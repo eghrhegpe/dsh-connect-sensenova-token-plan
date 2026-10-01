@@ -53,8 +53,11 @@ interface RaccoonState {
   balanceBreakdown?: { daily?: number; reward?: number; monthly?: number; topup?: number } | null;
   /** The concrete reason a balance read came back empty (absent when fine). */
   balanceDetail?: string;
-  /** Which roster the tab is drawing: the gateway catalogue or the built-in table. */
-  modelsSource?: "live" | "fallback";
+  /** Which roster the tab is drawing: the gateway catalogue ("live"), a read
+   *  that succeeded but listed no visible model ("empty"), or a read that
+   *  failed outright ("unreadable") — the last two both fall back to the
+   *  built-in table, but they must be worded differently. */
+  modelsSource?: "live" | "empty" | "unreadable";
   models?: RaccoonModel[];
   providerRegistered?: boolean;
   providerError?: string;
@@ -385,14 +388,15 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
  *   table as the gateway's catalogue.
  * @returns {unknown} the roster list element.
  */
-export function RaccoonRoster({ models, tt, source }: { models: RaccoonModel[]; tt: Tt; source?: "live" | "fallback" }): unknown {
+export function RaccoonRoster({ models, tt, source }: { models: RaccoonModel[]; tt: Tt; source?: "live" | "empty" | "unreadable" }): unknown {
   const rows = Array.isArray(models) ? models : [];
+  const fallbackNote = source === "empty" ? tt("raccoon.modelsEmpty") : source === "unreadable" ? tt("raccoon.modelsFallback") : null;
   return h(
     "div",
     { style: S.modelPanel },
     h("div", { style: { ...S.muted, fontSize: 12, marginBottom: 6 } }, format(tt("raccoon.models"), { count: count(rows.length) })),
-    source === "fallback"
-      ? h("div", { style: { ...S.muted, fontSize: 11, marginBottom: 6 } }, tt("raccoon.modelsFallback"))
+    fallbackNote !== null
+      ? h("div", { style: { ...S.muted, fontSize: 11, marginBottom: 6 } }, fallbackNote)
       : null,
     h(
       "ul",

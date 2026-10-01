@@ -252,6 +252,19 @@ function section(title) {
       (await fetchRaccoonCatalog({ access_token: "t" }, async () => {
         throw new Error("down");
       })) === null);
+    // "empty" vs "unreadable": a read that SUCCEEDED but listed no visible
+    // model must NOT fire onFail (the gateway hid its catalog — not an
+    // outage), while a thrown read MUST. This is the split the panel's
+    // "the gateway offers no visible models" note depends on.
+    const onFailCalls = [];
+    check("a successful-but-empty catalog read does not fire onFail",
+      (await fetchRaccoonCatalog({ access_token: "t" },
+        fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [{ id: "h", name: "Hidden", visible: false }] }] } }),
+        () => { onFailCalls.push("empty"); })) === null && onFailCalls.length === 0);
+    onFailCalls.length = 0;
+    check("a thrown catalog read fires onFail",
+      (await fetchRaccoonCatalog({ access_token: "t" }, async () => { throw new Error("down"); },
+        () => { onFailCalls.push("failed"); })) === null && onFailCalls.length === 1 && onFailCalls[0] === "failed");
 
     // The store-shape regression, pinned at the function level: the panel
     // routes resolve the credential through `raccoonStore` (camelCase) and

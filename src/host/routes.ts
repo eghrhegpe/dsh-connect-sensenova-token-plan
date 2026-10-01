@@ -757,21 +757,29 @@ export function registerRoutes(ctx, wiring) {
         // The roster the adapter offers: the live catalogue when a credential
         // exists (the switch's own publish reads it too), else the static
         // fallback so the panel still shows the known models. `modelsSource`
-        // names which one the panel is looking at — a silent fallback reads
-        // as "the gateway says" when it is actually the built-in table.
+        // names which one the panel is looking at — and WHY the fallback is in
+        // play, so the note does not lie: a gateway that read fine but listed
+        // no visible model is "empty", not "unreadable" (the two read as very
+        // different facts to the user).
         let models = null;
+        let catalogReadFailed = false;
         try {
           if (raccoonStore !== null && raccoonStore !== undefined) {
             const { credential } = await raccoonStore.resolve().catch(() => ({ credential: null }));
             if (credential?.accessToken) {
-              models = await fetchRaccoonCatalog(credential).catch(() => null);
+              models = await fetchRaccoonCatalog(credential, undefined, () => { catalogReadFailed = true; }).catch(() => {
+                catalogReadFailed = true;
+                return null;
+              });
             }
           }
         } catch {
           models = null;
+          catalogReadFailed = true;
         }
         const rosterLive = models !== null && Array.isArray(models) && models.length > 0;
         const roster = rosterLive ? models : RACCOON_FALLBACK_MODELS;
+        const modelsSource = rosterLive ? "live" : catalogReadFailed ? "unreadable" : "empty";
         const publisherState = raccoonPublisher?.state ?? null;
         return {
           ok: true,
@@ -799,7 +807,7 @@ export function registerRoutes(ctx, wiring) {
           ...(accessTokenFingerprint !== null ? { accessTokenFingerprint } : {}),
           hostProxyEnv,
           models: roster,
-          modelsSource: rosterLive ? "live" : "fallback",
+          modelsSource,
           providerRegistered: publisherState?.registered === true,
           ...(publisherState?.error !== null && publisherState?.error !== undefined ? { providerError: publisherState.error } : {}),
           ...(error !== null ? { error } : {})

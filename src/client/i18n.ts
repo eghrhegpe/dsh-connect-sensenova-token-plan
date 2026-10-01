@@ -183,6 +183,7 @@ export const zh = {
   "raccoon.refreshTip": "{days} 天内免重扫",
   "raccoon.models": "模型（{count}）",
   "raccoon.modelsFallback": "网关目录暂不可读——以下为内置备用模型",
+  "raccoon.modelsEmpty": "网关当前没有开放可见模型——以下为内置备用模型",
   // Zero multiplier: a statement about the model, not a rate of zero.
   "raccoon.free": "free",
   // NOT `llm.rosterRateTitle`: that one says the rate is the operator's own
@@ -369,6 +370,7 @@ export const en: typeof zh = {
   "raccoon.refreshTip": "No re-scan for {days} days",
   "raccoon.models": "Models ({count})",
   "raccoon.modelsFallback": "Live catalogue unreadable — showing the built-in roster",
+  "raccoon.modelsEmpty": "The gateway offers no visible models right now — showing the built-in roster",
   "raccoon.free": "free",
   "raccoon.rateTitle": "Credit multiplier as declared by the gateway catalogue (0 = free)",
   "raccoon.registered": "Raccoon registered with DSH: {count} model(s).",

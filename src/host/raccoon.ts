@@ -246,25 +246,37 @@ export async function refreshRaccoonCredential(
 }
 
 /**
- * Fetch the live model catalogue, or `null` when it cannot be read.
+ * Fetch the live model catalogue, or `null` when it cannot be read OR when it
+ * read fine but lists no visible model.
  *
- * The adapter falls back to a static roster when this returns `null`, so a
- * transient catalogue outage degrades to the known-good models instead of
- * breaking the provider — the silent-fallback discipline of `console-client`.
+ * The adapter falls back to a static roster in both cases, so a transient
+ * catalogue outage degrades to the known-good models instead of breaking the
+ * provider — the silent-fallback discipline of `console-client`. The two cases
+ * are still distinguishable to the caller: `onFail` fires ONLY on a genuine
+ * read failure (network / HTTP / envelope error), NOT on a successful read
+ * that simply has no visible model — that split is what lets the panel say
+ * "the gateway offered nothing" instead of "the gateway is down".
  * @param {object} credential - `{ access_token }`.
  * @param {typeof fetch} [fetcher] - injected fetch.
+ * @param {(why: string) => void} [onFail] - fired on a genuine read failure.
  * @returns {Promise<object[]|null>} the normalized `[{id, name, multiplier, vision, contextWindow, maxOutputLength}]`, or `null`.
  */
-export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetch) {
+export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetch, onFail?: (why: string) => void) {
   const effective = fetcher ?? globalThis.fetch;
   try {
     const response = await effective(
       `${RACCOON_API_BASE}${RACCOON_LLM_PREFIX}/model_catalog`,
       { headers: raccoonHeaders(credential), signal: AbortSignal.timeout(30_000) }
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      onFail?.(`HTTP ${response.status}`);
+      return null;
+    }
     const envelope = parseRaccoonEnvelope(await response.json().catch(() => ({})), response.status);
-    if (envelope.code !== 0 || envelope.data === null) return null;
+    if (envelope.code !== 0 || envelope.data === null) {
+      onFail?.(`envelope code=${envelope.code} message=${envelope.message}`);
+      return null;
+    }
     const categories = Array.isArray(envelope.data.categories) ? envelope.data.categories : [];
     for (const category of categories) {
       if (obj(category).type !== "chat") continue;
@@ -288,8 +300,12 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
       }
       if (out.length > 0) return out;
     }
+    // A successful read that lists no visible model is NOT a failure — the
+    // gateway deliberately hid its catalog; the panel must not read it as an
+    // outage. Fall through to `null` without firing `onFail`.
     return null;
-  } catch {
+  } catch (why) {
+    onFail?.(why instanceof Error ? `${why.name}: ${why.message}` : String(why));
     return null;
   }
 }
