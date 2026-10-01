@@ -1,5 +1,5 @@
 {
-  "$comment": "Progressive checkJs. checkJs is OFF: only files carrying a top-level '// @ts-check' pragma are type-checked, so adding one is a per-file opt-in. Start with strict:false; raise per-module as the backlog clears. noEmit:true means this never produces build artifacts — the shipped .js files stay exactly as they are (see docs/ARCHITECTURE.md: source is the publishable).",
+  "$comment": "Source is TypeScript now (src/host/*.ts, src/client/*.ts), and every .ts file is type-checked unconditionally — `checkJs` only governs plain .js files, of which src/ has none (a .js under src/ would need a top-level '// @ts-check' pragma to be checked at all). strict/noImplicitAny stay false, so untyped parameters are implicit-any and pass: the ONE shape that does not is a parameter WITH a default initializer, which is typed from that initializer — give it an explicit annotation instead of JSDoc (in a .ts file `@param`/`@type` are comments, not type sources; see src/host/lifecycle.ts). noEmit:true means this check never produces artifacts — the build is tsdown's job (test/build-gate.mjs). Run it with `npm run typecheck`; it is deliberately NOT part of `npm test`.",
   "compilerOptions": {
     "target": "ES2023",
     "module": "NodeNext",

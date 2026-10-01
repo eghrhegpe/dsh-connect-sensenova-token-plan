@@ -410,7 +410,11 @@ export async function fetchRaccoonBalance(credential: any, fetcher?: typeof fetc
       return null;
     }
     const total = numOrNullSafe(envelope.data.available_points ?? envelope.data.balance ?? envelope.data.available ?? envelope.data.amount);
-    const read = { total };
+    // The returned shape is declared, not inferred from `{ total }`: a part is
+    // added only when the gateway declared it, so the fields must stay optional
+    // (reading them off a `{ total }` literal is a type error, and widening the
+    // literal afterwards would type them as always-present non-optional).
+    const read: { total: number | null; daily?: number; reward?: number; monthly?: number; topup?: number } = { total };
     const daily = numOrNullSafe(envelope.data.daily_points);
     const reward = numOrNullSafe(envelope.data.reward_points);
     const monthly = numOrNullSafe(envelope.data.monthly_points);

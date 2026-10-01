@@ -778,7 +778,10 @@ export function registerRoutes(ctx, wiring) {
                 });
                 balance = balanceRead?.total ?? null;
                 if (balanceRead !== null && balanceRead !== undefined) {
-                  const parts = {};
+                  // Declared, not inferred: each part is copied only when the
+                  // gateway declared it, so the target must accept optional
+                  // numbers (`{}` would reject every assignment).
+                  const parts: { daily?: number; reward?: number; monthly?: number; topup?: number } = {};
                   if (balanceRead.daily !== undefined) parts.daily = balanceRead.daily;
                   if (balanceRead.reward !== undefined) parts.reward = balanceRead.reward;
                   if (balanceRead.monthly !== undefined) parts.monthly = balanceRead.monthly;

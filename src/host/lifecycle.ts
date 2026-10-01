@@ -54,7 +54,15 @@ const SERVICE_RETRY_DELAY_MS = 300;
  * @returns {Promise<unknown|null>} the service, or `null` when it never
  *   appeared inside the window.
  */
-export async function resolveServiceWithRetry(ctx, service, options = {}) {
+export async function resolveServiceWithRetry(
+  ctx,
+  service,
+  // Typed explicitly rather than left to inference, and NOT via JSDoc: a
+  // parameter with a default initializer is typed from that initializer (`{}`),
+  // and in a `.ts` file `@param` / `@type` are comments, not type sources — so
+  // the destructuring below would read three properties off `{}` (TS2339).
+  options: { isDisposed?: () => boolean; attempts?: number; delayMs?: number } = {}
+) {
   const {
     isDisposed = () => false,
     attempts = SERVICE_RETRY_ATTEMPTS,
