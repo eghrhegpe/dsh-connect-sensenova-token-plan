@@ -70,7 +70,7 @@ npm run doctor:json     # 机器读：JSON（可进你的巡检 / 工单脚本�
 - [docs/API.md](docs/API.md) — 路由与控制台端点
 - [docs/TESTING.md](docs/TESTING.md) — 测试体系
 - [docs/SENSENOVA-API.md](docs/SENSENOVA-API.md) — 商汤接口全集（实测）
-- [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（31 条）
+- [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（32 条）
 - [CHANGELOG.md](CHANGELOG.md) — 版本变化
 
 AI 协作会话请先读 [AGENTS.md](AGENTS.md)。

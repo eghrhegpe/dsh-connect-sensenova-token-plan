@@ -20,16 +20,28 @@
 
 import { LLM_PROVIDER_ID, LLM_DISPLAY_NAME } from "./llm-models.ts";
 import { identifyVisionModel } from "./parsers.ts";
-import { str, redactSecrets } from "./util.ts";
-import { name as pluginName } from "./host-config.ts";
+import { str } from "./util.ts";
+import {
+  createPublishQueue,
+  createPairReleaser,
+  createAdapterFactoryResolver,
+  registerProviderPair,
+  isBuiltAdapter,
+  BAD_FACTORY_SHAPE_ERROR,
+  describeBuildFailure,
+  warnBuildFailure,
+  swapRegistration,
+  resolveRegistrationService,
+  unregister
+} from "./publish-core.ts";
 import type { HostDeps } from "./types.ts";
 
 /**
  * The provider publisher.
  *
- * Holds the live registration state (`state`), the `publishChain` that
- * serialises publishes, the `disposed` gate, and the single-point
- * `registerPair`. The caller drives `publish` from the mount seed, the
+ * Holds the live registration state (`state`); the publish queue, the
+ * `disposed` gate and the single-point `registerPair` are the shared
+ * `publish-core.ts` bones. The caller drives `publish` from the mount seed, the
  * catalog poll, the provider switch, the roster save and the api-key forget;
  * it calls `dispose` from the `ctx.effect` teardown.
  *
@@ -110,92 +122,38 @@ export function createProviderPublisher(deps: HostDeps = {}) {
     built: null
   };
 
-  /** Set once the plugin is disposed; a publish that arrives after dispose
-   *  registers a provider into a Host that has already withdrawn this
-   *  plugin — no owner, no release, nothing on screen. Every publish
-   *  checks this first. */
-  let disposed = false;
+  /**
+   * The publish queue and the `disposed` gate — the first two of the three
+   * load-bearing semantics. Both live in `publish-core.ts` now, so the
+   * Raccoon publisher's copy cannot drift from this one.
+   */
+  const queue = createPublishQueue();
 
   /** Resolve the peer-dependent adapter factory once and memoize it. */
-  let adapterFactoryPromise;
-  const resolveAdapterFactory = async () => {
-    if (adapterFactoryPromise === undefined) {
-      adapterFactoryPromise = Promise.resolve(effectiveLoadAdapterModule())
-        .then((mod) => mod.createSensenovaAdapter);
-    }
-    return adapterFactoryPromise;
-  };
+  const resolveAdapterFactory = createAdapterFactoryResolver(
+    effectiveLoadAdapterModule,
+    "createSensenovaAdapter"
+  );
 
-  /**
-   * Release the registered pair. Releases are idempotent in the Host.
-   */
-  const release = () => {
-    const releaseFn = (fn) => {
-      try {
-        fn?.();
-      } catch {
-        // The service may already be gone during shutdown or rollback.
-      }
-    };
-    releaseFn(state.releaseAdapter);
-    releaseFn(state.releaseDirectory);
-    state.releaseAdapter = null;
-    state.releaseDirectory = null;
-  };
+  /** Release the registered pair. Releases are idempotent in the Host. */
+  const release = createPairReleaser(state);
 
   /**
    * Hand one built adapter to the llm service and record its release
    * functions onto `target`.
    *
-   * Defined ONCE because the publish path and the rollback path both register
-   * a pair, and two copies will drift: a change to the directory row made in
-   * one place and not the other leaves the ROLLBACK registering a provider
-   * the publish path would never have built — and a rollback only runs once
-   * something has already gone wrong, which is the worst possible moment to
-   * discover it.
-   *
-   * The releases are written straight onto `target` rather than returned: if
-   * the directory call throws after the adapter was registered, the adapter's
-   * release must still be reachable, or `release()` cannot undo it and the
-   * adapter outlives the plugin.
+   * The body is the shared `registerProviderPair` (PITFALLS §19) — one copy
+   * for both publishers and both paths; this wrapper only supplies which
+   * provider the row is for.
    * @param {object} llm - the registration service.
    * @param {{providerIds: string[], adapter: unknown}} built - what to register.
    * @param {object} target - where the release functions are recorded (`state`).
    * @returns {void}
    */
-  const registerPair = (llm, built, target) => {
-    target.releaseAdapter = llm.registerAdapter(built.providerIds, built.adapter);
-    // `registerConfigurableProviders` is how a provider gains its row on the
-    // models settings page; an older runtime without it still gets models
-    // through the adapter registration above.
-    target.releaseDirectory = typeof llm.registerConfigurableProviders === "function"
-      ? llm.registerConfigurableProviders([{
-          provider: LLM_PROVIDER_ID,
-          displayName: LLM_DISPLAY_NAME,
-          // This plugin's OWN row namespace; declared:false because the row
-          // exists as a patch already, not as a provider-declared schema.
-          settingsNs: pluginName,
-          settingsPath: [],
-          declared: false
-        }])
-      : null;
-  };
-
-  /**
-   * Publishes are serialized through this chain.
-   *
-   * Concurrent publishes are not hypothetical: the mount seed runs
-   * fire-and-forget and can still be mid-flight when the first panel poll
-   * publishes the catalog it just fetched, and an api-key forget or a
-   * provider switch can land on top of either. Two publishes interleaving
-   * means the SLOWER one wins — it releases the pair the faster one just
-   * registered and then registers its own — so the Host ends up serving a
-   * stale (possibly empty) catalog while the snapshot reports the fresh one.
-   *
-   * The chain is the same shape `token-store.ts` uses for `getToken`: no
-   * lock object, and a rejected link never poisons the ones behind it.
-   */
-  let publishChain = Promise.resolve();
+  const registerPair = (llm, built, target) => registerProviderPair(llm, built, target, {
+    providerId: LLM_PROVIDER_ID,
+    displayName: LLM_DISPLAY_NAME
+  });
 
   /**
    * (Re)build and register the provider for one catalog/allow-list snapshot.
@@ -215,7 +173,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
     // A publish that arrives after the plugin was disposed registers a
     // provider into a Host that has already withdrawn this plugin: no owner,
     // no release, and nothing on screen saying where it came from.
-    if (disposed) return { ok: false, skipped: true };
+    if (queue.isDisposed()) return { ok: false, skipped: true };
     const previousBuilt = state.built;
     const previousEntries = state.entries;
     const previousEnabledIds = state.enabledIds;
@@ -229,21 +187,9 @@ export function createProviderPublisher(deps: HostDeps = {}) {
     // re-read here on every publish, so a flip applies without a restart.
     const panelValue = await effectivePanelSwitch().catch(() => null);
     const registerWanted = panelValue ?? effectiveSettings.registerProvider === true;
-    if (!registerWanted) {
-      release();
-      state.registered = false;
-      state.built = null;
-      state.error = null;
-      return { ok: true, skipped: true };
-    }
-    const llm = effectiveGetLlm("llm");
-    state.llmAvailable = llm !== null && typeof llm.registerAdapter === "function";
-    if (!state.llmAvailable) {
-      release();
-      state.registered = false;
-      state.error = "the Host exposes no llm registration service";
-      return { ok: false, error: state.error };
-    }
+    if (!registerWanted) return unregister({ state, release });
+    const llm = resolveRegistrationService({ state, getLlm: effectiveGetLlm, release });
+    if (llm === null) return { ok: false, error: state.error };
     let createSensenovaAdapter;
     let built;
     try {
@@ -263,74 +209,35 @@ export function createProviderPublisher(deps: HostDeps = {}) {
       // The same reason, stated: an adapter is registered Host-wide, so a
       // factory that returns anything else must fail here rather than publish
       // a provider that cannot serve a request.
-      if (built === null || typeof built !== "object"
-        || !Array.isArray(built.providerIds) || built.adapter === undefined) {
-        throw new Error("the adapter factory did not return { adapter, providerIds }");
-      }
+      if (!isBuiltAdapter(built)) throw new Error(BAD_FACTORY_SHAPE_ERROR);
     } catch (e) {
-      // A missing llm peer surfaces as Node's ERR_MODULE_NOT_FOUND on a plain
-      // Error's `code` — read through an annotation local to this block; the
-      // thrown value may not be a pluginError at all, and `throw error` below
-      // must re-raise exactly what was caught.
-      const error = e as Error & { code?: unknown };
-      const why = error instanceof Error ? error.message : String(error);
-      // A credential never reaches the panel or a log. The failure a reader
-      // cannot diagnose from the message alone: the LLM peer packages ship
-      // INSIDE the Host, so a plugin directory the Host's node_modules cannot
-      // be reached from — a dev checkout symlinked into the profile, say —
-      // has no way to import them. Say so, with the remedy, because the panel
-      // can only report "provider absent".
-      const note = redactSecrets(why);
-      state.error = note;
-      effectiveLogger?.warn?.(
-        `${pluginName}: cannot build the SenseNova adapter: ${note}` +
-          (error?.code === "ERR_MODULE_NOT_FOUND"
-            ? " — the llm peer packages ship with the Host; install this plugin where they resolve" +
-              " (or link them into its own node_modules)"
-            : "")
-      );
-      return { ok: false, error };
+      // A missing llm peer surfaces as Node's ERR_MODULE_NOT_FOUND on the
+      // thrown value (which may not be a plugin Error at all) — the shared
+      // describer reads it, redacts the message, and appends the remedy.
+      const described = describeBuildFailure(e);
+      state.error = described.note;
+      warnBuildFailure(effectiveLogger, "SenseNova", described);
+      return { ok: false, error: described.error };
     }
-    // Build first (it can throw); only then take down the old pair.
-    release();
-    try {
-      registerPair(llm, built, state);
-    } catch (error) {
-      release();
-      state.built = null;
-      // The snapshot's `offered` set must describe what is really serving, so
-      // a failed re-registration restores the previous pair's identity too.
-      state.entries = previousEntries;
-      state.enabledIds = previousEnabledIds;
-      // Restore the pair that was serving, if any.
-      if (previousBuilt !== null) {
-        try {
-          registerPair(llm, previousBuilt, state);
-          state.built = previousBuilt;
-          state.registered = true;
-        } catch {
-          state.built = null;
-          state.registered = false;
-        }
-      } else {
-        state.registered = false;
+    // The swap (and the rollback behind it) is the shared mechanism: a failed
+    // re-registration must restore the pair that was serving. What is restored
+    // on THIS side is the catalog identity — entries, allow-list, and the
+    // quota-exhausted set (which must not keep pointing at a set we failed to
+    // publish).
+    return swapRegistration({
+      llm,
+      built,
+      previousBuilt,
+      state,
+      release,
+      registerPair,
+      emit: effectiveEmit,
+      onRollback: () => {
+        state.entries = previousEntries;
+        state.enabledIds = previousEnabledIds;
+        state.unavailableIds = previousUnavailable;
       }
-      // The failed re-registration must not leave the quota state pointing at
-      // the set we failed to publish; restore what was actually serving.
-      state.unavailableIds = previousUnavailable;
-      state.error = redactSecrets(error instanceof Error ? error.message : String(error));
-      return { ok: false, error };
-    }
-    state.built = built;
-    state.registered = true;
-    state.error = null;
-    try {
-      effectiveEmit("llm/adapters-updated");
-    } catch {
-      // A Host that refuses the event still has the registration; readers
-      // refresh on their own cadence.
-    }
-    return { ok: true };
+    });
   };
 
   /**
@@ -344,22 +251,14 @@ export function createProviderPublisher(deps: HostDeps = {}) {
    * @param {string[]} [unavailableModelIds] - quota-exhausted model ids.
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publish = (entries, enabledIds, unavailableModelIds = []) => {
-    const queued = publishChain.then(
-      () => publishProviderOnce(entries, enabledIds, unavailableModelIds),
-      () => publishProviderOnce(entries, enabledIds, unavailableModelIds)
-    );
-    publishChain = queued.then(() => undefined, () => undefined);
-    return queued;
-  };
+  const publish = (entries, enabledIds, unavailableModelIds = []) =>
+    queue.enqueue(() => publishProviderOnce(entries, enabledIds, unavailableModelIds));
 
   /**
    * Mark the publisher as disposed: any in-flight or later publish becomes a
    * no-op that cannot register into a withdrawn Host.
    */
-  const dispose = () => {
-    disposed = true;
-  };
+  const dispose = () => queue.dispose();
 
   return {
     state,
@@ -368,7 +267,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
     dispose,
     // Exposed so the caller can read whether a publish was skipped due to
     // disposal (the mount seed checks this to stay quiet).
-    isDisposed: () => disposed
+    isDisposed: () => queue.isDisposed()
   };
 }
 

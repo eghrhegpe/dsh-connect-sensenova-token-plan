@@ -28,8 +28,20 @@
  */
 
 import { RACCOON_PROVIDER_ID, RACCOON_DISPLAY_NAME } from "./raccoon-models.ts";
-import { str, redactSecrets } from "./util.ts";
-import { name as pluginName } from "./host-config.ts";
+import { str } from "./util.ts";
+import {
+  createPublishQueue,
+  createPairReleaser,
+  createAdapterFactoryResolver,
+  registerProviderPair,
+  isBuiltAdapter,
+  describeBuildFailure,
+  warnBuildFailure,
+  swapRegistration,
+  resolveRegistrationService,
+  unregister,
+  BAD_FACTORY_SHAPE_ERROR
+} from "./publish-core.ts";
 import type { RaccoonPublisherDeps } from "./types.ts";
 
 /**
@@ -91,53 +103,30 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
     built: null
   };
 
-  /** Set once the plugin is disposed; a later publish is a no-op. */
-  let disposed = false;
+  /**
+   * The publish queue and the `disposed` gate — shared with the Token Plan
+   * publisher (`publish-core.ts`), so the two cannot drift apart.
+   */
+  const queue = createPublishQueue();
 
   /** Resolve the peer-dependent adapter factory once and memoize it. */
-  let adapterFactoryPromise;
-  const resolveAdapterFactory = async () => {
-    if (adapterFactoryPromise === undefined) {
-      adapterFactoryPromise = Promise.resolve(effectiveLoadAdapterModule()).then((mod) => mod.createRaccoonAdapter);
-    }
-    return adapterFactoryPromise;
-  };
+  const resolveAdapterFactory = createAdapterFactoryResolver(
+    effectiveLoadAdapterModule,
+    "createRaccoonAdapter"
+  );
 
   /** Release the registered pair. Releases are idempotent in the Host. */
-  const release = () => {
-    const releaseFn = (fn) => {
-      try {
-        fn?.();
-      } catch {
-        // The service may already be gone during shutdown or rollback.
-      }
-    };
-    releaseFn(state.releaseAdapter);
-    releaseFn(state.releaseDirectory);
-    state.releaseAdapter = null;
-    state.releaseDirectory = null;
-  };
+  const release = createPairReleaser(state);
 
   /**
    * Hand one built adapter to the llm service and record its release
-   * functions onto `target` — defined ONCE, used by publish and rollback.
+   * functions onto `target` — the shared single-point registrar (PITFALLS
+   * §19), used by both the publish and the rollback path.
    */
-  const registerPair = (llm, built, target) => {
-    target.releaseAdapter = llm.registerAdapter(built.providerIds, built.adapter);
-    target.releaseDirectory = typeof llm.registerConfigurableProviders === "function"
-      ? llm.registerConfigurableProviders([{
-          provider: RACCOON_PROVIDER_ID,
-          displayName: RACCOON_DISPLAY_NAME,
-          settingsNs: pluginName,
-          settingsPath: [],
-          declared: false
-        }])
-      : null;
-  };
-
-  /** Publishes are serialized through this chain (no lock object; a rejected
-   *  link never poisons the ones behind it). */
-  let publishChain = Promise.resolve();
+  const registerPair = (llm, built, target) => registerProviderPair(llm, built, target, {
+    providerId: RACCOON_PROVIDER_ID,
+    displayName: RACCOON_DISPLAY_NAME
+  });
 
   /**
    * (Re)build and register the Raccoon provider for one roster snapshot.
@@ -153,7 +142,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
   const publishProviderOnce = async (rows, officeIdentity = "") => {
-    if (disposed) return { ok: false, skipped: true };
+    if (queue.isDisposed()) return { ok: false, skipped: true };
     const previousBuilt = state.built;
     const previousRows = state.rows;
     state.rows = Array.isArray(rows) ? rows : [];
@@ -161,33 +150,18 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
 
     const panelValue = await effectivePanelSwitch().catch(() => null);
     const registerWanted = panelValue === true;
-    if (!registerWanted) {
-      release();
-      state.registered = false;
-      state.built = null;
-      state.error = null;
-      return { ok: true, skipped: true };
-    }
+    if (!registerWanted) return unregister({ state, release });
 
     // The gateway reads the office identity from the request headers; resolve
     // the live credential's identity at publish time, not a snapshot.
-    const llm = effectiveGetLlm("llm");
-    state.llmAvailable = llm !== null && typeof llm.registerAdapter === "function";
-    if (!state.llmAvailable) {
-      release();
-      state.registered = false;
-      state.error = "the Host exposes no llm registration service";
-      return { ok: false, error: state.error };
-    }
+    const llm = resolveRegistrationService({ state, getLlm: effectiveGetLlm, release });
+    if (llm === null) return { ok: false, error: state.error };
 
     // No token to serve with: the offer must not exist, and the reason is a
     // fact the panel states ("not logged in — scan the QR first").
     const token = await effectiveResolveToken().catch(() => "");
     if (token === null || token === "") {
-      release();
-      state.registered = false;
-      state.error = "not_configured";
-      return { ok: true, skipped: true };
+      return unregister({ state, release, error: "not_configured" });
     }
 
     let createRaccoonAdapter;
@@ -203,82 +177,45 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
         resolveToken: effectiveResolveToken,
         get: effectiveGetLlm
       });
-      if (built === null || typeof built !== "object"
-        || !Array.isArray(built.providerIds) || built.adapter === undefined) {
-        throw new Error("the adapter factory did not return { adapter, providerIds }");
-      }
+      if (!isBuiltAdapter(built)) throw new Error(BAD_FACTORY_SHAPE_ERROR);
     } catch (e) {
-      // Node's ERR_MODULE_NOT_FOUND rides a plain `code` string on the thrown
-      // Error — read through an annotation local to this block (see the same
-      // shape in provider-publish.ts).
-      const error = e as Error & { code?: unknown };
-      const note = redactSecrets(error instanceof Error ? error.message : String(error));
-      state.error = note;
-      effectiveLogger?.warn?.(
-        `${pluginName}: cannot build the Raccoon adapter: ${note}`
-          + (error?.code === "ERR_MODULE_NOT_FOUND"
-            ? " — the llm peer packages ship with the Host; install this plugin where they resolve"
-            : "")
-      );
-      return { ok: false, error };
+      // Shared with the Token Plan publisher: redaction and the
+      // ERR_MODULE_NOT_FOUND remedy live in `publish-core.ts`, so a fix to
+      // that diagnosis reaches both upstreams at once.
+      const described = describeBuildFailure(e);
+      state.error = described.note;
+      warnBuildFailure(effectiveLogger, "Raccoon", described);
+      return { ok: false, error: described.error };
     }
 
-    // Build first (it can throw); only then take down the old pair.
-    release();
-    try {
-      registerPair(llm, built, state);
-    } catch (error) {
-      release();
-      state.built = null;
-      state.rows = previousRows;
-      state.error = redactSecrets(error instanceof Error ? error.message : String(error));
-      if (previousBuilt !== null) {
-        try {
-          registerPair(llm, previousBuilt, state);
-          state.built = previousBuilt;
-          state.registered = true;
-        } catch {
-          state.built = null;
-          state.registered = false;
-        }
-      } else {
-        state.registered = false;
+    // The swap (and the rollback behind it) is the shared mechanism; what is
+    // restored on THIS side is the roster identity.
+    return swapRegistration({
+      llm,
+      built,
+      previousBuilt,
+      state,
+      release,
+      registerPair,
+      emit: effectiveEmit,
+      onRollback: () => {
+        state.rows = previousRows;
       }
-      return { ok: false, error };
-    }
-    state.built = built;
-    state.registered = true;
-    state.error = null;
-    try {
-      effectiveEmit("llm/adapters-updated");
-    } catch {
-      // A Host that refuses the event still has the registration; readers
-      // refresh on their own cadence.
-    }
-    return { ok: true };
+    });
   };
 
   /** Publish, queued behind every other in-flight publish. */
-  const publish = (rows, officeIdentity) => {
-    const queued = publishChain.then(
-      () => publishProviderOnce(rows, officeIdentity),
-      () => publishProviderOnce(rows, officeIdentity)
-    );
-    publishChain = queued.then(() => undefined, () => undefined);
-    return queued;
-  };
+  const publish = (rows, officeIdentity) => queue.enqueue(() => publishProviderOnce(rows, officeIdentity));
 
   /** Mark the publisher disposed: any later publish is a no-op. */
-  const dispose = () => {
-    disposed = true;
-  };
+  const dispose = () => queue.dispose();
 
   return {
     state,
     publish,
     release,
     dispose,
-    isDisposed: () => disposed
+    isDisposed: () => queue.isDisposed()
   };
 }
 

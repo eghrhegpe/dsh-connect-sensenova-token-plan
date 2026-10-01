@@ -61,7 +61,7 @@
 - `draw.ts`：出图模块（peer-free）——结构化识别 image-output 模型、端点拼接、wire body 钳制、响应解析、失败分诊（429 配额 vs 限频）、失败冷却。
 - `doctor.ts`：只读状态文件诊断（peer-free，`npm run doctor` / `doctor:json`）——回答「这台机器上 provider 到底是开是关」（PITFALLS §22）。
 - `raccoon.ts`：第二上游协议层——微信扫码登录走查、信封解析、refresh 轮换、余额与目录读取。
-- `raccoon-store.ts`：小浣熊凭据（DSH 凭据服务引用）；`raccoon-switch-store.ts`：小浣熊开关（按 profile 分段）；`raccoon-models.ts`：小浣熊模型目录归一化与描述符映射；`raccoon-publish.ts` + `raccoon-llm-adapter.ts`：小浣熊独立 provider 注册与 adapter（与 Token Plan 注册完全隔离）。
+- `raccoon-store.ts`：小浣熊凭据（DSH 凭据服务引用）；`raccoon-switch-store.ts`：小浣熊开关（按 profile 分段）；`raccoon-models.ts`：小浣熊模型目录归一化与描述符映射；`raccoon-publish.ts` + `raccoon-llm-adapter.ts`：小浣熊独立 provider 注册与 adapter（与 Token Plan 注册完全隔离——**隔离的是状态与凭据，不是代码**：两个 publisher 实例的 `state`、开关、凭据引用互不相干，而两者的发布状态机与 adapter 装配共用 `publish-core.ts` / `llm-adapter-core.ts`，理由见 §5.5）。
 - `client.js`：Plugins 页内的配置卡与三个 tab（积分额度 / 接入 API / 小浣熊）+ 账号表单（React，纯主题令牌样式）。内部 `interpretSnapshot` 把 Host 的响应读成 `(data, error)` 对，再交给决策块。
 - 测试基建：`client-surface.js` / `panel-decision.js` / `panel-render.js` —— 把 `client.js` 作为模块加载后物化 `panel` 测试面。不进运行时、不进 `files` 打包清单。
 
@@ -326,6 +326,13 @@ lifetime `AbortController` + `AbortSignal.any` 超时合并模式（line 103-115
 必须做到的正是现在这套：**独立凭据生命周期、独立 publisher、独立 provider id**——共享任何
 一样都会把两条产品线焊死在一起。它撞的不是「是不是商汤的」这条线，而是「要不要把一个新
 产品的凭据塞进旧产品的池子里」这条线。
+
+**「隔离」指的是状态与凭据，不是复制代码**（2026-10-02 收敛，见 PITFALLS §32）：两个 publisher
+各自的 `state`、开关与凭据引用互不相干，这是本裁定要求的；但两者的**发布状态机**（发布队列 /
+`disposed` 闸 / 单点注册与失败回滚 / 构建失败诊断）与 **adapter 装配**（inert 认证面、profile
+行、429 误判纠正层）应当**共用一份**（`publish-core.ts` / `llm-adapter-core.ts`），各自持一个
+实例即可。原先为「隔离」而复制文件，复制的恰好是最脆的回滚路径——改一处漏一处只在出事时
+才暴露。**隔离由实例边界保证，不由代码副本保证**；共享机制不违反本条，共享状态才违反。
 
 **本次裁定不改变的边界**（防止一句话把口子开成无限大）：
 

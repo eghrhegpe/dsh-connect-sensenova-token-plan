@@ -537,6 +537,29 @@ function section(title) {
       check("switch ON + no token releases with not_configured", result.ok === true && result.skipped === true && publisher.state.registered === false && publisher.state.error === "not_configured");
     }
 
+    // A publish that takes the registration down must FORGET the pair, not
+    // just release it: a stale `built` survives into the next publish as its
+    // rollback target, so a later failed publish would re-register an adapter
+    // whose release has already been called. (The "no token" branch used to
+    // leave it standing; `unregister` in publish-core.ts now clears it.)
+    {
+      const llm = makeLlm();
+      let token = "a-token";
+      const publisher = createRaccoonPublisher({
+        panelSwitch: async () => true,
+        resolveToken: async () => token,
+        getLlm: () => llm,
+        loadAdapterModule: async () => ({
+          createRaccoonAdapter: async () => ({ adapter: { marker: true }, providerIds: [RACCOON_PROVIDER_ID] })
+        })
+      });
+      await publisher.publish([{ id: "a" }], "");
+      const builtWhileServing = publisher.state.built;
+      token = "";
+      const result = await publisher.publish([{ id: "a" }], "");
+      check("a publish that goes down forgets the pair it released", builtWhileServing !== null && result.skipped === true && publisher.state.built === null);
+    }
+
     // The switch ON + a token: the roster is built and registered; the
     // officeIdentity rides to the factory.
     {

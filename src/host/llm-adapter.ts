@@ -18,68 +18,14 @@
  * - no API key baked into the profile: the picker advertises models without
  *   one and a request fails at resolve time, where the panel status is visible.
  *
+ * The assembly is shared with the Raccoon adapter (`llm-adapter-core.ts`) —
+ * what THIS provider contributes is its descriptor build, its credential
+ * resolver, and the reasoning effort its profile pins.
+ *
  * @module dsh-connect-sensenova-token-plan/llm-adapter
  */
-import { createProvider } from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
-import { resolveRetryPolicy, resolveImageAttachmentAccess } from "@deepseek-ai/dsh-llm";
-import { name } from "./host-config.ts";
 import { buildDescriptors, LLM_PROVIDER_ID, LLM_DISPLAY_NAME, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
-import { buildRetryPolicyConfig } from "./llm-retry.ts";
-import { reclassifyStream } from "./llm-error-fix.ts";
-
-/** Idle ceiling while one stream read is outstanding (dsh-llm-pi-ai default). */
-const STREAM_IDLE_TIMEOUT_MS = 300_000;
-
-/**
- * Image budgets at the `dsh-llm-pi-ai` defaults. They bound requests to models
- * whose catalog descriptor declares image input; text-only models never see
- * images.
- */
-const REQUEST_IMAGE_BUDGETS = {
-  maxRequestImageBytes: 20_971_520,
-  requestImagePixelBudget: 4_194_304,
-  requestImageMaxBytes: 1_048_576
-};
-
-/**
- * Inert pi-ai auth plane.
- *
- * Authentication goes through `resolveApiKey` (the stored `SENSENOVA_API_KEY`
- * reference) per request. pi-ai's own credential lifecycle must never
- * manufacture a credential for this route, so every ambient question answers
- * "nothing stored, nothing set".
- */
-const INERT_AUTH = {
-  credentials: {
-    async read() {},
-    async list() {
-      return [];
-    },
-    // Deliberately a no-op, not a throw: pi-ai may call `modify` as an
-    // optional "persist the latest credential" hook during a normal request,
-    // and an exception there would 500 a conversation that is otherwise
-    // working. The credential lifecycle for this route lives in
-    // `api-key-store.ts`, not here.
-    async modify() {},
-    async delete() {}
-  },
-  authContext: {
-    async env() {},
-    async fileExists() {
-      return false;
-    }
-  }
-};
-
-/**
- * The `fs` service face the image hook reads — a single host-path mapper, and
- * only that. Resolved lazily through `get("fs")` because the service may be
- * registered after this adapter is built.
- * @typedef {object} FsService
- * @property {(hostPath: string) => unknown} [processPathFromHostPath]
- */
+import { assemblePiAiAdapter } from "./llm-adapter-core.ts";
 
 /**
  * Assemble the adapter instance for one catalog snapshot.
@@ -106,110 +52,22 @@ const INERT_AUTH = {
 export function createSensenovaAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [] }) {
   const models = buildDescriptors(entries, { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds });
 
-  const provider = {
-    ...createProvider({
-      id: LLM_PROVIDER_ID,
-      name: LLM_DISPLAY_NAME,
-      auth: {
-        apiKey: {
-          name: "SenseNova API key",
-          /**
-           * pi-ai hands the credential it resolved; this route stores none, so
-           * the parameter is typed only to name what is read off it.
-           * @param {{credential?: {key?: string}}} [options]
-           */
-          async resolve({ credential }: { credential?: { key?: string } } = {}) {
-            const apiKey = credential?.key;
-            return apiKey === undefined || apiKey.length === 0
-              ? undefined
-              : { auth: { apiKey }, source: LLM_DISPLAY_NAME };
-          }
-        }
-      },
-      models,
-      api: openAICompletionsApi()
-    }),
-    // The adapter's resolver re-reads the provider to discover its models;
-    // returning the immutable descriptor set this build was registered with.
-    getModels: () => models
-  };
-
-  const profiles = new Map([
-    [
-      LLM_PROVIDER_ID,
-      {
-        provider: LLM_PROVIDER_ID,
-        displayName: LLM_DISPLAY_NAME,
-        streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
-        // Quota-aware retry policy: explicit (not `undefined`) so a future peer
-        // default change cannot silently alter this provider. Excludes the quota
-        // codes (a depleted pool cannot be retried into health; see
-        // `llm-retry.ts`), keeps `RATE_LIMIT` with a gentle shared-pool backoff.
-        retryPolicy: resolveRetryPolicy(buildRetryPolicyConfig(), `${name}.${LLM_PROVIDER_ID}.retryPolicy`),
-        configuredMaxTokens: new Map(),
-        modelErrors: new Map(),
-        // The picker's "Default" pins to DEFAULT_REASONING_EFFORT (high).
-        // SenseNova thinks by default (reasoning_effort default high), and the
-        // descriptor's thinkingLevelMap spells off as `none`, so an unselected
-        // effort must not reach pi-ai as "no effort" — that would dispatch
-        // `map.off` and silently turn thinking off. Pinning the profile default
-        // keeps the platform default; the snapshot quotes this same constant to
-        // the panel roster, so the displayed default cannot drift from it.
-        reasoning: DEFAULT_REASONING_EFFORT,
-        ...REQUEST_IMAGE_BUDGETS,
-        piProvider: provider
-      }
-    ]
-  ]);
-
-  const inner = new PiAiAdapter({
-    profiles: () => profiles,
-    auth: INERT_AUTH,
+  return assemblePiAiAdapter({
+    providerId: LLM_PROVIDER_ID,
+    displayName: LLM_DISPLAY_NAME,
+    apiKeyName: "SenseNova API key",
+    models,
     // The stored API-key reference is the only credential this route presents;
     // it is read per request, so rotating the key needs no re-registration.
-    resolveApiKey: async () => resolveApiKey(),
-    // Image input is a hard requirement of pi-ai, not an optional extra:
-    // `streamWithSnapshot` throws UNSUPPORTED_CONTENT whenever a message
-    // carries an image and `resolveAttachments()` yields undefined. Both hooks
-    // are wired the same way the official `llm-pi-ai` plugin wires them.
-    resolveAttachments: () => get?.("attachments"),
-    resolveImageAccess: (attachments, ref) =>
-      resolveImageAttachmentAccess(
-        attachments,
-        (hostPath) =>
-          /** @type {FsService | undefined} */ (get?.("fs"))?.processPathFromHostPath?.(hostPath),
-        ref
-      )
+    resolveCredential: resolveApiKey,
+    get,
+    // The picker's "Default" pins to DEFAULT_REASONING_EFFORT (high).
+    // SenseNova thinks by default (reasoning_effort default high), and the
+    // descriptor's thinkingLevelMap spells off as `none`, so an unselected
+    // effort must not reach pi-ai as "no effort" — that would dispatch
+    // `map.off` and silently turn thinking off. Pinning the profile default
+    // keeps the platform default; the snapshot quotes this same constant to
+    // the panel roster, so the displayed default cannot drift from it.
+    reasoning: DEFAULT_REASONING_EFFORT
   });
-
-  // 429 误判纠正层：peer 的 `classifyPiAiError` 会把带 "budget/credits" 字眼的
-  // 限频 429 抢判成 QUOTA（不重试），本 Proxy 把这类误判体在出流前纠正回
-  // RATE_LIMIT，使 `llm-retry.ts` 的退避重试真正生效。只拦截流出口，不触碰
-  // peer 内部逻辑，也不影响任何正常数据 chunk。详见 `llm-error-fix.ts`。
-  const adapter = new Proxy(inner, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver);
-      // `stream(...)` 与 `prepareCall(...).stream` 都返回一个 async iterable；
-      // 二者据此包裹重判流。其它成员（含 image/resolveApiKey 等）原样放行。
-      if (prop === "stream") {
-        return (options) => reclassifyStream(target.stream(options));
-      }
-      if (typeof value === "function" && prop === "prepareCall") {
-        return (...args) => {
-          const prepared = value.apply(target, args);
-          if (prepared && typeof prepared.then === "function") {
-            return prepared.then((p) => p && typeof p.stream === "function"
-              ? { ...p, stream: (o) => reclassifyStream(p.stream(o)) }
-              : p);
-          }
-          return prepared && typeof prepared.stream === "function"
-            ? { ...prepared, stream: (o) => reclassifyStream(prepared.stream(o)) }
-            : prepared;
-        };
-      }
-      return value;
-    }
-  });
-
-  return { adapter, providerIds: [LLM_PROVIDER_ID] };
 }

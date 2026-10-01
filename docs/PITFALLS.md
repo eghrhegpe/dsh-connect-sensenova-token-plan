@@ -335,3 +335,20 @@
   4. **客户端删掉死循环**：删掉 150 × 2 s 的 `quick()`（它在扫码 10 秒成功后仍会跑满 5 分钟），改为由服务端 `loginStatus` 驱动的**双档 cadence**（扫描中 2 s，其余 60 s），闸门也在服务端——客户端不再持有任何可能活过 walk 的定时器。
 - **验证**：`test/routes.test.mjs` 新增 T 段 6 条（173 项全绿）：T1 断言 POST 在 1 s 内返回 `scanning`；T2 断言 walk 在飞时第二次 login 复用同一 `scanCode`；T3 断言 settle 后 `loginStatus === "logged_in"` 与 `loggedIn === true` **同时成立**；T4 断言终态只投递一次；T5 断言 TTL 内再轮询 5 次**零新增**网关读；T6 断言两个并发 GET 共享一次读（单飞）。**T3 当场抓到一个真 bug**：`loginStatus` 原先在响应组装的**末尾**读取，而 `loggedIn` 在**开头**读取，中间那次 `await`（读 balance）足够让 walk 落地凭据——于是同一个响应能一边说 `logged_in` 一边说没登录；修法是把事件读取挪到 `raccoonState()` 的最开头，使终态永远晚于它所描述的 state。
 - **教训**：**等待人 ≠ 等待连接**——凡是「等用户做某个动作」的流程，请求必须立刻返回，状态必须可被轮询，且**截止期限归服务端所有**（客户端持有一个比 walk 活得久的定时器，就是下一个幽灵轮询）。更要紧的是那条乘法：**客户端的轮询密度 × 服务端的每请求成本 = 真实流量**，只优化一头等于没优化；所以每接入一个新上游，缓存与单飞要和路由**一起**接上，别等流量账算出来才补。
+
+---
+
+## 32. 用「复制一份」实现隔离：复制的恰好是最脆的回滚路径
+
+- **现象**：为接入第二上游（小浣熊），`raccoon-publish.ts` 与 `raccoon-llm-adapter.ts` 是按 `provider-publish.ts` / `llm-adapter.ts` **复制出来**的。逐字比对（去注释去空行）：publisher 一对有 **101 行逐字相同**（占并集 47%），adapter 一对 **73 行**（63%）。被复制进去的包括 PITFALLS §18/§19 钉死的三条承重语义（`publishChain` 串行、`disposed` 闸、单点 `registerPair` + 回滚），以及那段注释自己都写着 "provider-agnostic" 的 429 误判纠正 Proxy。表面症状不是报错，是**纪律分裂**：两边注释互相指着对方说"保持同步"，而没有任何测试或机制在强制这件事。
+- **根因**（三层）：
+  1. **把「隔离」理解成了「不共享代码」**。要隔离的是*状态与凭据*（两个 publisher 各持实例、各读各的 store 即可达成），却用*复制文件*去实现——复制带来的是两份会漂移的副本，不是更强的隔离。
+  2. **复制的对象选错了：挑中了最脆的那部分**。回滚路径（注册失败 → 恢复旧 pair）**只在出事时才跑**，是全线最难被日常测试碰到、也最致命的一段；把它复制成两份，等于把唯一不能漂移的代码漂移了。§19 那条注释本身就是为这个场景写的。
+  3. **没有度量"什么是重复"**。凭感觉"这两个文件不一样"（provider 有 quota/allow-list、raccoon 有 token gate），于是整文件复制；但真正该问的是——**这些行能不能被同一个测试同时钉住**？能，就不该有第二份；不能（领域差异），才允许分开。
+- **修法**（2026-10-02 已做，收敛而非新增重复）：
+  1. 新建 `src/host/publish-core.ts`：`createPublishQueue`（队列 + disposed 闸）、`createPairReleaser`、`registerProviderPair`（单点注册）、`swapRegistration`（注册交换 + 失败回滚旧 pair）、`resolveRegistrationService`（llm 服务检查）、`unregister`（注销并记录原因）、`createAdapterFactoryResolver`、`isBuiltAdapter` / `describeBuildFailure` / `warnBuildFailure` / `emitAdaptersUpdated`。**两个 publisher 各持一个实例**，各传自己的 provider 身份与 `onRollback`。
+  2. 新建 `src/host/llm-adapter-core.ts`：`assemblePiAiAdapter`（provider + profile + `PiAiAdapter` + 429 纠正 Proxy）+ `imageBudgets`（像素预算可覆写——小浣熊网关 10 MB 限制，用更小的预算）。两个 adapter 只剩"自己的描述符构建 + 自己的凭据解析"。
+  3. **保留领域差异，不做参数化状态机**：gate 语义（provider 看 catalog + allow-list；raccoon 看 token）与 state 形状（`entries`/`enabledIds`/quota vs `rows`）留在各自文件里——那是真差异，参数化只会让每个读者都要读配置才能理解一次 publish。
+  4. **顺手抓到并修掉一个真 bug**：raccoon 的 "no token / `not_configured`" 分支只 `release()` 却**不清 `state.built`**（Token Plan 侧的 switch-off 分支清了）。残留的 `built` 会成为**下一次** publish 的回滚目标——一次失败发布会把一个 release 已被调用的 adapter 重新注册回 Host。统一走 `unregister` 后消失。
+- **验证**：收敛后全域复跑零漂移——provider 201、raccoon **122**（+1 为新增的 stale-`built` 断言）、wiring 46、routes 173、contract 98、store-baseline 48 帧、typecheck 2 配置 0 错、e2e 44/44。adapter 一对的逐字相同行 **73 → 7**（Jaccard 0.63 → 0.23），publisher 一对 **101 → 81**，且剩下的 81 行绝大多数是 state 字段声明与 import 行（数据，不是逻辑）。
+- **教训**：**隔离由实例边界保证，不由代码副本保证**。判断"该不该有第二份"的问法不是"两个文件像不像"，而是"这些行能不能被一个测试同时钉住"——能就抽，不能才留。尤其：**需要复制的代码，优先检查它是不是回滚 / 降级 / 清理路径**；这类代码一年跑不了几次，却决定了出事时是"退回去"还是"烂在那里"。
