@@ -396,7 +396,7 @@ export function isModelEnabled(enabledIds, id) {
  */
 export function rosterOf(entries) {
   const position = new Map();
-  const out = [];
+  const out: { id: string; name: string; vision: boolean }[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     // Image-generation models are not chat models and are not offered (see
     // `isChatModel`): the roster and the registered offer must agree about
@@ -437,7 +437,10 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
   const blocked = new Set(Array.isArray(unavailableModelIds) ? unavailableModelIds : []);
   const filtered = filterByEnabled(entries, enabledIds).filter(isChatModel);
   const seen = new Map();
-  const out = [];
+  // `undefined` slots exist briefly: a first sighting reserves the position
+  // (push), the descriptor lands at that index below — the hole is always
+  // filled before `out` is returned.
+  const out: (object | undefined)[] = [];
   for (const entry of Array.isArray(filtered) ? filtered : []) {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
     const id = str(entry.id, "");
@@ -473,7 +476,7 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
 export function rosterWithAvailability(entries, pools) {
   const blocked = new Set(exhaustedModelIds(pools));
   const position = new Map();
-  const out = [];
+  const out: { id: string; name: string; vision: boolean; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number; thinkingLevels: string[] }[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (!isChatModel(entry)) continue;
     const id = str(entry?.id, "");

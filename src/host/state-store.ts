@@ -265,8 +265,11 @@ export const STATE_READ_TTL_MS = 1000;
  *   - 旧版共享布局（`read`）与把它回填到本 profile（`write`）；`null` = 不迁移。
  * @returns {{read: () => Promise<T|null>, remember: (value: T|null) => void}}
  */
-export function createStateReadCache(readThrough, { ttlMs = STATE_READ_TTL_MS, now = Date.now, inheritFrom = null } = {}) {
-  let cached = undefined;
+export function createStateReadCache<T>(readThrough: () => Promise<T | null>, options: { ttlMs?: number; now?: () => number; inheritFrom?: { read: () => Promise<T | null>; write: (value: T) => Promise<void> } | null } = {}) {
+  const { ttlMs = STATE_READ_TTL_MS, now = Date.now, inheritFrom = null } = options;
+  // "never read" is `undefined` and "read, nothing stored" is `null` — the two
+  // must not collapse into one type, so the annotation carries both.
+  let cached: T | null | undefined = undefined;
   let cachedAt = 0;
   /** Whether the one-shot legacy adoption has already been attempted. */
   let adopted = false;

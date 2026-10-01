@@ -1,10 +1,10 @@
 {
-  "$comment": "Per-file strictNullChecks allowlist (docs/IMPROVEMENTS.md §8). The whole-project flip costs ~170 sites with no per-file granularity, so modules graduate ONE AT A TIME: the main tsconfig EXCLUDES every file listed here, and each must hold strictNullChecks + noUncheckedIndexedAccess clean. Graduated so far: the whole client half — qr.ts (pure QR math, zero imports, verified by a jsQR decode round-trip) and the render/form layer (cards/account-form/panel-page; failure mode is a mis-drawn panel, never a locked account). Next in line: the non-red-line host modules (store/catalog/parse); LAST: the ~40 login-path sites (routes/token-store/auth/publish), which need frame-by-frame review like the store-baseline split. A graduating file moves into `include` here AND gets added to the main config's `exclude` — both in the same commit, or typecheck-gate runs it twice under different rules.",
+  "$comment": "Per-file strictNullChecks allowlist (docs/IMPROVEMENTS.md §8). The whole-project flip has no per-file granularity, so modules graduate ONE AT A TIME: the main tsconfig EXCLUDES every file listed here, and each must hold strictNullChecks + noUncheckedIndexedAccess clean. The config also SNC-checks every file the listed ones transitively IMPORT (TypeScript follows relative imports), so a closure leaf must stay clean even when it has not graduated itself (raccoon.ts's one never[] fix). Graduated: the whole client half (qr/cards/account-form/panel-page — failure mode is a mis-drawn panel, never a locked account) and the host data/parse layer (state-store/catalog-store/parsers/llm-models/raccoon-models). LAST, only after frame-by-frame review like the store-baseline split: the login-path files (routes/token-store/auth/publish/stores holding credentials). A graduating file moves into `include` here AND into the main config's `exclude` — both in the same commit, or typecheck-gate runs it twice under different rules.",
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noUncheckedIndexedAccess": true,
     "strictNullChecks": true
   },
-  "include": ["src/client/qr.ts", "src/client/cards.ts", "src/client/account-form.ts", "src/client/panel-page.ts", "types/*.d.ts"],
+  "include": ["src/client/qr.ts", "src/client/cards.ts", "src/client/account-form.ts", "src/client/panel-page.ts", "src/host/state-store.ts", "src/host/catalog-store.ts", "src/host/parsers.ts", "src/host/llm-models.ts", "src/host/raccoon-models.ts", "types/*.d.ts"],
   "exclude": []
 }

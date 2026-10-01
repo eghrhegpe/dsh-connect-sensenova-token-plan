@@ -96,7 +96,7 @@ export function parsePools(body) {
 /** Normalize the `credit-usage-trend` response into per-model credit rows. */
 export function parseTrend(body, trendHours) {
   const series = Array.isArray(body?.series) ? body.series : [];
-  const rows = [];
+  const rows: { model: string; credits: number }[] = [];
   for (const entry of series) {
     const source = obj(entry);
     const modelId = str(source.model_id, str(source.model_name, ""));

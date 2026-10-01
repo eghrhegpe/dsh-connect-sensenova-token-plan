@@ -346,7 +346,7 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
       if (obj(category).type !== "chat") continue;
       const models = Array.isArray(obj(category).models) ? obj(category).models : [];
       const seen = new Set();
-      const out = [];
+      const out: object[] = [];
       for (const raw of models) {
         const model = obj(raw);
         if (model.visible === false) continue;

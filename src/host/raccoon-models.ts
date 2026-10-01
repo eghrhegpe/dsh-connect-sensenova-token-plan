@@ -62,7 +62,7 @@ export function raccoonRequestHeaders(officeIdentity = "") {
  */
 export function raccoonRoster(catalog) {
   const rows = Array.isArray(catalog) && catalog.length > 0 ? catalog : RACCOON_FALLBACK_MODELS;
-  const out = [];
+  const out: object[] = [];
   for (const row of rows) {
     const id = str(row?.id, "");
     if (id === "") continue;
@@ -146,7 +146,7 @@ export function raccoonToDescriptor(row: any, options: { officeIdentity?: string
  */
 export function buildRaccoonDescriptors(roster: any, options: { officeIdentity?: string } = {}) {
   const list = Array.isArray(roster) ? roster : raccoonRoster(null);
-  const out = [];
+  const out: object[] = [];
   const seen = new Set();
   for (const row of list) {
     const id = str(row?.id, "");
