@@ -6,8 +6,8 @@
  * error-body.js:15-30,63-76,111-118`：OpenAI SDK 的 `error.error`（parsed JSON 对象）
  * 经 `safeJsonStringify` 转回 JSON 字符串作 body）。本套件在**真实 peer 可达时**
  * （`findPeerRoot()` 本地解析，见 test/peer-roots.mjs 头注）钉死这条端到端行为契约；
- * peer 缺席（干净检出/CI）则 SKIP——与 `npm test` 离线门禁兼容。有真实 Host 的机器
- * （本机）会真跑。
+ * peer 缺席则 SKIP——与 `npm test` 离线门禁兼容（一台没装 Host 的机器上属正常；CI 由
+ * workflow 装好运行时，故那边出现 SKIP 本身就是信号）。有真实 Host 的机器（本机）会真跑。
  *
  * 误判机制（2026-09-29 实测修正原稿 §3.1③）：
  *   - peer 的 `isQuotaExceededError`（`@deepseek-ai/dsh-llm/lib/types/error.js:76-82`）
@@ -62,8 +62,8 @@ installNetworkGuard();
 
 const root = findPeerRoot();
 if (root === undefined) {
-  console.log("SKIP: 未找到 Host peer 根（干净检出/CI 常态）——契约无法验证，跳过且不红。");
-  console.log("SKIP: 需 $DSH_HOME 或已解包的 DSH runtime 才会真跑（见 test/peer-roots.mjs）。");
+  console.log("SKIP: 未找到 Host peer 根——契约无法验证，跳过且不红（本地干净检出属正常；CI 里出现则说明 workflow 的运行时安装步骤没生效，见 .github/workflows/ci.yml）。");
+  console.log("SKIP: 需 $DSH_HOME / 已解包的桌面运行时 / npm 全局 CLI 的运行时树才会真跑（见 test/peer-roots.mjs 的候选根）。");
   process.exit(0);
 }
 

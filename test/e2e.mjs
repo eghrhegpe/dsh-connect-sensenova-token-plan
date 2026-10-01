@@ -33,6 +33,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cliRuntimeModules } from "./peer-roots.mjs";
 
 /**
  * Where this plugin lives, derived from the running file — never hard-coded.
@@ -126,22 +127,16 @@ function withDeadline(promise, ms, what) {
  * different version, which shows up as a third of its entries failing to
  * activate.
  *
+ * The lookup itself now lives in `peer-roots.mjs` (`cliRuntimeModules`), the one
+ * place that answers "where is the Host runtime?" for every suite. The offline
+ * suites need it for their PEER packages (which is the same question), and they
+ * need it for the same reason: a machine with no desktop install — CI — has no
+ * other complete source.
+ *
  * `undefined` means the CLI is not an npm install (a packaged desktop app has no
  * global tree); the home is then left as it was, and the boot failure says what
  * it could not find.
- * @returns {string|undefined} a `node_modules` directory to share, or undefined.
  */
-function cliRuntimeModules() {
-  const root = spawnSync("npm", ["root", "-g"], { shell: true, encoding: "utf8", timeout: 30_000 });
-  if (root.error !== undefined || root.status !== 0) return undefined;
-  const prefix = root.stdout.trim();
-  if (prefix === "") return undefined;
-  const anchor = join(prefix, "@deepseek-ai", "dsh", "node_modules");
-  // The marker is a package the Host itself needs; without it the directory is
-  // not the runtime, and linking it would only trade one ERR_MODULE_NOT_FOUND
-  // for another.
-  return existsSync(join(anchor, "@deepseek-ai", "dsh-base")) ? anchor : undefined;
-}
 
 /** The isolated home: a profile whose only plugin is ours, aimed at the fake. */
 function buildHome(fakePort) {

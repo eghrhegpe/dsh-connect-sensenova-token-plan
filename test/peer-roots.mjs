@@ -13,9 +13,23 @@
  * the copy inside the Host is used, which is the same one that will run the
  * plugin.
  *
+ * The Host copy is not always there. On a CI runner the ONLY candidate is the
+ * repo's own `node_modules`, which `npm install --legacy-peer-deps` leaves
+ * without an `@deepseek-ai` scope at all — the root manifest declares those
+ * packages as PEER dependencies, and that flag means npm skips them rather than
+ * fetching them. The gate then died at its second suite (`store.test.mjs`) and
+ * the remaining seventeen never ran, on every push, silently. So the
+ * npm-installed CLI's own tree is a candidate as well: it is the one complete,
+ * version-consistent set (its siblings resolve each other through peers too —
+ * `dsh-credentials-local` imports `@deepseek-ai/dsh-atomic-write`, so a
+ * two-or-three-package install from the registry leaves dangling imports), and
+ * it is listed LAST so a developer machine keeps preferring the runtime it
+ * actually runs.
+ *
  * Usage: `const { credentialKey } = await loadPeer("dsh-credentials");`
  */
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -50,8 +64,51 @@ function candidateRoots() {
     // usable candidate, because the packaged app's node_modules carries no
     // @deepseek-ai scope.
     join(homedir(), ".dsh", "dsh-asar-unpacked", "dsh", "node_modules"),
-    ...(localAppData === "" ? [] : [join(localAppData, "Programs", "DeepSeek Harness", "resources", "app.asar.unpacked", "dsh", "node_modules")])
-  ].filter((candidate) => candidate !== "" && existsSync(candidate));
+    ...(localAppData === "" ? [] : [join(localAppData, "Programs", "DeepSeek Harness", "resources", "app.asar.unpacked", "dsh", "node_modules")]),
+    // Last two, and deliberately so: a developer machine must keep resolving
+    // against the runtime it actually runs. These are for the machine that has
+    // no Host install at all — CI, first and foremost: the meta package in the
+    // workspace, then the CLI's own tree (the one an `npm install -g` creates).
+    join(ROOT, "node_modules", "@deepseek-ai", "dsh", "node_modules"),
+    cliRuntimeModules()
+  ].filter((candidate) => typeof candidate === "string" && candidate !== "" && existsSync(candidate));
+}
+
+/**
+ * The `node_modules` tree of the npm-installed DSH CLI, when there is one.
+ *
+ * This is the source `test/e2e.mjs` has always used, for a reason worth
+ * restating: it is the package set the CLI was built against, it is complete,
+ * and it carries no user plugins. The unpacked desktop runtime under `~/.dsh`
+ * looks like a candidate and is NOT one for booting a whole Host (a different
+ * version, which shows up as a third of its entries failing to activate) — but
+ * it is perfectly good for the offline suites' narrower needs, which is why it
+ * keeps its earlier place in `candidateRoots`.
+ *
+ * Memoized: computing it spawns `npm root -g`, and `loadPeer` is called more
+ * than once per suite. A machine where the spawn fails (a packaged desktop app
+ * has no global tree; a confined sandbox may refuse a piped child) simply gets
+ * one fewer candidate instead of an exception.
+ * @returns {string|undefined} a `node_modules` directory, or undefined.
+ */
+let cliRuntimeCache = null;
+export function cliRuntimeModules() {
+  if (cliRuntimeCache !== null) return cliRuntimeCache === false ? undefined : cliRuntimeCache;
+  // One command string, not argv + `shell: true`: the argv form is deprecated
+  // precisely because it concatenates unescaped arguments (DEP0190), and this
+  // runs in every suite that falls back here.
+  const root = spawnSync("npm root -g", { shell: true, encoding: "utf8", timeout: 30_000 });
+  if (root.error !== undefined || root.status !== 0) {
+    cliRuntimeCache = false;
+    return undefined;
+  }
+  const prefix = root.stdout.trim();
+  const anchor = prefix === "" ? "" : join(prefix, "@deepseek-ai", "dsh", "node_modules");
+  // The marker is a package the Host itself needs; without it the directory is
+  // not the runtime, and using it would only trade one ERR_MODULE_NOT_FOUND for
+  // another.
+  cliRuntimeCache = anchor !== "" && existsSync(join(anchor, "@deepseek-ai", "dsh-base")) ? anchor : false;
+  return cliRuntimeCache === false ? undefined : cliRuntimeCache;
 }
 
 /**

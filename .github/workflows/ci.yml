@@ -13,6 +13,11 @@ name: CI
 #                  These are the real gate: they stub the network
 #                  (test/peer-roots.mjs installs a sentinel that fails any
 #                  request escaping a stub), so a red here is always a regression.
+#                  They also need a HOST RUNTIME, which a clean runner does not
+#                  have: the suites import the Host's own packages as PEERS (see
+#                  the install step below — this is the one job that must obtain
+#                  them, and a green run that "SKIPped" them would be a gate that
+#                  tests nothing).
 #   e2e          — boots a REAL `dsh web` process against a fake platform. It proves
 #                  the loader, routes, and trust fence assemble correctly — the class
 #                  of bug the offline suites cannot see. It needs the dsh CLI and a
@@ -57,13 +62,33 @@ jobs:
           # registry), so the npm cache keys off package.json instead.
           cache: npm
           cache-dependency-path: package.json
-      # The offline suites themselves still run on bare node (they import the
-      # src/*.ts sources directly via native type stripping and resolve peers
-      # from stubs). The install exists for ONE suite: build-gate, which runs
-      # the real tsdown build. --legacy-peer-deps is mandatory — the plugin's
-      # peerDependencies are Host-runtime packages that no registry serves.
+      # The offline suites run on bare node (they import the src/*.ts sources
+      # directly via native type stripping). This install exists for ONE suite:
+      # build-gate, which runs the real tsdown build. --legacy-peer-deps is
+      # mandatory — the plugin's peerDependencies are Host-runtime packages, and
+      # a range install of them cannot succeed anyway (their published `latest`
+      # tags are prereleases, which `>=0.1.5 <0.3` does not match under npm's
+      # default semver rules).
       - name: Install dev dependencies (tsdown, for the build gate)
         run: npm install --legacy-peer-deps --no-audit --no-fund
+      # The suites resolve the Host's own packages as PEERS through
+      # test/peer-roots.mjs, and `--legacy-peer-deps` deliberately SKIPS peer
+      # dependencies — so a clean runner has none, the FIRST peer-dependent suite
+      # (`store.test.mjs`, second in the list below) threw
+      # "cannot resolve the peer dependency @deepseek-ai/dsh-credentials", and
+      # `set -e` then hid the other seventeen, on every push, for a day.
+      #
+      # Installing two or three packages from the registry does NOT fix it: the
+      # DSH package set resolves its own internals through peers as well
+      # (`dsh-credentials-local/lib/index.js` imports `@deepseek-ai/dsh-atomic-write`),
+      # so a partial install only moves the failure. The complete,
+      # version-consistent source is the CLI's own install tree — exactly what
+      # the e2e job below already uses and what `cliRuntimeModules()` in
+      # test/peer-roots.mjs now falls back to. Installed GLOBALLY on purpose:
+      # a global install does not read this repo's manifest, so npm is free to
+      # pull the runtime's own peer closure.
+      - name: Provide the Host runtime the peer suites resolve from
+        run: npm install -g @deepseek-ai/dsh || echo "dsh CLI not installable here; the peer suites will fail loudly (this gate must not pass without them)"
       - name: Run the offline suites
         run: |
           set -e
