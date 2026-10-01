@@ -72,6 +72,48 @@ export const RACCOON_QR_STATUS = Object.freeze({
   SUCCESS: "success"
 });
 
+/**
+ * Extract the account display name from a login payload, defensively across
+ * the field spellings a gateway plausibly uses. The success envelope was
+ * never probed for a nickname (only `access_token`/`refresh_token` were
+ * recorded), so the extraction tries the flat fields and a nested user
+ * object, then falls back to JWT claims — and the caller logs the envelope's
+ * FIELD NAMES (never values) so the next real scan settles the question with
+ * evidence instead of another silent gap.
+ * @param {object} data - the success envelope's `data` object.
+ * @param {string} [accessToken] - the JWT, whose payload may carry the name.
+ * @returns {string} the nickname, or `""` when none is found.
+ */
+export function extractRaccoonNickname(data: any, accessToken = ""): string {
+  const source = obj(data);
+  const nested = obj(source.user ?? source.user_info ?? source.account);
+  const candidates = [
+    source.nickname, source.nick_name, source.display_name,
+    nested.nickname, nested.nick_name, nested.name
+  ];
+  let nickname = "";
+  for (const candidate of candidates) {
+    const value = str(candidate, "");
+    if (value !== "") { nickname = value; break; }
+  }
+  if (nickname !== "" || typeof accessToken !== "string" || accessToken === "") return nickname;
+  // JWT fallback: the payload is read for ONE claim, never logged or stored
+  // beyond the nickname the caller decides to keep.
+  const parts = accessToken.split(".");
+  if (parts.length < 2) return "";
+  try {
+    const claims = JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf8"));
+    if (typeof claims !== "object" || claims === null || Array.isArray(claims)) return "";
+    for (const key of ["nickname", "nick_name", "display_name", "preferred_username", "name"]) {
+      const value = str(claims[key], "");
+      if (value !== "") return value;
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
 /** Decode a JWT's `exp` claim to MILLISECONDS; `undefined` on any failure. */
 export function decodeRaccoonJwtExpMs(token) {
   if (typeof token !== "string" || token.length === 0) return undefined;
@@ -192,7 +234,14 @@ export async function pollRaccoonQrLogin(code: string, fetcher?: typeof fetch) {
       status: RACCOON_QR_STATUS.SUCCESS,
       accessToken,
       refreshToken,
-      ...(expMs !== undefined ? { expiresAtMs: expMs } : {})
+      ...(expMs !== undefined ? { expiresAtMs: expMs } : {}),
+      // The account display name, extracted defensively (see
+      // `extractRaccoonNickname`) — `""` when the payload carries none.
+      nickname: extractRaccoonNickname(envelope.data, accessToken),
+      // Field NAMES only (never values): the caller logs this once per login,
+      // so an unprobed corner of the envelope becomes evidence on the next
+      // real scan instead of a silent data breakpoint.
+      dataFields: Object.keys(envelope.data).sort()
     };
   }
   return { status: RACCOON_QR_STATUS.PENDING };

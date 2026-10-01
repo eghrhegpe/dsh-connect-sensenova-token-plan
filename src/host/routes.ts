@@ -951,6 +951,13 @@ export function registerRoutes(ctx, wiring) {
           await answer({ ok: false, status: canceled ? "canceled" : "timeout" });
           return;
         }
+        // Evidence, not guesswork: the success envelope was only ever probed
+        // for the token pair, so log its FIELD NAMES (never values — no
+        // secret can leak in a key list) once per login. A field the panel
+        // later wants (a nickname the extractor missed, an org id) shows up
+        // here on the first real scan instead of staying a silent gap.
+        const dataFields = Array.isArray(settled.dataFields) ? settled.dataFields : [];
+        logger?.info?.(`${name}: raccoon login envelope fields: ${dataFields.join(", ") || "(none)"}; nickname extracted: ${settled.nickname !== ""}`);
         // The scan worked: persist the pair to the credentials service (the
         // refresh token is single-use, so the store owns that write-back),
         // then drive the registration if the switch is on.

@@ -28,6 +28,7 @@ import {
   raccoonQrLoginUrl,
   parseRaccoonEnvelope,
   decodeRaccoonJwtExpMs,
+  extractRaccoonNickname,
   raccoonHeaders,
   RACCOON_FALLBACK_MODELS,
   raccoonThinkingExtraBody,
@@ -173,6 +174,24 @@ function section(title) {
     const success = await pollRaccoonQrLogin("code", fakeFetcher(successBody));
     check("a success poll returns the token pair", success.status === RACCOON_QR_STATUS.SUCCESS && success.accessToken.length > 0 && success.refreshToken === "rt-1");
     check("the success poll decodes the expiry", success.expiresAtMs === expSeconds * 1000);
+    // The nickname extraction: flat field, nested object, JWT claim, then "".
+    // The success envelope was never probed for the nickname (the token pair
+    // was the only recorded read), so the extractor is defensive across the
+    // plausible spellings and the caller logs the envelope's field names —
+    // the next real scan settles which shape the gateway actually speaks.
+    check("the success poll extracts a flat nickname", success.nickname === "nick", String(success.nickname));
+    check("the success poll reports the envelope field names (names only)",
+      Array.isArray(success.dataFields) && success.dataFields.includes("access_token") && success.dataFields.includes("nickname")
+        && success.dataFields.every((field) => typeof field === "string"),
+      JSON.stringify(success.dataFields));
+    const namelessJwt = Buffer.from(JSON.stringify({ exp: expSeconds, preferred_username: "130****1100" })).toString("base64url");
+    check("the nickname falls back to a JWT claim",
+      extractRaccoonNickname({ status: "success" }, `header.${namelessJwt}.sig`) === "130****1100");
+    check("a nested user object carries the nickname too",
+      extractRaccoonNickname({ user: { nickname: "小浣熊" } }, "") === "小浣熊");
+    check("a payload with no name reads as an empty nickname, not an error",
+      extractRaccoonNickname({ status: "success" }, `header.${jwtPayload}.sig`) === ""
+        && extractRaccoonNickname(null, "not a jwt") === "");
 
     // A pending status: nothing yet.
     const pending = await pollRaccoonQrLogin("code", fakeFetcher({ code: 0, data: { status: "pending" } }));
