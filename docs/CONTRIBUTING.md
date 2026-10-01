@@ -115,7 +115,7 @@ description:
 - 仓库创建满 24 小时（CI 按 GitHub `created_at` 自动卡）；本仓 2026-09-28T05:03:11Z 建仓；
 - 真实可用代码、非占位——已满足；仓库需公开且处于活跃维护。
 
-已发布 npm 包 `dsh-connect-sensenova-token-plan`（registry 上最新为 **0.4.4**，2026-10-01 发布；2026-09-28 首发 0.2.0；
+已发布 npm 包 `dsh-connect-sensenova-token-plan`（**0.4.5 于 2026-10-01 发布**；2026-09-28 首发 0.2.0；
 0.4.1 与 0.4.2 打了 git tag 但**未发布到 npm**，其内容随 **0.4.3** 一并发布。`repository` 指回本仓，列表会
 自动按下载量关联，yml 里无需任何 npm 字段）。注意本机默认 registry 是 npmmirror 镜像，登录与发布都
 必须显式带 `--registry=https://registry.npmjs.org`；发新版前先在 package.json 升版本号（已发布版本

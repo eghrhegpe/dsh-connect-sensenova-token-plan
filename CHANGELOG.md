@@ -2,6 +2,15 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
+## [0.4.5] — 2026-10-01
+
+出图请求体对齐官方文档：`sensenova_draw_image` 现在会显式携带 `output_format` 与 `watermark`，并在 agent 工具参数面暴露对应入口。
+
+- **出图请求体补齐文档字段**（`src/host/draw.ts`、`src/host/types.ts`）：`buildDrawBody()` 现默认发送 `output_format: "png"` 与 `watermark: true`，不再只发 `{model, prompt, n, size, response_format}`。这是按官方 `images/generations` 文档做的显式化——官方说明建议调用时显式传入 `watermark`，避免后续默认值变更影响线上行为。
+- **出图参数归一化收敛**：`outputFormat` 只接受文档允许值（`png` / `jpg` / `jpeg` / `webp`），非法值回落 `png`；`watermark` 仅接受文档声明的布尔形态（`true/false` 或字符串 `"true"/"false"`），其余回落默认 `true`。
+- **agent 工具新增两个可选参数**（`sensenova_draw_image`）：`outputFormat`、`watermark`，调用侧可按需控制出图格式与水印，缺省保持官方默认。
+- **测试补齐**（`test/draw.test.mjs`）：锁住默认请求体字段、归一化行为与工具 schema 暴露；`node test/draw.test.mjs` 74/74 全绿。
+
 ## [0.4.4] — 2026-10-01
 
 插件卡的自述面补正：中文界面下卡片的标题与简介不再显示英文，并补上卡片图标。
