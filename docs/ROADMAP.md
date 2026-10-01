@@ -372,7 +372,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 
 - **自动续期**（Token Plan / 小浣熊都有）：Token Plan 走 `acquire()`（节流闸 → 新鲜度 → refresh → 登录兜底）；小浣熊的 refresh 是**单用轮换**、整对回写，并在每次请求前 eager refresh。触发是**惰性**的——Host 半边零 `setInterval`，靠面板轮询打路由时按需触发。
 - **密码自动重登**（仅 Token Plan）：**opt-in**，必须 `SENSENOVA_PASSWORD` 在 Host 进程环境里且账号已存；没有它，refresh 一死就回面板要手动登录。平台要短信/图形验证码时自动化注定失败（面板文案 `auth.verification`）。
-- **登录本身**永远需要用户在场一次：Token Plan 是浏览器 OIDC+PKCE，小浣熊是微信扫码（阻塞最多 5 分钟等扫）。
+- **登录本身**永远需要用户在场一次：Token Plan 是浏览器 OIDC+PKCE，小浣熊是微信扫码（最长等 5 分钟扫完）。**等的是用户，不是 HTTP 请求**：`/raccoon` 的 `login` 动作发码即回（约 100 ms），扫码 walk 在后台跑，结果经 GET 的 `loginStatus` 事件下发一次（`scanning` → `logged_in` / `timeout` / `canceled` / `failed`）。旧实现让 POST 阻塞到 5 分钟截止，客户端还在旁边跑 150 × 2 s 的补偿轮询，一次扫码要打网关几百次读——现在的缓存与单飞把这笔账压到「每窗口两次读」（`test/routes.test.mjs` T 段）。
 - **签到 / 每日领取：没有做，也没有可调的端点**。Token Plan 侧从未证实存在这样的端点（§6「先证商汤有端点，否则不吸」与 §7「明确不做」仍然有效）；小浣熊侧日发积分是**服务端自动发的 `daily_grant`**（网关没给这个发放的端点），面板只读余额、把日发那部分当 breakdown 展示。所以**不存在「靠自动登录刷签到」这回事**——本插件从未发出任何签到/领取请求。
 
 #### 探针提醒：`desktop/v1/login/points/grant` 不能拿真凭据试

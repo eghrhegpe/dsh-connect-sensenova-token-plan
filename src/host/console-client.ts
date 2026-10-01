@@ -6,27 +6,22 @@
  * also how the Host stays off the platform's own rate limiter. Cached responses
  * age out on their own TTL, and a safety sweep drops anything older than the
  * longest TTL so the map never grows without bound.
+ *
+ * The caching + coalescing is NOT implemented here: both functions drive the
+ * shared `coalesced-fetch.ts` primitive with the caller's maps, so this module
+ * owns the REQUEST shape only and the "one call per key" discipline has exactly
+ * one implementation to get right.
  * @module dsh-connect-sensenova-token-plan/console-client
  */
 
 import { CODE } from "./codes.ts";
 import { str, obj } from "./util.ts";
+import { createCoalescedFetch } from "./coalesced-fetch.ts";
 
 /**
  * One cached console response: the body plus the epoch millis it was fetched.
  * @typedef {{body: unknown, at: number}} CacheEntry
  */
-
-/** Longest TTL any caller uses; entries older than this are swept. */
-const MAX_CACHE_AGE_MS = 3600_000;
-
-/** Drop entries older than the longest TTL so the map stays bounded. */
-function sweepCache(cache) {
-  const nowMs = Date.now();
-  for (const [key, entry] of cache) {
-    if (nowMs - entry.at > MAX_CACHE_AGE_MS) cache.delete(key);
-  }
-}
 
 /**
  * Fetch one console endpoint with a bearer token, caching the result.
@@ -50,14 +45,10 @@ export async function fetchConsole(settings, path, params, cacheMs, cache, infli
     ? `?${new URLSearchParams(params).toString()}`
     : "";
   const url = `${settings.consoleBase}${path}${query}`;
-  const cached = cache.get(url);
-  if (cached !== undefined && Date.now() - cached.at < cacheMs) return cached.body;
-
-  // One in-flight fetch per URL: many open panels (or tabs) polling at once
-  // must not each hammer the console. The same request is shared until it
-  // resolves, which also keeps the host off the platform's own rate limiter.
-  const pending = inflight.get(url);
-  if (pending !== undefined) return pending;
+  // One cache + one in-flight map, shared with every other console caller: many
+  // open panels (or tabs) polling at once must not each hammer the console, and
+  // the request is shared until it resolves.
+  const coalesced = createCoalescedFetch({ cache, inflight });
 
   const run = async () => {
     const send = async (token) => fetch(url, {
@@ -84,15 +75,10 @@ export async function fetchConsole(settings, path, params, cacheMs, cache, infli
     if (!response.ok) {
       throw new Error(`console returned HTTP ${response.status}`);
     }
-    const body = await response.json();
-    cache.set(url, { body, at: Date.now() });
-    sweepCache(cache);
-    return body;
+    return await response.json();
   };
 
-  const flight = run().finally(() => { inflight.delete(url); });
-  inflight.set(url, flight);
-  return flight;
+  return coalesced.read(url, run, cacheMs);
 }
 
 /**
@@ -112,13 +98,9 @@ export async function fetchConsole(settings, path, params, cacheMs, cache, infli
  */
 export async function fetchModelCatalog(settings, cacheMs, cache, inflight, apiKey) {
   const url = `${settings.apiBase}/models`;
-  const cached = cache.get(url);
-  if (cached !== undefined && Date.now() - cached.at < cacheMs) return cached.body;
-
   // Same single-flight treatment as fetchConsole: an open panel and a Models
   // page both poll `/v1/models`, and they should share one call.
-  const pending = inflight.get(url);
-  if (pending !== undefined) return pending;
+  const coalesced = createCoalescedFetch({ cache, inflight });
 
   const run = async () => {
     const response = await fetch(url, {
@@ -141,12 +123,8 @@ export async function fetchModelCatalog(settings, cacheMs, cache, inflight, apiK
           })
           .filter((entry) => entry.id !== "")
       : [];
-    cache.set(url, { body: models, at: Date.now() });
-    sweepCache(cache);
     return models;
   };
 
-  const flight = run().finally(() => { inflight.delete(url); });
-  inflight.set(url, flight);
-  return flight;
+  return coalesced.read(url, run, cacheMs);
 }

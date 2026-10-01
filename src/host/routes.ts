@@ -12,6 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import { isAdmitted, name } from "./host-config.ts";
+import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { buildSnapshotBody, failureCode } from "./snapshot-aggregate.ts";
 import { CODE } from "./codes.ts";
 import { writeLoginTrace } from "./trace.ts";
@@ -63,6 +64,31 @@ const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "referrer-policy": "no-referrer"
 };
+
+/**
+ * How long one Raccoon balance read stays fresh.
+ *
+ * The tab polls every 60 s, and while a QR scan is waiting it polls every 2 s —
+ * without a cache that fast poll is 30 gateway calls a minute for a number that
+ * moves when the account spends. The window matches the slow cadence, so a
+ * scan's fast poll costs the same two calls a minute the idle tab does.
+ */
+const RACCOON_BALANCE_TTL_MS = 60_000;
+/**
+ * How long one Raccoon catalogue read stays fresh (longer: the roster drifts
+ * when the gateway adds a model, not while a session is open).
+ */
+const RACCOON_CATALOG_TTL_MS = 300_000;
+
+/**
+ * A secret-free, stable identity for one access token, used as the cache key
+ * half so a rotated credential never reads the previous one's answer.
+ * @param {string} token - the access token (never stored, never logged).
+ * @returns {string} a 12-hex-character digest prefix.
+ */
+function tokenFingerprint(token) {
+  return createHash("sha256").update(typeof token === "string" ? token : "", "utf8").digest("hex").slice(0, 12);
+}
 
 /** Write one JSON response with the family headers. */
 function writeJson(res, status, body, headers = {}) {
@@ -233,7 +259,13 @@ async function readJsonBodyOr400(request, response) {
  *   order — `teardown` runs them last.
  */
 export function registerRoutes(ctx, wiring) {
-  const { settings, configError, cache, inflight, tokenStore, apiKeyStore, catalogStore, providerStore, drawStore, publisher, providerState, publishProvider, visionPublish, logger, raccoonStore, raccoonSwitch, raccoonPublisher } = wiring;
+  const { settings, configError, cache, inflight, tokenStore, apiKeyStore, catalogStore, providerStore, drawStore, publisher, providerState, publishProvider, visionPublish, logger, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache } = wiring;
+  // The Raccoon gateway reads (balance + catalogue) go through the SAME
+  // coalescing cache primitive the console route uses, so a scan's fast poll
+  // shares one call instead of issuing one per panel refresh. The instance is
+  // the wiring's (created in `index.ts`) so a login/logout can clear it in one
+  // place; a Host that wired none still gets a private one rather than a crash.
+  const raccoonRead = raccoonCache ?? createCoalescedFetch();
 
   const offRoute = ctx.webServer.register({
     kind: "exact",
@@ -680,6 +712,29 @@ export function registerRoutes(ctx, wiring) {
   // render. One scan per process (the single long-poll owns it); cleared when
   // the walk settles.
   let raccoonScan: { code: string; url: string } | null = null;
+  /**
+   * The in-flight login walk, kept as the CONCURRENCY GATE.
+   *
+   * The walk is no longer the request (see the `login` branch): it runs in the
+   * background and the POST answers the moment the scan code is issued. The
+   * promise is held only so a second click (or a second tab) cannot start a
+   * second walk — two walks would each hold a different code while the GET
+   * could only ever report one, which is how a scan silently stops matching
+   * the QR on screen.
+   */
+  let raccoonWalk: Promise<void> | null = null;
+  /**
+   * The settled outcome of the last login walk (`logged_in` / `timeout` /
+   * `canceled` / `failed`), or `"scanning"` while one is in flight.
+   *
+   * A terminal status is delivered ONCE and then cleared: it is an event, not a
+   * state, and leaving it standing would have the tab re-announce a two-minute
+   * old timeout on every later poll. The panel's durable truth is `loggedIn`,
+   * which the credential itself answers.
+   */
+  let raccoonLoginStatus: string | null = null;
+  /** The reason behind a `failed` walk; cleared with the status. */
+  let raccoonLoginError: string | null = null;
   const offRaccoon = ctx.webServer.register({
     kind: "exact",
     path: RACCOON_PATH,
@@ -696,6 +751,19 @@ export function registerRoutes(ctx, wiring) {
       // fields ride only on an explicit `?debug=1` GET (see `wantsDiagnostics`),
       // so `answer()` below reports the same state minus the scaffold.
       const raccoonState = async (withDiagnostics = false) => {
+        // The walk's outcome is read (and cleared) FIRST, before any await in
+        // this function: everything below it costs at least one gateway read,
+        // which is time enough for a walk to finish its save. Reading it last
+        // let one response claim `loginStatus:"logged_in"` while the
+        // `loggedIn` computed at the top still said the credential was absent —
+        // two facts from the same answer, contradicting each other. Taken at
+        // the top, a terminal outcome always postdates the state it names.
+        const loginStatus = raccoonLoginStatus;
+        const loginError = raccoonLoginError;
+        if (loginStatus !== null && loginStatus !== "scanning") {
+          raccoonLoginStatus = null;
+          raccoonLoginError = null;
+        }
         const switchState = await (raccoonSwitch ? raccoonSwitch.enabled() : null).catch(() => null);
         const effectiveEnabled = switchState === true;
         let loggedIn = false;
@@ -777,10 +845,21 @@ export function registerRoutes(ctx, wiring) {
                 // `onFail` reports the concrete reason a read came back empty —
                 // a broken request must not look like "the gateway has nothing
                 // to say". Surfaced as `balanceDetail` for debugging.
-                const balanceRead = await fetchRaccoonBalance(credential, undefined, (why) => { balanceDetail = why; }).catch((why) => {
-                  balanceDetail = `call rejected: ${why instanceof Error ? why.message : String(why)}`;
-                  return null;
-                });
+                //
+                // Cached + coalesced on the token's fingerprint: the tab polls
+                // every 2 s while a scan is waiting, and a fresh number cannot
+                // arrive faster than the account spends. Failures are shared,
+                // never cached (see `coalesced-fetch.ts`).
+                const balanceRead = await raccoonRead
+                  .read(
+                    `balance:${tokenFingerprint(credential.accessToken)}`,
+                    () => fetchRaccoonBalance(credential, undefined, (why) => { balanceDetail = why; }),
+                    RACCOON_BALANCE_TTL_MS
+                  )
+                  .catch((why) => {
+                    balanceDetail = `call rejected: ${why instanceof Error ? why.message : String(why)}`;
+                    return null;
+                  });
                 balance = balanceRead?.total ?? null;
                 if (balanceRead !== null && balanceRead !== undefined) {
                   // Declared, not inferred: each part is copied only when the
@@ -849,10 +928,19 @@ export function registerRoutes(ctx, wiring) {
           if (raccoonStore !== null && raccoonStore !== undefined) {
             const { credential } = await raccoonStore.resolve().catch(() => ({ credential: null }));
             if (credential?.accessToken) {
-              models = await fetchRaccoonCatalog(credential, undefined, () => { catalogReadFailed = true; }).catch(() => {
-                catalogReadFailed = true;
-                return null;
-              });
+              // Same treatment as the balance read: the catalogue is fetched
+              // once per window per credential, and a scan's fast poll (or two
+              // open tabs) share the one call that is already out.
+              models = await raccoonRead
+                .read(
+                  `catalog:${tokenFingerprint(credential.accessToken)}`,
+                  () => fetchRaccoonCatalog(credential, undefined, () => { catalogReadFailed = true; }),
+                  RACCOON_CATALOG_TTL_MS
+                )
+                .catch(() => {
+                  catalogReadFailed = true;
+                  return null;
+                });
             }
           }
         } catch {
@@ -894,6 +982,8 @@ export function registerRoutes(ctx, wiring) {
           // its QR from this on every poll, so a second tab / a refresh
           // continues the SAME scan instead of voiding it.
           ...(raccoonScan !== null ? { scanUrl: raccoonScan.url, scanCode: raccoonScan.code } : {}),
+          ...(loginStatus !== null ? { loginStatus } : {}),
+          ...(loginError !== null && loginError !== "" ? { loginError } : {}),
           balance,
           ...(balanceBreakdown !== null ? { balanceBreakdown } : {}),
           ...(balanceDetail !== null ? { balanceDetail } : {}),
@@ -938,10 +1028,17 @@ export function registerRoutes(ctx, wiring) {
         try {
           const { credential } = raccoonStore ? await raccoonStore.resolve().catch(() => ({ credential: null })) : { credential: null };
           if (catalogToken !== undefined && catalogToken !== null && catalogToken !== "") {
-            const live = await fetchRaccoonCatalog({ access_token: catalogToken }).catch(() => null);
+            // A freshly-scanned token: the read lands in the same cache under
+            // its own fingerprint, so the first GET after login reuses it
+            // instead of re-fetching what this very call just fetched.
+            const live = await raccoonRead
+              .read(`catalog:${tokenFingerprint(catalogToken)}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS)
+              .catch(() => null);
             if (live !== null && live.length > 0) rows = live;
           } else if (credential?.accessToken) {
-            const live = await fetchRaccoonCatalog(credential).catch(() => null);
+            const live = await raccoonRead
+              .read(`catalog:${tokenFingerprint(credential.accessToken)}`, () => fetchRaccoonCatalog(credential), RACCOON_CATALOG_TTL_MS)
+              .catch(() => null);
             if (live !== null && live.length > 0) rows = live;
             officeIdentity = credential.officeIdentity ?? "";
           }
@@ -1008,10 +1105,31 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
 
-      // ── login: start a WeChat-QR walk and block until it settles ──
+      // ── login: issue a WeChat scan, then walk it in the BACKGROUND ──
+      //
+      // The walk used to BE the request: the POST blocked up to the 5-minute
+      // deadline, polling the gateway every 2 s. That is an HTTP handler
+      // holding a connection for five minutes — a tab reload, a proxy timeout
+      // or a Host restart cuts it mid-walk, and the scan it issued stays pinned
+      // on this route with nothing left to clear it. The client compensated by
+      // running its own 150 × 2 s poll beside it, so one scan cost the gateway
+      // hundreds of reads for a number that cannot change that fast.
+      //
+      // Now the POST answers the moment the scan is issued, the walk runs
+      // behind it, and the tab learns the outcome from the GET it already
+      // polls. One walk at a time (`raccoonWalk`).
       if (action === "login") {
         if (raccoonStore === null || raccoonStore === undefined) {
           await answer({ ok: false, error: "the raccoon credential store is unavailable" });
+          return;
+        }
+        // A walk is already waiting: hand back ITS scan rather than issuing a
+        // second one. Two walks would each own a different code while the GET
+        // can only ever report one, so the QR on screen would stop matching the
+        // code being polled — a scan that looks permanently stuck, with no
+        // error anywhere to explain it.
+        if (raccoonWalk !== null && raccoonScan !== null) {
+          await answer({ ok: true, status: "scanning", scanUrl: raccoonScan.url, scanCode: raccoonScan.code });
           return;
         }
         const code = generateRaccoonQrCode();
@@ -1020,58 +1138,78 @@ export function registerRoutes(ctx, wiring) {
         // waiting reports the SAME code/URL (see `raccoonState`), so a refresh
         // or a second tab continues the scan instead of voiding it.
         raccoonScan = { code, url: scanUrl };
-        const deadline = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
-        let settled = null;
-        let canceled = false;
-        while (Date.now() < deadline) {
-          const poll = await pollRaccoonQrLogin(code).catch(() => ({ status: RACCOON_QR_STATUS.PENDING }));
-          if (poll.status === RACCOON_QR_STATUS.SUCCESS) {
-            settled = poll;
-            break;
+        raccoonLoginStatus = "scanning";
+        raccoonLoginError = null;
+        raccoonWalk = (async () => {
+          const deadline = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
+          let settled: any = null;
+          let canceled = false;
+          while (Date.now() < deadline) {
+            const poll = await pollRaccoonQrLogin(code).catch(() => ({ status: RACCOON_QR_STATUS.PENDING }));
+            if (poll.status === RACCOON_QR_STATUS.SUCCESS) {
+              settled = poll;
+              break;
+            }
+            if (poll.status === RACCOON_QR_STATUS.CANCELED) {
+              canceled = true;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, RACCOON_QR_POLL_INTERVAL_MS));
           }
-          if (poll.status === RACCOON_QR_STATUS.CANCELED) {
-            canceled = true;
-            break;
+          if (settled === null) {
+            // Timed out or the phone canceled: the panel says "try again".
+            raccoonLoginStatus = canceled ? "canceled" : "timeout";
+            return;
           }
-          await new Promise((resolve) => setTimeout(resolve, RACCOON_QR_POLL_INTERVAL_MS));
-        }
-        raccoonScan = null;
-        if (settled === null) {
-          // Timed out or the phone canceled: the panel says "try again".
-          await answer({ ok: false, status: canceled ? "canceled" : "timeout" });
-          return;
-        }
-        // Evidence, not guesswork: the success envelope was only ever probed
-        // for the token pair, so log its FIELD NAMES (never values — no
-        // secret can leak in a key list) once per login. A field the panel
-        // later wants (a nickname the extractor missed, an org id) shows up
-        // here on the first real scan instead of staying a silent gap.
-        const dataFields = Array.isArray(settled.dataFields) ? settled.dataFields : [];
-        logger?.info?.(`${name}: raccoon login envelope fields: ${dataFields.join(", ") || "(none)"}; nickname extracted: ${settled.nickname !== ""}`);
-        // The scan worked: persist the pair to the credentials service (the
-        // refresh token is single-use, so the store owns that write-back),
-        // then drive the registration if the switch is on.
-        try {
-          await raccoonStore.save({
-            accessToken: settled.accessToken,
-            refreshToken: settled.refreshToken,
-            ...(settled.expiresAtMs !== undefined ? { expiresAtMs: settled.expiresAtMs } : {}),
-            // The QR success envelope carries the nickname — store it, or the
-            // panel's "已登录：" line has nothing to show.
-            ...(settled.nickname !== undefined && settled.nickname !== "" ? { nickname: settled.nickname } : {})
-          });
-        } catch (error) {
-          await answer({ ok: false, status: "logged_in", error: redactSecrets(error instanceof Error ? error.message : String(error)) });
-          return;
-        }
-        if (raccoonPublisher !== null && raccoonPublisher !== undefined && raccoonPublisher.isDisposed() === false) {
-          const switchState = raccoonSwitch ? await raccoonSwitch.enabled().catch(() => null) : null;
-          if (switchState === true) {
-            const { rows, officeIdentity } = await collectRaccoonRows(settled.accessToken);
-            await raccoonPublisher.publish(rows, officeIdentity);
+          // Evidence, not guesswork: the success envelope was only ever probed
+          // for the token pair, so log its FIELD NAMES (never values — no
+          // secret can leak in a key list) once per login. A field the panel
+          // later wants (a nickname the extractor missed, an org id) shows up
+          // here on the first real scan instead of staying a silent gap.
+          const dataFields = Array.isArray(settled.dataFields) ? settled.dataFields : [];
+          logger?.info?.(`${name}: raccoon login envelope fields: ${dataFields.join(", ") || "(none)"}; nickname extracted: ${settled.nickname !== ""}`);
+          // The scan worked: persist the pair to the credentials service (the
+          // refresh token is single-use, so the store owns that write-back),
+          // then drive the registration if the switch is on.
+          try {
+            await raccoonStore.save({
+              accessToken: settled.accessToken,
+              refreshToken: settled.refreshToken,
+              ...(settled.expiresAtMs !== undefined ? { expiresAtMs: settled.expiresAtMs } : {}),
+              // The QR success envelope carries the nickname — store it, or the
+              // panel's "已登录：" line has nothing to show.
+              ...(settled.nickname !== undefined && settled.nickname !== "" ? { nickname: settled.nickname } : {})
+            });
+          } catch (error) {
+            // The scan worked and the credential did not land: the tab can only
+            // hear about it through the same event channel, so the reason rides
+            // there (sanitized — the store's message may quote the document).
+            raccoonLoginStatus = "failed";
+            raccoonLoginError = redactSecrets(error instanceof Error ? error.message : String(error));
+            return;
           }
-        }
-        await answer({ ok: true, status: "logged_in" });
+          // A new credential invalidates every read taken under the previous
+          // one: the balance and the catalogue are per-account facts, and a
+          // cached answer from the old session must not surface under the new
+          // login. (This walk's own catalogue read is keyed on the NEW token, so
+          // it is unaffected.)
+          raccoonRead.clear();
+          if (raccoonPublisher !== null && raccoonPublisher !== undefined && raccoonPublisher.isDisposed() === false) {
+            const switchState = raccoonSwitch ? await raccoonSwitch.enabled().catch(() => null) : null;
+            if (switchState === true) {
+              const { rows, officeIdentity } = await collectRaccoonRows(settled.accessToken);
+              await raccoonPublisher.publish(rows, officeIdentity);
+            }
+          }
+          raccoonLoginStatus = "logged_in";
+        })().finally(() => {
+          // Both exits land here: the scan is over either way, and the gate
+          // must reopen even when the walk threw — otherwise every later login
+          // would be told "a walk is already waiting" forever.
+          raccoonWalk = null;
+          raccoonScan = null;
+        });
+        await answer({ ok: true, status: "scanning", scanUrl, scanCode: code });
         return;
       }
 
@@ -1083,6 +1221,10 @@ export function registerRoutes(ctx, wiring) {
         }
         try {
           await raccoonStore.forget();
+          // The credential is gone, so every cached balance/catalogue read
+          // taken under it is now somebody else's number: a re-login must not
+          // be served the previous account's balance for up to five minutes.
+          raccoonRead.clear();
           if (raccoonPublisher !== null && raccoonPublisher !== undefined) {
             await raccoonPublisher.publish(RACCOON_FALLBACK_MODELS, "");
           }

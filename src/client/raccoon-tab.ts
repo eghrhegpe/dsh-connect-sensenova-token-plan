@@ -67,10 +67,32 @@ interface RaccoonState {
   /** The in-flight QR scan the route last issued (cleared when it settles). */
   scanUrl?: string;
   scanCode?: string;
+  /**
+   * The QR walk's outcome: `"scanning"` while one waits, otherwise a terminal
+   * `logged_in` / `timeout` / `canceled` / `failed`.
+   *
+   * It is an EVENT, not a state: the route hands a terminal outcome over once
+   * and clears it, so only the poll that catches it sees it. The durable
+   * "signed in" fact is `loggedIn`. What this drives is the poll CADENCE — a
+   * waiting scan is the only time the tab needs to poll faster than a minute.
+   */
+  loginStatus?: string;
+  /** The reason a `failed` walk gave; only ever present beside that status. */
+  loginError?: string;
 }
 
 /** The cadence the tab polls at while open (balance + roster drift slowly). */
 const RACCOON_POLL_MS = 60_000;
+/**
+ * The cadence while a scan is waiting.
+ *
+ * The gateway's own client polls every 2 s, so a confirmed scan must be
+ * noticed within a couple of seconds of it happening. It costs nothing when no
+ * scan is in flight (the loop drops back to the slow cadence the moment the
+ * route stops saying `scanning`), and it is bounded by the SERVER's deadline —
+ * the tab holds no timer of its own that could outlive the walk.
+ */
+const RACCOON_SCAN_POLL_MS = 2_000;
 
 /**
  * The QR image the login code encodes. The payload is the gateway's own
@@ -120,14 +142,14 @@ export function RaccoonTab({
   // in load() remain valid, but their values are never rendered here.
   const [_loading, setLoading] = useState(true);
   const [_error, setError] = useState<string | null>(null);
-  // The in-flight login walk: the route blocks up to its 5-minute deadline,
-  // so the button goes to a "waiting" state and the result lands in `state`.
+  // The login click's own round-trip: the route issues the scan and answers
+  // straight away, so this is SHORT. The wait the user actually experiences is
+  // the scan, which the route reports as `loginStatus:"scanning"`.
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginNote, setLoginNote] = useState<string | null>(null);
   const [modelsNote, setModelsNote] = useState<string | null>(null);
   const [idsBusy, setIdsBusy] = useState(false);
   const alive = useRef(true);
-  const pollMs = useRef(RACCOON_POLL_MS);
 
   // Stamp the header's refresh channel with the time of the last successful
   // GET. A failed read keeps the previous timestamp (the data is only stale,
@@ -139,30 +161,54 @@ export function RaccoonTab({
   }, [onReportStatus]);
 
   const load = useCallback(async () => {
-    const generation = pollMs.current;
     const at = Date.now();
     try {
       const response = await fetch(RACCOON_PATH, { headers: { accept: "application/json" }, cache: "no-store" });
-      if (!response.ok || !alive.current || generation !== pollMs.current) return;
+      if (!response.ok || !alive.current) return;
       const body = (await response.json().catch(() => null)) as RaccoonState | null;
-      if (!alive.current || generation !== pollMs.current) return;
+      if (!alive.current) return;
       if (body === null || body.ok === false) {
         setError(typeof body?.error === "string" && body.error !== "" ? body.error : "no answer");
         // A failed read does not reset the timestamp we already reported.
         return;
       }
       setState(body);
+      // A terminal walk outcome is delivered ONCE, so this is the only poll
+      // that sees it — the note is the tab's whole account of a scan that
+      // ended without the user being signed in. (`logged_in` needs no note:
+      // the card itself changes, and the effect's immediate reload picks up
+      // the freshly published roster.)
+      const outcome = typeof body.loginStatus === "string" ? body.loginStatus : null;
+      if (outcome === "timeout") setLoginNote(tt("raccoon.loginTimeout"));
+      else if (outcome === "canceled") setLoginNote(tt("raccoon.loginCanceled"));
+      else if (outcome === "failed") {
+        setLoginNote(format(tt("raccoon.loginFailed"), {
+          error: typeof body.loginError === "string" && body.loginError !== "" ? body.loginError : "unknown"
+        }));
+      } else if (outcome === "logged_in") setLoginNote(null);
       setError(null);
       report(at, null);
     } catch {
-      if (alive.current && generation === pollMs.current) setError("unable to reach the Host");
+      if (alive.current) setError("unable to reach the Host");
     } finally {
       if (alive.current) setLoading(false);
     }
-  }, [report]);
+  }, [report, tt]);
+
+  // A scan is waiting on the phone. The ROUTE owns that fact (and the walk's
+  // deadline), so the tab has no timer of its own to leak: it simply polls
+  // faster while the route says so, and drops back the moment it stops.
+  const scanning = state?.loginStatus === "scanning";
+  // What disables the login controls. The POST itself returns at once now, so
+  // the WAIT is the scan, not the request: without it in the condition the
+  // button would re-enable while its own QR is still on screen.
+  const waiting = loginBusy || scanning;
 
   // One loop owns the tab's polling: an immediate load on entry, then the
-  // cadence; the timer stops on unmount (the tab may close at any time).
+  // cadence; the timer stops on unmount (the tab may close at any time). The
+  // cadence is part of the dependency set, so entering or leaving a scan
+  // rebuilds the loop — and its immediate first load is what fetches the
+  // just-published roster the moment a scan settles.
   useEffect(() => {
     alive.current = true;
     let timer: ReturnType<typeof setInterval> | null = null;
@@ -170,7 +216,7 @@ export function RaccoonTab({
       if (alive.current) void load();
     };
     run();
-    timer = setInterval(run, pollMs.current);
+    timer = setInterval(run, scanning ? RACCOON_SCAN_POLL_MS : RACCOON_POLL_MS);
     return () => {
       alive.current = false;
       if (timer !== null) clearInterval(timer);
@@ -178,7 +224,7 @@ export function RaccoonTab({
       // tabs own their own clusters, so nothing else should show this one's).
       if (onReportStatus !== undefined) onReportStatus(null);
     };
-  }, [load, onReportStatus]);
+  }, [load, onReportStatus, scanning]);
 
   const toggle = useCallback(async (enabled: boolean) => {
     setLoginNote(null);
@@ -193,37 +239,31 @@ export function RaccoonTab({
   const startLogin = useCallback(async () => {
     setLoginBusy(true);
     setLoginNote(null);
-    // The scan URL is issued by the POST walk but delivered by the GET: fire
-    // ONE immediate fetch so the QR appears within ~100 ms of the click
-    // (the 60 s cadence would leave a full minute of "nothing happened"),
-    // then keep a fast poll while the walk is waiting, because that GET is
-    // also how the tab learns the login has settled early.
-    const quick = async () => {
-      for (let i = 0; i < 150; i++) {
-        await load();
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-    };
-    void quick();
-    // The route answers only when the walk settles (success / timeout), so
-    // the button stays "waiting" the whole time and the result repicks the
-    // card from the fresh state.
+    // The route answers the moment it has issued a scan — the walk runs behind
+    // it — so this is an ordinary short request, not a five-minute one. Its
+    // body IS the state a GET would return: the scan URL to render, and
+    // `loginStatus:"scanning"`, which is what switches the poll loop to the
+    // fast cadence.
+    //
+    // Nothing here polls. The loop above already does, and it stops being fast
+    // the instant the route stops saying "scanning" — the old 150 × 2 s local
+    // loop had no such brake, so it kept polling for the full five minutes
+    // after a scan that settled in ten seconds.
     try {
-      const body = await postJson(RACCOON_PATH, { action: "login" });
+      const body = (await postJson(RACCOON_PATH, { action: "login" })) as RaccoonState | null;
       if (alive.current) {
         if (body?.ok === true) {
-          setLoginNote(null);
+          setState(body);
         } else {
           setLoginNote(body?.error ?? tt("raccoon.error").replace("{error}", "login did not finish"));
         }
-        void load();
       }
     } catch (why) {
       if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: why instanceof Error ? why.message : String(why) }));
     } finally {
       if (alive.current) setLoginBusy(false);
     }
-  }, [load, tt]);
+  }, [tt]);
 
   const logout = useCallback(async () => {
     setLoginNote(null);
@@ -356,15 +396,15 @@ export function RaccoonTab({
                   type: "button",
                   style: S.button,
                   onClick: () => void startLogin(),
-                  disabled: loginBusy
-                }, loginBusy ? tt("raccoon.loggingIn") : tt("raccoon.reLogin"))
+                  disabled: waiting
+                }, waiting ? tt("raccoon.loggingIn") : tt("raccoon.reLogin"))
               : h("button", { type: "button", style: S.button, onClick: () => void logout() }, tt("raccoon.logout")))
           : h("button", {
               type: "button",
               style: S.button,
               onClick: () => void startLogin(),
-              disabled: loginBusy
-            }, loginBusy ? tt("raccoon.loggingIn") : tt("raccoon.login"))
+              disabled: waiting
+            }, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login"))
       ),
       // The QR encodes the scan URL the route is CURRENTLY waiting on (it
       // re-issues one per login; the tab's poll picks it up in `state.scanUrl`).
@@ -379,8 +419,8 @@ export function RaccoonTab({
     // models are registered with DSH at all — the second step, after signing in.
     h(
       "label",
-      { style: { display: "flex", gap: 8, alignItems: "center", margin: "12px 0 0", cursor: loginBusy ? "wait" : "pointer" } },
-      h("input", { type: "checkbox", checked: enabled, disabled: loginBusy, onChange: () => void toggle(!enabled) }),
+      { style: { display: "flex", gap: 8, alignItems: "center", margin: "12px 0 0", cursor: waiting ? "wait" : "pointer" } },
+      h("input", { type: "checkbox", checked: enabled, disabled: waiting, onChange: () => void toggle(!enabled) }),
       h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" } }, tt("raccoon.switch"))
     ),
     // A registration failure stays visible even while the switch is OFF —
@@ -402,7 +442,7 @@ export function RaccoonTab({
           tt,
           source: state?.modelsSource,
           enabledIds: Array.isArray(state?.enabledModelIds) ? state.enabledModelIds : null,
-          busy: idsBusy || loginBusy,
+          busy: idsBusy || waiting,
           registered: state?.providerRegistered === true,
           onToggle: (id) => {
             // Toggle against the WHOLE roster: an uncurated list (`null`) reads

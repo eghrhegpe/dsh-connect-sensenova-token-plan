@@ -40,6 +40,7 @@ import { createRaccoonPublisher } from "./raccoon-publish.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
+import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { registerRoutes } from "./routes.ts";
 import { startSideEffects, teardown } from "./lifecycle.ts";
 import { CODE } from "./codes.ts";
@@ -165,6 +166,30 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     }
   };
 
+  /**
+   * Announce an adapter update, tolerating a Host that refuses the event.
+   *
+   * One definition, because BOTH publishers need it and the two copies were
+   * already word-for-word identical: a Host that refuses the event still has
+   * the registration, and readers refresh on their own cadence.
+   * @param {string} event - the event name.
+   * @returns {void}
+   */
+  const emitEvent = (event) => {
+    try {
+      ctx.emit?.(event);
+    } catch {
+      // See above: a refused event is not a failed registration.
+    }
+  };
+
+  // The Raccoon gateway's own read cache (balance + catalogue). Separate from
+  // the console route's `cache`/`inflight` pair because they are two upstreams:
+  // forgetting the SenseNova key must not drop the Raccoon reads, and a Raccoon
+  // logout must not drop the console's. The route clears it on login/logout,
+  // where the identity it was read under changes.
+  const raccoonCache = createCoalescedFetch();
+
   // The directly-registered provider's live registration state now lives in
   // the peer-free `provider-publish.ts` module: the `publishChain` that
   // serialises publishes, the `disposed` gate, the single-point `registerPair`
@@ -183,14 +208,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     loadAdapterModule,
     getLlm: (service) => getService(service),
     resolveApiKey,
-    emit: (event) => {
-      try {
-        ctx.emit?.(event);
-      } catch {
-        // A Host that refuses the event still has the registration; readers
-        // refresh on their own cadence.
-      }
-    },
+    emit: emitEvent,
     logger: ctx.logger
   });
   const providerState = publisher.state;
@@ -224,14 +242,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     },
     getLlm: (service) => getService(service),
     loadAdapterModule: deps.loadRaccoonAdapterModule ?? (() => import("./raccoon-llm-adapter.ts")),
-    emit: (event) => {
-      try {
-        ctx.emit?.(event);
-      } catch {
-        // A Host that refuses the event still has the registration; readers
-        // refresh on their own cadence.
-      }
-    },
+    emit: emitEvent,
     logger: ctx.logger
   });
   // Mount seed: if the switch is already on and a credential was stored before
@@ -358,7 +369,8 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // touches the Token Plan publisher above.
     raccoonStore,
     raccoonSwitch,
-    raccoonPublisher
+    raccoonPublisher,
+    raccoonCache
   };
 
   // The six route handlers (trust fence, method allowances, body ceilings,

@@ -318,3 +318,20 @@
 - **修法**（2026-10-01 已做）：offline job 增加 `npm install -g @deepseek-ai/dsh`（**全局**装：不读本仓 manifest，npm 才会去拉运行时自己的 peer 闭包），`test/peer-roots.mjs` 新增 `cliRuntimeModules()`（从 `test/e2e.mjs` 抽出并共享；`npm root -g` → `<prefix>/@deepseek-ai/dsh/node_modules`，marker `dsh-base`，每进程 memo 一次）作为**最后**一个候选根。本地优先级不变，开发机仍优先跑它真正运行的那份运行时。
 - **验证**（不 push 也能验，且必须这么做）：把开发机的运行时候选**全部屏蔽**——`USERPROFILE` / `LOCALAPPDATA` / `DSH_HOME` 指向空目录（`APPDATA` 不能动：Windows 上 npm 的全局前缀取自它）——此时 `findPeerRoot()` 必须落到 CLI 运行时树，然后跑**完整 19 套件 + build-gate**，全绿才算修好（本机实测：屏蔽后 19 套件 + build-gate 全绿，`e2e` 44/44）。反证也做过：该条件下只装 2–3 个 registry 包，`store.test.mjs` 会以 `Cannot find package '@deepseek-ai/dsh-atomic-write'` 崩——**DSH 整套包互相以 peerDependencies 咬合，装子集必留悬空 import**，这就是「必须整棵运行时」的判据。
 - **教训**：**门禁的依赖获取方式也是门禁的一部分**。判据不是「CI 红没红」，而是「**这个门禁在目标环境上有没有可能变绿**」——恒红的门禁与没有门禁等价，甚至更糟：它把真回归淹进噪音，还让 release 照发。三条纪律：① **clean runner 上必须能绿**；做不到就把来源写进 workflow，**不要**在测试里加 SKIP（把 peer 依赖 SKIP 掉 = 绿着什么都没测）；② **别把 N 个套件塞进一个 `set -e` step**，一次失败会吞掉其余套件的全部信号；③ **注释里的「为什么这样做」必须与实现同步**——本次三条根因里最难发现的恰恰是那条说谎的注释，它让每个人都以为这是已知且可接受的红色。
+
+---
+
+## 31. 把「等用户」实现成「等 HTTP」：一次扫码打了网关几百次读
+
+- **现象**：小浣熊微信扫码登录的 `POST /raccoon {action:"login"}` **阻塞最长 5 分钟**（`RACCOON_LOGIN_TIMEOUT_MS`，每 2 s 轮询网关一次），期间该 HTTP 请求一直挂着；客户端为了能在这段时间里拿到二维码和最终结果，又在旁边跑了一个自己写的 **150 × 2 s** 补偿轮询。两次轮询叠起来，一次扫码要打网关 **几百次** `balance` + `model_catalog` 读——为一个「用户扫没扫码」的事实，和为一个根本不可能每秒变化的余额数字。附带三处隐性故障：① tab 刷新 / 代理超时 / Host 重启会切掉这个 POST，而 `raccoonScan` 只在正常 settle 时被清，于是变成**没人能清的幽灵扫码**；② 两个 tab（或双击）各起一次登录，后发的 code 覆盖前一个，而 GET 只能回报一个——屏上的二维码与正在轮询的码从此不匹配，**表现为「扫了没反应」且没有任何报错**；③ 被切断的 walk 不 reopen 闸门，此后的登录请求可能被永久挡在门外。
+- **根因**（三层，缺一层都只是「有点浪费」而不是「两个数量级」）：
+  1. **等待对象错了**：要等的是**人**（手机扫码），实现却让**连接**去等。HTTP handler 持有连接 5 分钟，把「用户动作」的时延直接变成「服务端资源」的占用，并且把生命周期交给了最不可靠的一方（浏览器 / 代理）。
+  2. **客户端用「更密地轮询」补偿「服务端不回答」**：补偿是**乘数不是加法**——服务端没有可读的状态，客户端就只能加密度；密度上去了，服务端的每请求成本又被乘了一遍。
+  3. **第二上游没接缓存与单飞**：Token Plan 侧早有 `cache` / `inflight`（`console-client.ts`），小浣熊这条线写的时候没有接，于是每次 GET 都实打实打两次网关读。**「复用面板的轮询基建」不等于「共享它省下的那份请求」。**
+- **修法**（2026-10-02 已做，四处一并落地）：
+  1. **发码即回**：POST 只负责生成并下发扫码（`scanUrl` / `scanCode` / `loginStatus:"scanning"`，约 100 ms），扫码 walk 转后台（`raccoonWalk`）；结果作为**事件**经 GET 的 `loginStatus` 下发一次（`logged_in` / `timeout` / `canceled` / `failed`），**读后即清**——它是事件不是状态，否则两分钟前的超时会被每次轮询反复播报。
+  2. **并发闸 + finally 清理**：`raccoonWalk !== null` 时第二次 login 返回**同一个**扫码而不是新发一个；walk 无论成败都在 `finally` 里清掉 `raccoonWalk` 与 `raccoonScan`，切断 / 抛错都 reopen 闸门。
+  3. **读侧接缓存与单飞**：新增 `src/host/coalesced-fetch.ts`（TTL 读穿 + 每 key 单飞，失败共享但不缓存），**`console-client.ts` 里两份手写的 cache/inflight 逻辑一并换成它**（顺手消掉重复），小浣熊的 `balance`(60 s) / `catalog`(300 s) 按**凭据指纹**做 key，logout / 登录成功时 `clear()`——换账号不能读到上一个人的余额。
+  4. **客户端删掉死循环**：删掉 150 × 2 s 的 `quick()`（它在扫码 10 秒成功后仍会跑满 5 分钟），改为由服务端 `loginStatus` 驱动的**双档 cadence**（扫描中 2 s，其余 60 s），闸门也在服务端——客户端不再持有任何可能活过 walk 的定时器。
+- **验证**：`test/routes.test.mjs` 新增 T 段 6 条（173 项全绿）：T1 断言 POST 在 1 s 内返回 `scanning`；T2 断言 walk 在飞时第二次 login 复用同一 `scanCode`；T3 断言 settle 后 `loginStatus === "logged_in"` 与 `loggedIn === true` **同时成立**；T4 断言终态只投递一次；T5 断言 TTL 内再轮询 5 次**零新增**网关读；T6 断言两个并发 GET 共享一次读（单飞）。**T3 当场抓到一个真 bug**：`loginStatus` 原先在响应组装的**末尾**读取，而 `loggedIn` 在**开头**读取，中间那次 `await`（读 balance）足够让 walk 落地凭据——于是同一个响应能一边说 `logged_in` 一边说没登录；修法是把事件读取挪到 `raccoonState()` 的最开头，使终态永远晚于它所描述的 state。
+- **教训**：**等待人 ≠ 等待连接**——凡是「等用户做某个动作」的流程，请求必须立刻返回，状态必须可被轮询，且**截止期限归服务端所有**（客户端持有一个比 walk 活得久的定时器，就是下一个幽灵轮询）。更要紧的是那条乘法：**客户端的轮询密度 × 服务端的每请求成本 = 真实流量**，只优化一头等于没优化；所以每接入一个新上游，缓存与单飞要和路由**一起**接上，别等流量账算出来才补。

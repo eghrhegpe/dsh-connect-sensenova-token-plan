@@ -205,6 +205,12 @@ export const zh = {
   "raccoon.rateTitle": "网关目录声明的积分倍率（0 为免费）",
   "raccoon.unregistered": "未注册——勾选上方开关即可开启。",
   "raccoon.awaitingLogin": "已启用——登录后即可注册模型。",
+  // The three terminal outcomes of a QR walk. They are EVENTS the tab reports
+  // once (the route clears them as it hands them over), not a persistent state:
+  // "signed in" is `loggedIn`, which the credential answers on every poll.
+  "raccoon.loginTimeout": "扫码超时（5 分钟内未确认）——请重新点击登录。",
+  "raccoon.loginCanceled": "扫码已取消——请重新点击登录。",
+  "raccoon.loginFailed": "登录未能保存：{error}",
   "raccoon.error": "小浣熊操作失败：{error}"
 } satisfies Record<string, string>;
 
@@ -394,6 +400,9 @@ export const en: typeof zh = {
   "raccoon.rateTitle": "Credit multiplier as declared by the gateway catalogue (0 = free)",
   "raccoon.unregistered": "Not registered — tick the switch above.",
   "raccoon.awaitingLogin": "Enabled — log in to register the models.",
+  "raccoon.loginTimeout": "The scan timed out (no confirmation within 5 minutes) — start it again.",
+  "raccoon.loginCanceled": "The scan was canceled — start it again.",
+  "raccoon.loginFailed": "Sign-in could not be saved: {error}",
   "raccoon.error": "Raccoon operation failed: {error}"
 };
 

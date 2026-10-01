@@ -13,6 +13,7 @@
  */
 import { loadPeer, installNetworkGuard, isolateHostEnv, isolateStateDir } from "./peer-roots.mjs";
 import { createFileThrottleStore } from "../src/host/throttle-store.ts";
+import { RACCOON_CREDENTIAL_REF, serializeRaccoonCredential } from "../src/host/raccoon-store.ts";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -1364,6 +1365,129 @@ async function withNetwork(stub, body) {
       posted.payload.ok === true && carried(posted.payload).length === 0,
       JSON.stringify(carried(posted.payload)));
   } catch (error) { fail("S: the raccoon diagnostics gate", error); }
+}
+
+// === T. the QR login answers at once, and one gateway read serves many polls =
+// The login walk used to BE the HTTP request: the POST blocked for up to five
+// minutes while the client ran its own 150 × 2 s poll beside it, so one scan
+// cost the gateway hundreds of reads for a balance that cannot move that fast.
+// Now the POST answers the moment the scan is issued, the walk runs behind it,
+// and the gateway reads are coalesced. This group pins all three halves — the
+// one a user sees (a button that answers), the one that silently doubled
+// (a second click issuing a second scan), and the one that was amplifying
+// traffic by two orders of magnitude.
+{
+  /** A minimal `Response` face: the parsers read `.ok` / `.status` / `.json()`. */
+  const jsonResponse = (body) => ({
+    ok: true,
+    status: 200,
+    async json() { return body; },
+    async text() { return JSON.stringify(body); }
+  });
+  /** A JWT whose `exp` is `minutes` out, so the store never sees it lapsed. */
+  const raccoonJwt = (minutes) =>
+    `header.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + minutes * 60, name: "tester" })).toString("base64url")}.sig`;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const TOKEN = raccoonJwt(60);
+  let polls = 0;
+  let balanceCalls = 0;
+  let releaseFirstPoll = null;
+  const guard = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string" ? input : String(input?.url ?? input);
+    if (url.includes("login_with_qrcode_code")) {
+      polls += 1;
+      if (polls === 1) {
+        // Hold the FIRST poll so the walk is provably in flight when the second
+        // POST arrives — that suspended call is the concurrency gate's window.
+        // It then answers SUCCESS, so the walk settles without sleeping through
+        // its 2 s cadence (a leftover walk would keep the process alive).
+        await new Promise((resolve) => { releaseFirstPoll = resolve; });
+        return jsonResponse({ code: 0, data: { status: "success", access_token: TOKEN, refresh_token: "refresh-1" } });
+      }
+      return jsonResponse({ code: 0, data: { status: "pending" } });
+    }
+    if (url.includes("/points/v1/balance")) {
+      balanceCalls += 1;
+      return jsonResponse({ code: 0, data: { available_points: 300 } });
+    }
+    if (url.includes("/model_catalog")) {
+      return jsonResponse({ code: 0, data: { categories: [{ type: "chat", models: [{ id: "sn-live", name: "Live", visible: true }] }] } });
+    }
+    if (url.includes("/refresh")) {
+      return jsonResponse({ code: 0, data: { access_token: TOKEN, refresh_token: "refresh-2" } });
+    }
+    throw new Error(`unstubbed raccoon request: ${url}`);
+  };
+
+  try {
+    const call = await mount(makeCredentials(null));
+
+    // ── T1: the request is short again ──
+    const started = Date.now();
+    const first = await call(RACCOON_PATH, makePost({ action: "login" }));
+    const elapsedMs = Date.now() - started;
+    const code1 = first.payload?.scanCode ?? null;
+    check("T1 the login POST answers when the scan is issued, not when it settles",
+      first.payload?.ok === true && first.payload?.loginStatus === "scanning"
+        && typeof code1 === "string" && code1 !== "" && elapsedMs < 1000,
+      JSON.stringify({ ok: first.payload?.ok, status: first.payload?.loginStatus, elapsedMs }));
+
+    // ── T2: one walk at a time ──
+    // A second click (or a second tab) mid-walk must not issue a second scan:
+    // the GET can only ever report one code, so the QR on screen would stop
+    // matching the one being polled — a scan that looks stuck with no error.
+    const second = await call(RACCOON_PATH, makePost({ action: "login" }));
+    check("T2 a login while a walk is in flight re-issues the SAME scan",
+      second.payload?.ok === true && second.payload?.scanCode === code1,
+      JSON.stringify({ first: code1, second: second.payload?.scanCode }));
+
+    // ── T3/T4: the outcome is an event, delivered once ──
+    for (let i = 0; i < 20 && releaseFirstPoll === null; i += 1) await sleep(10);
+    releaseFirstPoll?.();
+    let settled = null;
+    for (let i = 0; i < 40 && settled === null; i += 1) {
+      const body = (await call(RACCOON_PATH, makeRequest())).payload;
+      if (typeof body?.loginStatus === "string" && body.loginStatus !== "scanning") settled = body;
+      else await sleep(25);
+    }
+    check("T3 the settled walk reports `logged_in` and the credential landed",
+      settled !== null && settled.loginStatus === "logged_in" && settled.loggedIn === true,
+      JSON.stringify(settled === null ? null : { status: settled.loginStatus, loggedIn: settled.loggedIn }));
+    const after = (await call(RACCOON_PATH, makeRequest())).payload;
+    check("T4 a terminal login outcome is delivered once, then cleared",
+      Object.hasOwn(after, "loginStatus") === false, JSON.stringify(after.loginStatus ?? null));
+
+    // ── T5: the fast poll no longer amplifies into gateway traffic ──
+    // This is the whole point: during a scan the tab polls every 2 s, and each
+    // of those used to cost a balance read AND a catalogue read.
+    const before = balanceCalls;
+    for (let i = 0; i < 5; i += 1) await call(RACCOON_PATH, makeRequest());
+    const last = (await call(RACCOON_PATH, makeRequest())).payload;
+    check("T5 five more polls inside the TTL cost no further balance read",
+      balanceCalls - before === 0 && last?.balance === 300,
+      JSON.stringify({ calls: balanceCalls - before, balance: last?.balance }));
+
+    // ── T6: concurrent polls share one flight (a fresh cache, signed in) ──
+    const signedIn = await mount(makeCredentials(null, {
+      refs: {
+        [RACCOON_CREDENTIAL_REF]: serializeRaccoonCredential({
+          accessToken: TOKEN, refreshToken: "refresh-3", expiresAtMs: Date.now() + 3600_000
+        })
+      }
+    }));
+    const before2 = balanceCalls;
+    const [left, right] = await Promise.all([
+      signedIn(RACCOON_PATH, makeRequest()),
+      signedIn(RACCOON_PATH, makeRequest())
+    ]);
+    check("T6 two concurrent polls share ONE balance read (single flight)",
+      balanceCalls - before2 === 1 && left.payload?.balance === 300 && right.payload?.balance === 300,
+      JSON.stringify({ calls: balanceCalls - before2, left: left.payload?.balance, right: right.payload?.balance }));
+  } catch (error) { fail("T: the raccoon login walk and its read cache", error); } finally {
+    globalThis.fetch = guard;
+  }
 }
 
 // The Host routes are exercised against a stubbed console; nothing here may
