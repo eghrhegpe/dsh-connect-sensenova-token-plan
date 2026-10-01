@@ -37,7 +37,7 @@
 | **Client（前端）** | `src/client/*.ts`（构建为根 `client.js`） | 浏览器侧，随页面加载 | `npm run build:client` 重建后浏览器刷新即可 |
 
 - `index.ts`：Host 入口——注册只读路由 `/api/dsh-connect-sensenova-token-plan/snapshot`（聚合控制台数据，401 自动续期重试一次）+ 账号配置路由 + 各 store 接线与 side-effect 编排。
-- `routes.ts`：**路由主模块**（1074 行，本仓库最大的 Host 文件）——snapshot / account / api-key / provider / models / draw / raccoon 七条路由的 handler、同源闸、body 上限、`writeJson` 全部在此；`index.ts` 只保留 HTTP 面与装配。
+- `routes.ts`：**路由主模块**（990 行，本仓库最大的 Host 文件）——snapshot / account / api-key / provider / models / draw / raccoon 七条路由的 handler、同源闸、body 上限、`writeJson` 全部在此；`index.ts` 只保留 HTTP 面与装配。小浣熊的**读模型**已抽出为 `raccoon-status.ts`（原先它是 handler 内一个 190 行闭包），这里只剩扫码 walk 与四个 mutation。
 - `lifecycle.ts`：Host 生命周期——`registerRoutes` / `startSideEffects`（draw 工具注册、catalog seed）/ `teardown`（dispose + release + off×5）。
 - `host-config.ts`：配置契约——`CONFIG_DEFAULTS`、`resolveSettings` / `resolveAuthOverrides`（含嵌套 `auth:` 块拒绝）、`isAdmitted` 同源闸、`hostName` 解析。
 - `codes.ts`：全部错误码与 IAM 平台原因码的唯一声明处。`sensenova-auth.ts` 产出、`token-store.ts` 判定是否 parked、`index.ts` 判定是否属于「拿不到令牌」，三处都从这里取。
@@ -48,7 +48,7 @@
 - `console-client.ts`：控制台与模型目录的网络请求，带短生命周期缓存与 single-flight。
 - `parsers.ts`：响应解析层——字符串数值 / epoch 归一、`checkShape` 漂移检测、`parseTrend` 对 points 求和、`identifyVisionModel` 视觉模型识别。
 - `trace.ts`：登录 trace 落盘（成功/失败，值级脱敏，仅留最近 20 个，权限 0600）。
-- `util.ts`：共享工具函数（`str` / `num` / `obj` 等类型安全读取器）。
+- `util.ts`：共享工具函数（`str` / `num` / `obj` 等类型安全读取器）+ 两个共享原语：`retryBounded`（有界重试窗口，PITFALLS §31 的重试收敛）与 `optional`（可选 store 调用的守卫，PITFALLS §33）。
 - `types.ts`：Host 侧共享类型定义。
 - `state-store.ts`：状态文件公共原语——版本载荷 + 原子写 + 0600 + `createStateReadCache`（TTL 读缓存）+ `profileSegment` / `profileStateDir`（profile 分段，见 PITFALLS §23）。
 - `catalog-store.ts`：模型目录缓存（version 载荷、allow-list）；`provider-store.ts`：provider 开关（面板值 > 配置默认值）；`draw-store.ts`：出图开关与模型偏好；`api-key-store.ts`：推理 Key 存取（credentials → memory → env 优先级）。四个 store 同纪律：版本化、temp + rename 原子写、0600、损坏即忽略、按 profile 分段。
@@ -61,6 +61,7 @@
 - `draw.ts`：出图模块（peer-free）——结构化识别 image-output 模型、端点拼接、wire body 钳制、响应解析、失败分诊（429 配额 vs 限频）、失败冷却。
 - `doctor.ts`：只读状态文件诊断（peer-free，`npm run doctor` / `doctor:json`）——回答「这台机器上 provider 到底是开是关」（PITFALLS §22）。
 - `raccoon.ts`：第二上游协议层——微信扫码登录走查、信封解析、refresh 轮换、余额与目录读取。
+- `raccoon-status.ts`：小浣熊面板的**读模型**（peer-free）——把 switch / 凭据 / 余额 / roster / 注册态 / `?debug=1` 脚手架组装成一次 GET 的答案。余额 60 s、目录 300 s，按**凭据指纹**走 `coalesced-fetch`；终态登录事件在**首个 await 之前**读取（PITFALLS §31 的 T3 修复）。吃 `store` / `switchStore` / `publisher` / `read` / `login` 五个注入项，因此可脱开路由单测（`test/raccoon-status.test.mjs`）；walk 本身仍归 `routes.ts`。
 - `raccoon-store.ts`：小浣熊凭据（DSH 凭据服务引用）；`raccoon-switch-store.ts`：小浣熊开关（按 profile 分段）；`raccoon-models.ts`：小浣熊模型目录归一化与描述符映射；`raccoon-publish.ts` + `raccoon-llm-adapter.ts`：小浣熊独立 provider 注册与 adapter（与 Token Plan 注册完全隔离——**隔离的是状态与凭据，不是代码**：两个 publisher 实例的 `state`、开关、凭据引用互不相干，而两者的发布状态机与 adapter 装配共用 `publish-core.ts` / `llm-adapter-core.ts`，理由见 §5.5）。
 - `client.js`：Plugins 页内的配置卡与三个 tab（积分额度 / 接入 API / 小浣熊）+ 账号表单（React，纯主题令牌样式）。内部 `interpretSnapshot` 把 Host 的响应读成 `(data, error)` 对，再交给决策块。
 - 测试基建：`client-surface.js` / `panel-decision.js` / `panel-render.js` —— 把 `client.js` 作为模块加载后物化 `panel` 测试面。不进运行时、不进 `files` 打包清单。

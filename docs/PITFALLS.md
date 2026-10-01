@@ -352,3 +352,13 @@
   4. **顺手抓到并修掉一个真 bug**：raccoon 的 "no token / `not_configured`" 分支只 `release()` 却**不清 `state.built`**（Token Plan 侧的 switch-off 分支清了）。残留的 `built` 会成为**下一次** publish 的回滚目标——一次失败发布会把一个 release 已被调用的 adapter 重新注册回 Host。统一走 `unregister` 后消失。
 - **验证**：收敛后全域复跑零漂移——provider 201、raccoon **122**（+1 为新增的 stale-`built` 断言）、wiring 46、routes 173、contract 98、store-baseline 48 帧、typecheck 2 配置 0 错、e2e 44/44。adapter 一对的逐字相同行 **73 → 7**（Jaccard 0.63 → 0.23），publisher 一对 **101 → 81**，且剩下的 81 行绝大多数是 state 字段声明与 import 行（数据，不是逻辑）。
 - **教训**：**隔离由实例边界保证，不由代码副本保证**。判断"该不该有第二份"的问法不是"两个文件像不像"，而是"这些行能不能被一个测试同时钉住"——能就抽，不能才留。尤其：**需要复制的代码，优先检查它是不是回滚 / 降级 / 清理路径**；这类代码一年跑不了几次，却决定了出事时是"退回去"还是"烂在那里"。
+
+---
+
+## 33. 「看起来有防护」的表达式：`(x ? x.y() : null).catch(...)`
+
+- **现象**：把 `/raccoon` handler 里那个 190 行的 `raccoonState` 闭包抽成 `raccoon-status.ts` 时，`switchStore` 从「wire 里必然非空的实例」变成了**显式可选的注入项**。抽出后跑新写的单测，`switchStore: null` 直接抛 `TypeError: Cannot read properties of null (reading 'catch')`——而这一行原本长这样：`const switchState = await (switchStore ? switchStore.enabled() : null).catch(() => null);`。它在生产里活了很久，因为生产里 `raccoonSwitch` 永远是个对象：这条分支**从来没被走到过**。
+- **根因**：三元只保护了**调用**，`.catch` 却挂在三元**结果**上——缺席分支给的是 `null` 而不是 promise。于是这个"防御性"表达式只在**不需要防御的那一支**上是安全的，真正需要它的那一支直接崩。更麻烦的是它**读起来是有防护的**（明明有个 `?` 和一个 `.catch`），review 的眼球滑过去不留痕；这也解释了为什么它没在写的时候被发现。
+- **修法**（2026-10-02 已做）：`optional(value)` 进 `util.ts` —— `Promise.resolve(value).catch(() => null)`，把「不是 promise」和「rejected promise」统一读成"没有答案"，守卫就落在**调用点**而不是调用结果上。全仓**四处**一并换掉：新模块的 `raccoonSwitch.enabled()` / `enabledIds()`，以及 `routes.ts` 里同形状的 `drawStore.enabled()` / `drawStore.modelId()`（画图路由的 `answer()`，每请求都跑）——抽公共原语而不是只修自己这一处，理由与 PITFALLS §32 同：**同类 bug 会漂移，收在一处才不再有第二份可漂移的副本**。
+- **验证**：`test/raccoon-status.test.mjs` F 组用 `switchStore: null` 直接驱动，断言是「off + 降级」而不是抛错；修前同一输入会把**整组**检查一起带走（异常逃出组内 try，后续断言全部不执行）。新套件 46 项，`package.test.mjs` 的三方名册钉子（磁盘 ↔ `npm test` ↔ CI）同时钉住它的注册。
+- **教训**：**判断一个表达式是否真有防护，要看哪一条分支会走到那层防护，再用一个真的走那条分支的测试证明它**。`a ? a.b() : null` 这类形状正是"看起来有防护"的重灾区。顺带一个正面收获：把闭包抽成注入式模块的额外收益，不是行数变少，而是**缺席变成了可表达、可达的状态**——在路由里它被 wire 保证为非空，这个 bug 本可以永久潜伏。抽模块（`routes.ts` 1243 → 990 行，读模型 387 行、可脱开路由单测）真正的价值在此。

@@ -124,6 +124,7 @@ jobs:
           node test/draw.test.mjs
           node test/doctor.test.mjs
           node test/raccoon.test.mjs
+          node test/raccoon-status.test.mjs
           node test/state-segmentation.test.mjs
           # The typecheck gate is not a *.test.mjs (same exemption as the build
           # gate): it runs the local tsc pinned in devDependencies against

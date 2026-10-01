@@ -126,6 +126,26 @@ export function numOrNull(value) {
 }
 
 /**
+ * Await an OPTIONAL store call, reading "there is no store" as "no answer".
+ *
+ * The shape this replaces looks defensive and is not:
+ * `(store ? store.enabled() : null).catch(() => null)` guards the CALL but
+ * applies `.catch` to the ternary's RESULT — and the absent branch yields a
+ * bare `null`, so the expression throws exactly on the branch the guard was
+ * written for. It stays invisible because the store is always wired in
+ * production, which is the one case where it works (PITFALLS §33).
+ *
+ * Use it as `await optional(store ? store.enabled() : null)`: the guard then
+ * sits on the value, where "not a promise" and "a rejected promise" both read
+ * as `null`.
+ * @param {unknown} value - the call's result (usually a promise), or `null`.
+ * @returns {Promise<unknown>} the value, or `null` on absence or rejection.
+ */
+export function optional(value) {
+  return Promise.resolve(value).catch(() => null);
+}
+
+/**
  * An error carrying a stable code the panel can branch on.
  *
  * The single constructor for every failure this plugin produces. `extra`

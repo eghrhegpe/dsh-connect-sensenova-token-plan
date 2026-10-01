@@ -43,6 +43,7 @@ npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（�
 | `test/peer-contract.test.mjs` | **peer 契约护栏（peer 可达时）**：钉死「peer 判 QUOTA + 含限频信号 → 本插件 `reclassifyFinish` 纠正回 RATE_LIMIT」的端到端行为契约；`extractStructuredType` 必须仍能从 peer 拼好的 message 回捞结构化 type；peer 缺席则 SKIP |
 | `test/doctor.test.mjs` | **CLI 诊断（peer-free）**：`doctor.ts` 对状态文件只读扫描——provider / draw / catalog 开关与生效值、profile 分段目录、零凭据读取 |
 | `test/raccoon.test.mjs` | **第二上游（peer-free）**：小浣熊协议层（扫码信封解析、refresh 轮换、余额/目录读取）、两个 store、描述符映射、publisher 状态机、QR 编码器、开关 store |
+| `test/raccoon-status.test.mjs` | **小浣熊面板读模型（peer-free）**：`raccoon-status.ts` 的 `readRaccoonStatus` 直接以假 store/假缓存驱动——终态事件在**首个 await 之前**读取（T3 修复的排序）、`?debug=1` 脚手架只在显式 opt-in 时出现且代理密码/遮蔽凭据只以指纹出网、缓存键按**凭据指纹**且余额 60 s/目录 300 s（真 `coalesced-fetch` 对桩 fetch 验一次窗口一次调用）、roster 的 live/empty/unreadable 三态、过期凭据的原地续期与过期事实、可选 switch/store 缺席时降级不崩 |
 | `test/state-segmentation.test.mjs` | **PITFALLS §23 分段形状门禁（peer-free，只读源码）**：catalog / provider / draw / raccoon-switch 四个开关态必须走 `profileStateDir(name, profile)`、`profileStateDir(name, null)` 必须回退共享目录、throttle 与凭据 store（api-key / raccoon）**故意不分段**；`index.ts` 把 `profile` 只传给那四个、`createFileThrottleStore()` 不得带 profile；别名「统一它们」即红 |
 | `test/wiring.test.mjs` | **真实 Cordis 容器**里的装配：`inject` 解析、服务注册、路由挂载与卸载、配置错误；第三步的可选 `ctx.get("llm")` 注册对（`registerAdapter` + `registerConfigurableProviders`，id `sensenova-token-plan`）、opt-in 关闭不注册、fiber dispose 释放注册对与三条路由 |
 | `test/live-jwks.test.mjs` | （仅 `test:live`）真实拉取 JWKS 文档，确认封包公钥可达 |
