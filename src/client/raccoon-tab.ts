@@ -101,7 +101,19 @@ function qrImageOf(scanUrl: string | null | undefined): unknown {
  * @param {Tt} props.tt - the dictionary.
  * @returns {unknown} the tab's card tree.
  */
-export function RaccoonTab({ tt }: { tt: Tt }): unknown {
+export function RaccoonTab({
+  tt,
+  onReportStatus
+}: {
+  tt: Tt;
+  // A channel to the page's header: the raccoon tab is a SECOND upstream with
+  // its own poll, so its freshness + refresher belong in the pinned header's
+  // right cluster (the old global "刷新" only re-fetched the quota snapshot
+  // and silently skipped this tab). The tab calls this with its latest
+  // `updatedAt`/error on every successful GET — a state lift, so the header
+  // re-renders live; passing `null` on unmount clears the cluster.
+  onReportStatus?: (status: { updatedAt: number; error: string | null; onRefresh: () => void } | null) => void;
+}): unknown {
   const [state, setState] = useState<RaccoonState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -114,8 +126,18 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
   const alive = useRef(true);
   const pollMs = useRef(RACCOON_POLL_MS);
 
+  // Stamp the header's refresh channel with the time of the last successful
+  // GET. A failed read keeps the previous timestamp (the data is only stale,
+  // not gone) but still forwards the error so the header can surface it.
+  const report = useCallback((updatedAt: number, err: string | null) => {
+    if (onReportStatus !== undefined && alive.current) {
+      onReportStatus({ updatedAt, error: err, onRefresh: () => void load() });
+    }
+  }, [onReportStatus]);
+
   const load = useCallback(async () => {
     const generation = pollMs.current;
+    const at = Date.now();
     try {
       const response = await fetch(RACCOON_PATH, { headers: { accept: "application/json" }, cache: "no-store" });
       if (!response.ok || !alive.current || generation !== pollMs.current) return;
@@ -123,16 +145,18 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
       if (!alive.current || generation !== pollMs.current) return;
       if (body === null || body.ok === false) {
         setError(typeof body?.error === "string" && body.error !== "" ? body.error : "no answer");
+        // A failed read does not reset the timestamp we already reported.
         return;
       }
       setState(body);
       setError(null);
+      report(at, null);
     } catch {
       if (alive.current && generation === pollMs.current) setError("unable to reach the Host");
     } finally {
       if (alive.current) setLoading(false);
     }
-  }, []);
+  }, [report]);
 
   // One loop owns the tab's polling: an immediate load on entry, then the
   // cadence; the timer stops on unmount (the tab may close at any time).
@@ -147,8 +171,11 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
     return () => {
       alive.current = false;
       if (timer !== null) clearInterval(timer);
+      // The tab is closing: drop its freshness from the header (the quota/api
+      // tabs own their own clusters, so nothing else should show this one's).
+      if (onReportStatus !== undefined) onReportStatus(null);
     };
-  }, [load]);
+  }, [load, onReportStatus]);
 
   const toggle = useCallback(async (enabled: boolean) => {
     setLoginNote(null);

@@ -64,6 +64,18 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
   // INSIDE the quota tab, so the api and raccoon tabs (both independent of
   // the Token Plan console) stay reachable before a snapshot lands.
   const [activeTab, setActiveTab] = useState<"quota" | "api" | "raccoon">("quota");
+  // The pinned header is a SHELL: it shows the plugin identity (the card hosts
+  // three tabs, so it is never a quota-only label) and, on its right, the
+  // status cluster of the ACTIVE tab. The quota and api tabs read the Token
+  // Plan snapshot, so they share `updatedAt` + `load`; the raccoon tab is a
+  // SECOND upstream with its own poll, and reports its own freshness here
+  // (it writes `updatedAt`/`error`/`onRefresh` on mount and on every
+  // successful GET). A state, not a ref, so the header re-renders live when
+  // the raccoon tab refreshes. When the tab is not mounted the value is null
+  // and the header shows nothing raccoon-specific — the chip below is
+  // quota-only and must never bleed into the api/raccoon rows (pinned by
+  // render.test.mjs group H2's reverse-pin).
+  const [raccoonStatus, setRaccoonStatus] = useState<{ updatedAt: number; error: string | null; onRefresh: () => void } | null>(null);
 
   // The Host half registers the dictionaries, but a runtime language switch
   // only reaches this page through the locale face's subscribe: without it a
@@ -211,13 +223,20 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
       // and the form never disagree about why.
       ? h("span", { style: S.chip, title: auth.error || guidance || "" }, tt("auth.needsLogin"))
       : h("span", { style: S.chip }, tt("auth.selfRenew"));
-  // The login state and its editor are shown UNCONDITIONALLY (whenever the
-  // snapshot carries the Host's auth block): a reader must always be able to
-  // see the token state, re-type credentials to re-point a still-valid grant,
-  // or clear the saved account. Gating this on `hasAccount` / `needsAccount`
-  // made the "middle state" (grant still alive, saved account cleared) a dead
-  // end: the section card vanished with `hasAccount` — the user was locked out
-  // of their own account with no re-entry path until the grant died.
+  // The right-hand cluster of the pinned header, owned by the ACTIVE tab.
+  // Extracted into a hook-free {@link HeaderStatus} so the render suite can
+  // mount it directly and pin that quota-only copy (the renewal chip, the
+  // stale-data banner) never reaches the api/raccoon tabs.
+  const headerStatus = h(HeaderStatus, {
+    activeTab,
+    hasData: data !== null,
+    updatedAt,
+    failure,
+    authChip,
+    raccoonStatus,
+    tt,
+    onRefreshQuota: () => void load()
+  });
   const authManage = auth !== null;
   // The quota block can be empty with the console unreachable (no account, a
   // rejected token, the console down): the Host answers `ok:true` with an
@@ -356,7 +375,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
             h(
               SectionCard,
               { title: tt("raccoon.title"), open: true, onToggle: () => {}, tt },
-              h(RaccoonTab, { tt })
+              h(RaccoonTab, { tt, onReportStatus: setRaccoonStatus })
             )
           )
         : h(
@@ -384,7 +403,10 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
     "div",
     { style: S.page, "data-dsh-plugin": "dsh-connect-sensenova-token-plan" },
     // The bar is pinned (flex:none); everything below scrolls inside
-    // `S.scroll` instead of being clipped by the shell's center column.
+    // `S.scroll` instead of being clipped by the shell's center column. The
+    // bar is a SHELL: a plugin-identity title on the left, and the ACTIVE
+    // tab's own status cluster on the right — never a quota-only label that
+    // pretends to be the global title.
     h(
       "div",
       { style: S.headerBar },
@@ -392,15 +414,10 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
         "div",
         { style: S.header },
         h("h1", { style: S.title }, tt("panel.title")),
-        h("span", { style: S.updated }, data ? format(tt("panel.updated"), { time: clock(updatedAt / 1000) }) : ""),
-        authChip,
         h("span", { style: S.spacer }),
-        // With data on screen a failure is a stale-data warning, so it rides
-        // in the header; without data the body already explains it.
-        failure && data
-          ? h("span", { style: S.error, role: "status", title: failure.message }, format(tt("panel.error"), { error: failure.message }))
-          : null,
-        h("button", { type: "button", style: S.button, onClick: () => void load() }, tt("panel.refresh")),
+        // The right side is the active tab's cluster (更新于 / chip / banner /
+        // 刷新), built above so each tab owns only its own facts.
+        headerStatus,
         onClose ? h("button", { type: "button", style: S.button, onClick: () => onClose() }, tt("panel.back")) : null
       )
     ),
@@ -409,5 +426,89 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
       { style: S.scroll },
       h("div", { style: S.content }, body)
     )
+  );
+}
+
+/**
+ * The right-hand cluster of the pinned header.
+ *
+ * The header is a SHELL: a plugin-identity title on the left, and this — the
+ * ACTIVE tab's own status — on the right. Quota and api read the same Token
+ * Plan snapshot, so both show its `updatedAt` and share the quota refresher;
+ * only quota carries the renewal chip and the stale-data banner, because those
+ * describe the console login token that the api (API key) and raccoon (a
+ * separate gateway credential) tabs have nothing to say about. The raccoon tab
+ * reports its OWN freshness + refresher through `raccoonStatus`, so the header
+ * "刷新" finally refreshes it too (before, `load()` only re-fetched the quota
+ * snapshot and the raccoon poll was separate — the button silently skipped the
+ * third tab). Until the raccoon tab mounts, `raccoonStatus.current` is null and
+ * nothing raccoon-specific renders.
+ *
+ * Hook-free on purpose: the render suite mounts it directly to pin the
+ * invariant that quota-only copy (renewal chip, stale-data banner) never
+ * appears for the api/raccoon tabs.
+ *
+ * @param {object} props
+ * @param {"quota" | "api" | "raccoon"} props.activeTab - the active tab.
+ * @param {boolean} props.hasData - whether the snapshot carried pools.
+ * @param {number} props.updatedAt - epoch seconds of the last snapshot.
+ * @param {{message: string} | null} props.failure - stale-data failure.
+ * @param {unknown} props.authChip - the quota-only renewal/needs-login chip.
+ * @param {{updatedAt:number;error:string|null;onRefresh:() => void} | null} props.raccoonStatus
+ *   - the raccoon tab's reported freshness + refresher, or null when that tab
+ *   is not mounted.
+ * @param {Tt} props.tt - the dictionary.
+ * @param {() => void} props.onRefreshQuota - re-fetch the Token Plan snapshot.
+ * @returns {unknown} the status cluster tree, or null when nothing applies.
+ */
+export function HeaderStatus({
+  activeTab,
+  hasData,
+  updatedAt,
+  failure,
+  authChip,
+  raccoonStatus,
+  tt,
+  onRefreshQuota
+}: {
+  activeTab: "quota" | "api" | "raccoon";
+  hasData: boolean;
+  updatedAt: number;
+  failure: { message: string } | null;
+  authChip: unknown;
+  raccoonStatus: { updatedAt: number; error: string | null; onRefresh: () => void } | null;
+  tt: Tt;
+  onRefreshQuota: () => void;
+}): unknown {
+  // The raccoon tab owns a separate upstream; its cluster is whatever the tab
+  // last reported (its own updatedAt + its own refresh). Nothing quota-specific
+  // may appear here.
+  if (activeTab === "raccoon") {
+    const status = raccoonStatus;
+    if (status === null) return null;
+    return h(
+      "span",
+      { style: S.cluster },
+      status.updatedAt > 0
+        ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: clock(status.updatedAt / 1000) }))
+        : null,
+      h("button", { type: "button", style: S.button, onClick: () => status.onRefresh() }, tt("panel.refresh"))
+    );
+  }
+  // Quota and api share the Token Plan snapshot's `updatedAt` and refresher.
+  return h(
+    "span",
+    { style: S.cluster },
+    hasData ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: clock(updatedAt / 1000) })) : null,
+    // The renewal chip is quota-ONLY: gated on `activeTab === "quota"`, never on
+    // `hasData` alone, so the api tab (an API key, not a console grant) and the
+    // raccoon tab (a separate credential) never show "令牌自动续期中".
+    activeTab === "quota" ? authChip : null,
+    // The stale-data banner is quota-specific too: the console outage that
+    // produces it is unrelated to the api/raccoon tabs.
+    activeTab === "quota" && failure !== null && hasData
+      ? h("span", { style: S.error, role: "status", title: failure.message }, format(tt("panel.error"), { error: failure.message }))
+      : null,
+    h("button", { type: "button", style: S.button, onClick: () => onRefreshQuota() }, tt("panel.refresh"))
   );
 }

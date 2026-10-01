@@ -14,7 +14,7 @@
  * is the tree React would receive.
  */
 import { render, styles as S, texts, findElement, findAll } from "./panel-render.js";
-import { surface } from "./client-surface.js";
+import { h, surface } from "./client-surface.js";
 
 const results = [];
 function check(name, condition, detail = "") {
@@ -643,6 +643,58 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     check("the tab bar renders before the first snapshot lands",
       firstFrame.includes("tab.quota") && firstFrame.includes("tab.api") && firstFrame.includes("tab.raccoon"),
       firstFrame.join("\n"));
+  }
+
+  // === H2b. quota-only copy never leaks into the api/raccoon header =========
+  // The pinned header is now a SHELL: its right cluster is produced by
+  // `HeaderStatus`, which each tab feeds with its own facts. The renewal chip
+  // ("令牌自动续期中") and the stale-data banner ("读取失败") describe the
+  // console login token, which the api tab (an API key) and the raccoon tab (a
+  // separate gateway credential) have nothing to say about. This pin guards the
+  // exact regression the demotion was meant to prevent: a quota-only chip
+  // growing back into a "global" header. It mirrors the raccoon-leak pin at
+  // group J (render.test.mjs:~837) that keeps the second upstream from borrowing
+  // the Token Plan's rate tooltip.
+  {
+    const quotaChip = h("span", { style: {}, title: "x" }, "auth.selfRenew");
+    const quotaFailure = { message: "boom" };
+    // The raccoon tab's reported freshness (the value `PanelPage` lifts into
+    // state and passes straight to `HeaderStatus` — not a ref).
+    const raccoonReported = { updatedAt: 1_700_000_000_000, error: null, onRefresh: () => {} };
+
+    // Quota: chip + banner ARE expected.
+    const quotaCluster = rendered(render.HeaderStatus, {
+      activeTab: "quota", hasData: true, updatedAt: 1_700_000_000_000,
+      failure: quotaFailure, authChip: quotaChip, raccoonStatus: null, tt, onRefreshQuota: () => {}
+    });
+    check("quota header carries the renewal chip", quotaCluster.includes("auth.selfRenew"), quotaCluster.join("\n"));
+    check("quota header carries the stale-data banner", quotaCluster.includes("panel.error"), quotaCluster.join("\n"));
+
+    // API: NEITHER the chip nor the banner may appear — it is a different
+    // credential, not the console grant the chip speaks to.
+    const apiCluster = rendered(render.HeaderStatus, {
+      activeTab: "api", hasData: true, updatedAt: 1_700_000_000_000,
+      failure: quotaFailure, authChip: quotaChip, raccoonStatus: null, tt, onRefreshQuota: () => {}
+    });
+    check("api header does NOT carry the renewal chip", !apiCluster.includes("auth.selfRenew"), apiCluster.join("\n"));
+    check("api header does NOT carry the stale-data banner", !apiCluster.includes("panel.error"), apiCluster.join("\n"));
+
+    // Raccoon: only its own reported cluster (更新于 + 刷新), never the quota
+    // chip or banner.
+    const raccoonCluster = rendered(render.HeaderStatus, {
+      activeTab: "raccoon", hasData: true, updatedAt: 1_700_000_000_000,
+      failure: quotaFailure, authChip: quotaChip, raccoonStatus: raccoonReported, tt, onRefreshQuota: () => {}
+    });
+    check("raccoon header does NOT carry the renewal chip", !raccoonCluster.includes("auth.selfRenew"), raccoonCluster.join("\n"));
+    check("raccoon header does NOT carry the stale-data banner", !raccoonCluster.includes("panel.error"), raccoonCluster.join("\n"));
+    check("raccoon header shows its own 更新于 when it has reported", raccoonCluster.includes("panel.updated"), raccoonCluster.join("\n"));
+
+    // Raccoon, before it has reported (tab not yet mounted): no cluster at all.
+    const raccoonIdle = rendered(render.HeaderStatus, {
+      activeTab: "raccoon", hasData: true, updatedAt: 1_700_000_000_000,
+      failure: quotaFailure, authChip: quotaChip, raccoonStatus: null, tt, onRefreshQuota: () => {}
+    });
+    check("raccoon header is empty before the tab reports", raccoonIdle.length === 0, raccoonIdle.join("\n"));
   }
 }
 

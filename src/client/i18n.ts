@@ -9,8 +9,14 @@ import type { Tt } from "./runtime.ts";
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  "entry.label": "积分面板",
-  "panel.title": "积分面板",
+  // `entry.label` is the Plugins-page card name. It was "积分面板" while the
+  // plugin was a single-topic quota card; now the card hosts three tabs
+  // (额度 / 接入 API / 小浣熊), so the name is the plugin, not one tab.
+  "entry.label": "商汤接入",
+  // The in-card page title used to repeat the card name ("积分面板"). With the
+  // pinned header demoted to a shell whose right side is filled by the ACTIVE
+  // tab, the title is the plugin identity, never a quota-only label.
+  "panel.title": "商汤接入",
   "panel.back": "返回会话",
   "panel.refresh": "刷新",
   "panel.updated": "更新于 {time}",
@@ -202,8 +208,8 @@ export const zh = {
 
 /** English dictionary, mirroring every zh key. */
 export const en: typeof zh = {
-  "entry.label": "Credits",
-  "panel.title": "Credits",
+  "entry.label": "SenseNova",
+  "panel.title": "SenseNova",
   "panel.back": "Back to conversation",
   "panel.refresh": "Refresh",
   "panel.updated": "Updated {time}",

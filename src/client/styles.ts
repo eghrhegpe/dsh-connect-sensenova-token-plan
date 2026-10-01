@@ -25,6 +25,10 @@ export const S = {
   title: { margin: 0, fontSize: 20, fontWeight: 600, lineHeight: "28px" },
   updated: { color: "var(--dsw-alias-label-secondary)", fontSize: 12 },
   spacer: { flex: 1 },
+  // The active tab's status cluster on the right of the pinned header: a
+  // compact row (更新于 + chip + banner + 刷新) that stays put while the body
+  // scrolls. `inline-flex` lets it shrink instead of pushing the title off.
+  cluster: { display: "inline-flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" },
   button: BUTTON,
   sectionTitle: { margin: "22px 0 10px", fontSize: 13, fontWeight: 600, color: "var(--dsw-alias-label-secondary)" },
   // Content sections are workbuddy-style collapsible cards: a bordered

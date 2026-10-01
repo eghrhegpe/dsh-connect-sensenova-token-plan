@@ -64,7 +64,7 @@ import {
 import { ProviderStatus, ProviderRegStatus, ProviderSwitch, DrawSwitch } from "./provider-controls.ts";
 import { ApiKeyForm, ProviderForm } from "./api-key-form.ts";
 import { ModelPicker, ModelRoster } from "./model-picker.ts";
-import { PanelPage } from "./panel-page.ts";
+import { HeaderStatus, PanelPage } from "./panel-page.ts";
 import { RaccoonRoster, RaccoonTab } from "./raccoon-tab.ts";
 import { buildQrMatrix, qrDataUrl } from "./qr.ts";
 
@@ -122,6 +122,7 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       ModelRoster,
       ModelPicker,
       PanelPage,
+      HeaderStatus,
       RaccoonTab,
       RaccoonRoster
     }),
