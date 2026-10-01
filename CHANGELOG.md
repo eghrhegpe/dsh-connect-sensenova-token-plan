@@ -18,6 +18,14 @@
 - **refresh 端点路径修正**（`src/host/raccoon.ts`）：`/api/web/auth/v1/refresh_token` → `/api/web/auth/v1/refresh`。前者用无效 token 实测得纯文本 `404 page not found`（路径不存在）；后者得 `400 {"code":100002,"message":"params_invalid_error"}`（路径存在、已抵达业务层）。此前多抄的 `_token` 后缀让**每次续期都失败**——access token 过期后只能重新扫码登录。
 - **balance 字段名补齐 `available_points`**（`src/host/raccoon.ts`）：实测响应为 `{"available_points":10129,...}`，旧解析只认 `balance / available / amount`，读不到即返回 `null`，于是面板把拿不到当「积分余额 0」显示。
 
+### 两处面板常驻入口（随本版一并到达用户）
+
+登录态修好只解决了「能不能用」，用户还常缺两个「去哪儿办」的入口——API Key 表单的官网链接此前仅在未配置 key 时闪现，配置完就消失，而配额管理恰恰是配置完之后更需要的事；小浣熊 tab 则完全没有指向官网的路。
+
+- **API Key 表单的官网链接改为常驻**（`src/client/api-key-form.ts`）：去掉 `hasApiKey !== true` 的条件渲染，改为按状态切文案——未配置走原「还没有 API Key？前往官网免费获取 →」，已配置走新增的「前往官网管理额度 →」。链接始终在场，指向同一处 `SENSENOVA_SIGNUP_URL`。
+- **小浣熊 tab 底部补官网入口**（`src/client/raccoon-tab.ts`、`src/client/const.ts`）：新增 `RACCOON_SITE_URL`（`https://xiaohuanxiong.com/`）与 `raccoon.clientLink`「下载商汤小浣熊客户端，领取限时积分 →」。沿用 `SENSENOVA_SIGNUP_URL` 的同一套纪律：纯公开 URL、只在新 tab 打开、从不用于带凭据的请求。
+- 新增两处 i18n 键（`llm.keyManageHint` / `raccoon.clientLink`），中英文成对。
+
 ## [0.4.5] — 2026-10-01
 
 出图请求体对齐官方文档：`sensenova_draw_image` 现在会显式携带 `output_format` 与 `watermark`，并在 agent 工具参数面暴露对应入口。
