@@ -267,7 +267,12 @@ export function createProviderPublisher(deps: HostDeps = {}) {
         || !Array.isArray(built.providerIds) || built.adapter === undefined) {
         throw new Error("the adapter factory did not return { adapter, providerIds }");
       }
-    } catch (error) {
+    } catch (e) {
+      // A missing llm peer surfaces as Node's ERR_MODULE_NOT_FOUND on a plain
+      // Error's `code` — read through an annotation local to this block; the
+      // thrown value may not be a pluginError at all, and `throw error` below
+      // must re-raise exactly what was caught.
+      const error = e as Error & { code?: unknown };
       const why = error instanceof Error ? error.message : String(error);
       // A credential never reaches the panel or a log. The failure a reader
       // cannot diagnose from the message alone: the LLM peer packages ship

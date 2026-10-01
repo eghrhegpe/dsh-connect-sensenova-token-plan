@@ -16,6 +16,7 @@ import { buildSnapshotBody, failureCode } from "./snapshot-aggregate.ts";
 import { CODE } from "./codes.ts";
 import { writeLoginTrace } from "./trace.ts";
 import { str, redactSecrets } from "./util.ts";
+import type { PluginError } from "./types.ts";
 import { normalizeEnabledIds } from "./catalog-store.ts";
 import { catalogSignature } from "./provider-publish.ts";
 import {
@@ -347,9 +348,13 @@ export function registerRoutes(ctx, wiring) {
         await tokenStore.saveAccount({ username: body.value.username, password: body.value.password });
         // The success trace is persisted through `onTrace`; no path is owed
         // to the panel for a sign-in that worked.
-      } catch (error) {
+      } catch (e) {
         // A rejected password is the common case, and it is the user's to
-        // correct: report the reason and leave the panel usable.
+        // correct: report the reason and leave the panel usable. The extra
+        // fields are the shape `pluginError` attaches (types.PluginError) —
+        // a non-pluginError throw simply has none of them, which every read
+        // below already handles with its own fallback.
+        const error = e as Partial<PluginError>;
         const traceFile = await writeLoginTrace(error?.trace, str(error?.code, CODE.AUTH_ERROR));
         writeJson(response, 200, {
           ...(await tokenStore.state().catch(() => null)),

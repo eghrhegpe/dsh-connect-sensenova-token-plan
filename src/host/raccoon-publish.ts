@@ -207,7 +207,11 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
         || !Array.isArray(built.providerIds) || built.adapter === undefined) {
         throw new Error("the adapter factory did not return { adapter, providerIds }");
       }
-    } catch (error) {
+    } catch (e) {
+      // Node's ERR_MODULE_NOT_FOUND rides a plain `code` string on the thrown
+      // Error — read through an annotation local to this block (see the same
+      // shape in provider-publish.ts).
+      const error = e as Error & { code?: unknown };
       const note = redactSecrets(error instanceof Error ? error.message : String(error));
       state.error = note;
       effectiveLogger?.warn?.(

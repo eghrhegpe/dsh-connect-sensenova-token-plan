@@ -636,9 +636,13 @@ export async function loginWith(cfg, credentials, options: { timeoutMs?: number;
       // is impossible.
       try { options.onTrace?.(trace.done(), null); } catch { /* logging never breaks flow */ }
       return granted;
-    } catch (error) {
+    } catch (e) {
       // A failure that bypassed the flow's own `fail()` (a crypto error, a
-      // network timeout mid-walk) still owes the caller its trace.
+      // network timeout mid-walk) still owes the caller its trace. The shape
+      // is the optional `trace` field pluginError's contract documents
+      // (types.PluginError) — a non-pluginError throw gets the field attached
+      // right here, which is the whole point of this block.
+      const error = e as Error & { code?: unknown; trace?: object[] };
       if (error?.trace === undefined) {
         try { error.trace = trace.done(); } catch { /* ignore */ }
       }
