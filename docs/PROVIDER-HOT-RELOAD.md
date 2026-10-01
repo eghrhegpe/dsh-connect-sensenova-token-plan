@@ -19,7 +19,7 @@
 - **`dsh-connect-workbuddy`（web, 2.1.0）**：同样是「常驻注册 + `replace()` 换空列表」（lib/index.js:1326-1335）；adapter 与目录注册**原子成对**（try/finally 回滚，lib/index.js:1390-1412）；`settingsNs` 必须从 `ctx.fiber.entry.options.id` 推导。没有「是否注册 provider」的总开关——provider 常驻，只有 per-region 开关。
 - **`@eghrhegpe/dsh-connect-qoder`（desktop, 0.3.2）**：**条件注册 + 事务式重发布**——按「已成功启动的区域」动态重建 adapter 并整体重新注册，失败回滚到上一个注册对（lib/index.js:720-775）；区域开关存在**插件自有偏好状态**（preferences.js），不在 cordis 配置里；「无 peer 依赖纯函数模块层」与「宿主接线层」分离（README.md:254-256）。
 
-对本仓库最直接的两条启示：其一，`index.ts` 的 `publishProvider()` 已经是 qoder 式「事务发布 + 失败回滚」，且每次轮询都重读开关——**热生效的执行机制本来就在**，缺的只是「面板 → 开关状态 → 立即触发发布」这最后一公里。其二，纯模块层（`llm-models.js` / `llm-adapter.js` / `catalog-store.js` / `api-key-store.js`）与 qoder 的分层同构，「适配器独立化」的地基已就位。
+对本仓库最直接的两条启示：其一，`index.ts` 的 `publishProvider()` 已经是 qoder 式「事务发布 + 失败回滚」，且每次轮询都重读开关——**热生效的执行机制本来就在**，缺的只是「面板 → 开关状态 → 立即触发发布」这最后一公里。其二，纯模块层（`llm-models.ts` / `llm-adapter.ts` / `catalog-store.ts` / `api-key-store.ts`）与 qoder 的分层同构，「适配器独立化」的地基已就位。
 
 ## 3. 设计决策：不走 volatile 路线，走自有状态 + 自有路由
 
@@ -27,7 +27,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 
 本插件选择更贴合自身架构的路径，与 qoder 的偏好存储同构：
 
-1. **开关状态存插件私有状态文件** `state/<profile>/<name>/provider.json`（新模块 `provider-store.ts`，完整性纪律与 `catalog-store.ts`/`throttle-store.js` 一致：版本化、临时文件 + 原子改名、损坏即读作未设置；按 profile 分段，见 [PITFALLS.md](./PITFALLS.md) §23）。
+1. **开关状态存插件私有状态文件** `state/<profile>/<name>/provider.json`（新模块 `provider-store.ts`，完整性纪律与 `catalog-store.ts`/`throttle-store.ts` 一致：版本化、临时文件 + 原子改名、损坏即读作未设置；按 profile 分段，见 [PITFALLS.md](./PITFALLS.md) §23）。
 2. **优先级**：面板保存过的值 > `cordis.patch.yml` 的 `registerProvider`（后者降级为「出厂默认」）。从未动过面板开关的部署，行为与 0.3.0 完全一致。
 3. **面板开关 → `POST /api/<name>/provider`**（同源围栏 + body 上限，与账号/api-key 路由同一信任形状）→ 存状态 → **立即** `publishProvider(当前目录, 当前允许清单)` → 返回去密状态。不用等下一个轮询周期。
 4. 快照 `llm.registerProvider` 回显**生效值**（不再是 patch 直读），新增 `registerSource`（`"panel"` / `"config"`）说明当前值来自哪一侧。
@@ -69,14 +69,14 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 
 | 文件 | 改动 |
 |---|---|
-| `draw-store.ts`（新增） | 出图开关状态文件 `$DSH_HOME/state/<profile>/<plugin>/draw.json`；完整性纪律与 `provider-store.js` 完全一致 |
+| `draw-store.ts`（新增） | 出图开关状态文件 `$DSH_HOME/state/<profile>/<plugin>/draw.json`；完整性纪律与 `provider-store.ts` 完全一致 |
 | `index.ts` | wiring 里增补 `drawStore`；传给 `registerRoutes` 与 `startSideEffects` |
 | `lifecycle.ts` | `registerDrawTool` 改为读「面板保存值 > 配置默认值」的生效值，而不是直接读 `settings.drawEnabled` |
 | `routes.ts` | 新增 `POST /api/<name>/draw`，与 `/provider` 同一信任形状 |
 | `snapshot-aggregate.ts` | 快照 `llm.drawEnabled` / `llm.drawSource` 回显生效值与来源 |
 | `client.js` | `ApiKeyForm` 区新增「出图工具」卡片，含 `DrawSwitch` 控件 |
 
-与 provider 开关的一个**语义差异**需要说明：provider 开关改的是「当前请求立刻重新发布注册对」，改完立即生效；draw 开关改的是「挂载时是否注册 agent 工具」，**当前 Host 进程里已经注册的工具不会因为改开关而消失或出现**——要真正生效需要在**下一个 Host (re)mount**（即重启 `dsh web` 或重新安装插件）时，`lifecycle.js` 的 `startSideEffects` 重新读生效值。面板开关本身是「立即生效、无需重启」的**状态读写**；工具的实际挂载/卸载要等到下次 Host 启动。面板文案里「立即生效」指的是**开关值**本身，不是 agent 工具的实时性。
+与 provider 开关的一个**语义差异**需要说明：provider 开关改的是「当前请求立刻重新发布注册对」，改完立即生效；draw 开关改的是「挂载时是否注册 agent 工具」，**当前 Host 进程里已经注册的工具不会因为改开关而消失或出现**——要真正生效需要在**下一个 Host (re)mount**（即重启 `dsh web` 或重新安装插件）时，`lifecycle.ts` 的 `startSideEffects` 重新读生效值。面板开关本身是「立即生效、无需重启」的**状态读写**；工具的实际挂载/卸载要等到下次 Host 启动。面板文案里「立即生效」指的是**开关值**本身，不是 agent 工具的实时性。
 
-**已知边界**：两个 Host 进程共享同一状态目录时，后写者胜（与 provider / throttle / catalog 文件语义一致）。`POST /draw` 只改开关值，不直接操作 tools registry——这是有意的：tools registry 没有 `unregister` 语义（见 `lifecycle.js` 注释），强行卸载要等 Host 生命周期自然结束。
+**已知边界**：两个 Host 进程共享同一状态目录时，后写者胜（与 provider / throttle / catalog 文件语义一致）。`POST /draw` 只改开关值，不直接操作 tools registry——这是有意的：tools registry 没有 `unregister` 语义（见 `lifecycle.ts` 注释），强行卸载要等 Host 生命周期自然结束。
 

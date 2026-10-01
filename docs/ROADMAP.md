@@ -167,10 +167,9 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 - **不做**：提炼/转述、把官方原文合并进 SENSENOVA-API.md、`git rm` 官方副本。
 - **不做**「把 `upstream/` 拉进库」的反向操作（`upstream/` 仍 gitignored、独立历史）。
 
-## 5. P1：CLI `doctor --json`
+## 5. P1 ✅：CLI `doctor --json`
 
-- 零平台依赖，降最长登录链路排障成本；workbuddy 侧独有缺口。
-- 离线可测，归入 `config` / `parsers` 套件验证。
+- **已落地**（2026-10-01）：`src/host/doctor.ts`（peer-free，只读状态文件、不碰凭据，Host 没起也能跑）+ `tools/doctor.mjs` CLI（`npm run doctor` 人读 / `npm run doctor:json` 机器读）+ `test/doctor.test.mjs`（离线进 `npm test` 链）。README 已对外文档化。
 
 ## 6. 明确不做（边界，写死防止漂移）
 
@@ -389,7 +388,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 | **P0 ✅** | 429 spike + 配额联动（全局策略 `llm-retry.ts` + per-model 可用性 `llm-models.ts` + `index.ts` quota 重注册） | 低（1 行 peer + peer-free 分类器 + 状态文件桥） | `e2e-gate`（dsh CLI 在则实跑）；`test/retry.test.mjs` 已落地 |
 | **P0 文档** | §5 纠偏 + 本文入库 | 无（仅 doc） | `docs.test.mjs` |
 | **P1 ✅** | 出图吸收（§5.4 接法 B）：`draw.ts`（peer-free：结构化识别 / 端点拼接 / 429 分诊 / 失败冷却）+ `index.ts` opt-in 接线（`drawEnabled` 默认关，无 tools 服务即缺席）；快照契约零改动 | 低 | `test/draw.test.mjs`（56 项）已落地；离线 12 套件全绿 |
-| **P1** | `doctor --json` | 低 | `config` / `parsers` 套件 |
+| **P1 ✅** | `doctor --json`（`src/host/doctor.ts` + `tools/doctor.mjs`，已落地 2026-10-01） | 低 | `test/doctor.test.mjs` 进 `npm test` 链 |
 | P1（可选） | §4 官方文档保真（改名/链接，不提炼不 `git rm`） | 低（仅重命名 + 链接） | `docs.test.mjs` |
 | **P2 ✅ 部分落地** | 第二上游 provider：已随 0.4.3 落地（三个 tab 之一 + `sensenova-raccoon`），2026-10-01 补做网关契约复测，**契约成立**（§6.1.2）；剩余未做的是 desktop 融合路径（第二**登录路径**，见 §6.1.1）——它已实测判死，维持观望。接入面盘点与死负载处置见 §6.1.4（2026-10-01：诊断收进 `?debug=1` + 常量单真源） | 高（新上游 + 新凭据生命周期） | 已落地部分：`test/raccoon.test.mjs` 离线 101 项 + `docs.test.mjs` 检查 9；**仍缺**：带凭据的 live 端到端探针（比照 §2.2 给商汤做的 `live-contract`） |
 | 明确不做 | 多 Key / 签到 / 跨 provider 聚合 | — | — |

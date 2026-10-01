@@ -7,13 +7,15 @@
 ## 1. 运行
 
 ```powershell
-npm test       # 依次跑 auth / store / store-baseline / routes / panel / render / parsers / provider / config / package / docs / wiring / contract / retry / error-fix / peer-contract / draw，末尾 build-gate（重建 src/ 全部源码并验证 lib/ 与 client.js 产物；无 tsdown 则 SKIP，见 ROADMAP §6.2）+ e2e-gate（无 dsh CLI 则 SKIP）
+npm test       # 依次跑 auth / store / store-baseline / routes / panel / render / parsers / provider / config / package / docs / wiring / contract / retry / error-fix / peer-contract / draw / doctor / raccoon，末尾 build-gate（重建 src/ 全部源码并验证 lib/ 与 client.js 产物；无 tsdown 则 SKIP，见 ROADMAP §6.2）+ e2e-gate（无 dsh CLI 则 SKIP）
 npm run test:e2e    # 只跑端到端：真 Host + 假平台，需 dsh CLI 在 PATH
 npm run test:live   # 仅 live-jwks.test.mjs，需联网，验证 JWKS 文档可达
 npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_KEY，重放商汤推理契约
 ```
 
-测试**无需 `npm install`**：`@deepseek-ai/dsh-credentials` 是 Host 里的 peer 依赖，由 `test/peer-roots.mjs` 在 DSH 运行时里就地解析（`$DSH_HOME` → 插件 `node_modules` → 默认安装位置 `~/.dsh/dsh-asar-unpacked` → 打包安装目录）。找不到时会列出每个候选根**各自失败的原因**，而不是静默跳过或只报搜索路径。`config.test.mjs` 不依赖任何 peer，干净检出即可跑。
+测试**无需 `npm install`**：`@deepseek-ai/dsh-credentials` 等是 Host 里的 peer 依赖，由 `test/peer-roots.mjs` 就地解析（`$DSH_HOME` → 插件 `node_modules` → 默认安装位置 `~/.dsh/dsh-asar-unpacked` → 打包安装目录 → 工作区内的 `@deepseek-ai/dsh` 元包 → **npm 全局 CLI 的运行时树**，最后两项是为「没装 Host 的机器」准备的，CI 正属此类）。找不到时会列出每个候选根**各自失败的原因**，而不是静默跳过或只报搜索路径。`config.test.mjs` 不依赖任何 peer，干净检出即可跑。
+
+> **CI 侧的前车之鉴（2026-10-01，见 [AGENTS.md](../AGENTS.md)「验证」段）**：`npm install --legacy-peer-deps` 会**跳过** peer，所以干净 runner 上这些套件既没有 peer 也没有运行时——硬门禁一度**连续一整天每次都红在第二个套件**（`store.test.mjs`），`set -e` 又把后面 17 个套件一起吞掉。现在 `ci.yml` 的 offline job 会先装 CLI、`peer-roots.mjs` 据此解析。因此：**CI 里这类报错是回归，不是环境问题**；而「干净检出上跑不了」只对本机成立。
 
 ---
 
@@ -35,6 +37,10 @@ npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_K
 | `test/contract.test.mjs` | **商汤推理契约回归（离线档）**：`test/baselines/sensenova-contract.json`（冻结 2026-09-29 实测：9 目录模型的 thinking 形态 / reasoning_effort 支持面 / 采样参数 / context_length / 模态 / 404-403 标记）驱动 `llm-models.js` 的 `toPiDescriptor` / `isChatModel` / `buildDescriptors` / `exhaustedModelIds` / `thinkingLevelMapFor` 与 `parsers.js` 的归一、`llm-retry.js` 的 429/quota 分类；红 = 代码偏离冻结契约，修法走 `SENSENOVA-API.md` §7 + 基线刷新 |
 | `test/retry.test.mjs` | **429 自愈逻辑层（peer-free）**：`buildRetryPolicyConfig` 形状（排除 QUOTA/ACCOUNT_QUOTA、保留 RATE_LIMIT）、`exhaustedModelIds`、`buildDescriptors` 排除借尽模型、`rosterWithAvailability` 标记；peer 可达时追加断言 `resolveRetryPolicy` 的解析结果；不依赖 peer 的部分干净检出可跑 |
 | `test/draw.test.mjs` | **出图模块（peer-free，如 `provider.test.mjs`）**：端点拼接（`apiBase` 各种写法归一）、结构化识别 image-output 模型（看字段、绝不用名字正则）、挑选优先级、wire body 钳制、响应解析、失败分诊（429 配额 vs 限频）、`drawOnce` 对假 fetch（成功/分类失败/超时）、失败冷却门、`defineDrawTool` 用直通 `defineTool` + 假 store 端到端 |
+| `test/error-fix.test.mjs` | **429 分诊纠正（peer-free）**：`llm-error-fix.ts` 的 `reclassifyFinish` 把误判的 QUOTA 纠正回 RATE_LIMIT；真配额耗尽与已限频原样放行；`isQuotaExceededError` 命中面验证 |
+| `test/peer-contract.test.mjs` | **peer 契约护栏（peer 可达时）**：钉死「peer 判 QUOTA + 含限频信号 → 本插件 `reclassifyFinish` 纠正回 RATE_LIMIT」的端到端行为契约；`extractStructuredType` 必须仍能从 peer 拼好的 message 回捞结构化 type；peer 缺席则 SKIP |
+| `test/doctor.test.mjs` | **CLI 诊断（peer-free）**：`doctor.ts` 对状态文件只读扫描——provider / draw / catalog 开关与生效值、profile 分段目录、零凭据读取 |
+| `test/raccoon.test.mjs` | **第二上游（peer-free）**：小浣熊协议层（扫码信封解析、refresh 轮换、余额/目录读取）、两个 store、描述符映射、publisher 状态机、QR 编码器、开关 store |
 | `test/wiring.test.mjs` | **真实 Cordis 容器**里的装配：`inject` 解析、服务注册、路由挂载与卸载、配置错误；第三步的可选 `ctx.get("llm")` 注册对（`registerAdapter` + `registerConfigurableProviders`，id `sensenova-token-plan`）、opt-in 关闭不注册、fiber dispose 释放注册对与三条路由 |
 | `test/live-jwks.test.mjs` | （仅 `test:live`）真实拉取 JWKS 文档，确认封包公钥可达 |
 | `test/live-contract.mjs` | （仅 `test:live:contract`）重放 `test/baselines/sensenova-contract.json` 对商汤推理端点：`/v1/models` 目录核对 + 少量 `reasoning_effort:"none"` 探针（限流友好，每格 1 请求不重试）；红 = 平台方言漂移，**不是回归**，修法走 `SENSENOVA-API.md` §7 注释层 |
@@ -53,7 +59,7 @@ npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_K
 
 ## 4. 已知缺口
 
-> 本文曾记载「`wiring.test.mjs` 缺失、`panel.test.mjs` 有失败用例」。两条都已不成立：`wiring.test.mjs` 现在 24 项全过，`panel.test.mjs` 41 项全过。后来记载的「同源校验挡不住 DNS rebinding」「密码会被静默 trim」也已收口：前者由 `isAdmitted` 的 Host 白名单（`index.js`，`routes.test.mjs` D2 守住「Origin 与 Host 一致的陷阱」），后者由 `token-store.js` 的 `verbatim()`（密码按原样进 JWE，store.test.mjs 断言「密文不含明文、且密码不写入凭据服务」）。「渲染层没有被测到」同样不再成立：`test/render.test.mjs` 通过 `panel-render.js` 检查上屏数字，`used/limit` 写反的演练实测 5 项变红。文档比代码先过期也是一类缺陷，所以这里只保留仍然真实的缺口：
+> 本文曾记载「`wiring.test.mjs` 缺失、`panel.test.mjs` 有失败用例」。两条都已不成立：`wiring.test.mjs` 现在 24 项全过，`panel.test.mjs` 41 项全过。后来记载的「同源校验挡不住 DNS rebinding」「密码会被静默 trim」也已收口：前者由 `isAdmitted` 的 Host 白名单（`index.ts`，`routes.test.mjs` D2 守住「Origin 与 Host 一致的陷阱」），后者由 `token-store.ts` 的 `verbatim()`（密码按原样进 JWE，store.test.mjs 断言「密文不含明文、且密码不写入凭据服务」）。「渲染层没有被测到」同样不再成立：`test/render.test.mjs` 通过 `panel-render.js` 检查上屏数字，`used/limit` 写反的演练实测 5 项变红。文档比代码先过期也是一类缺陷，所以这里只保留仍然真实的缺口：
 
 - **`AccountForm` 的渲染没有被测到。** 它建立在 `useState`/`useEffect` 之上，React 替身只会无脑返回初值——测的会是那个假件。宁可留着缺口也不假装覆盖；表单的行为部分由 `store`/`routes` 套件在 Host 侧守住。`ModelPicker` 同属这类 hook 组件，草稿/保存态也未被渲染层覆盖；它的**可测部分**已被拆出来守住：勾选行的 `ModelRoster`（不依赖 hook）由 `test/render.test.mjs` G4 组覆盖，而「勾选 → 允许清单」的推导（含空清单折叠与 `__hide_all__` 哨兵）由 `test/provider.test.mjs` 5.6c 组以面板与 Host 两侧逐值相等钉死。
 - **`test:live` 是唯一允许联网的检查**（只拉公开 JWKS，不带凭据、不发登录请求）。默认不跑它，避免「测试会因与插件无关的外部原因失败」，也守住那条界线：验证不该默认等于对真实服务发请求。
@@ -71,7 +77,7 @@ npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_K
 
 ## 5. 行为冻结基线（`store-baseline.test.mjs`）
 
-`token-store.js` 计划拆成登录 / 续期 / 节流 / 迁移四块（锐评 #5：944 行单体），但四块共享闭包状态、迁移挂在读路径上，纯搬文件极易静默改掉细语义。`store.test.mjs` 的手写 check 只断言「作者想到的语义」；`store-baseline.test.mjs` 把 store 的**完整可观察面**冻结在 `test/baselines/token-store-behavior.json`：17 个场景、48 帧，每帧记录凭据服务调用序列（read/modify/delete/resolve/set/unset）、节流存储读视图、grant/ref 落盘内容、抛出的 `{code,message}` 与完整 `state()` 对象。
+`token-store.ts` 计划拆成登录 / 续期 / 节流 / 迁移四块（锐评 #5：944 行单体），但四块共享闭包状态、迁移挂在读路径上，纯搬文件极易静默改掉细语义。`store.test.mjs` 的手写 check 只断言「作者想到的语义」；`store-baseline.test.mjs` 把 store 的**完整可观察面**冻结在 `test/baselines/token-store-behavior.json`：17 个场景、48 帧，每帧记录凭据服务调用序列（read/modify/delete/resolve/set/unset）、节流存储读视图、grant/ref 落盘内容、抛出的 `{code,message}` 与完整 `state()` 对象。
 
 - **驱动方式**：只走公开 API（`getToken`/`invalidate`/`saveAccount`/`forgetAccount`/`state`），注入脚本化 `auth`、内存凭据服务、共享内存节流存储（第二个 store 实例模拟「重启」）、虚拟时钟；无网络、无 peer、无墙钟，干净检出可跑。
 - **已钉死的阴沟语义**：`not_configured` 绝不写节流；parked 跨重启零新登录；本地退避 60s→120s 翻倍且关窗后 attempt 保留；平台声明的 2h 窗口不被 30 分钟本地帽截断；并发轮询单飞（恰好一次 refresh）；compare-and-set 慢者赢（并发旋转的 grant 不被覆盖）；`refresh_rejected` 无账号回收 vs 有账号重登的岔路；被拒令牌不复播；旧命名空间 grant/节流一次性收养（节流只收养第一条、第二条等 `clearThrottle` 扫）；密码不落盘（`autoRecoverArmed` 只报布尔）；无凭据服务降级并标记 `ephemeral`。

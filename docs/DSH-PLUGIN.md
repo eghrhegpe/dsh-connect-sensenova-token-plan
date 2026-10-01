@@ -10,7 +10,7 @@
 
 DSH 插件是一段在 **Host**（桌面版或 `dsh web`）进程内运行的代码，通过 DSH 的 **Loader** 注册成一个 **bundle**，在启动时按 `cordis.patch.yml` 的描述挂进 Host 的 cordis 容器。插件分两半：
 
-- **Host 半边**：在 Node 侧运行，`index.js` / `token-store.js` / `sensenova-auth.js` 这种。本插件用它注册 HTTP 路由、调商汤控制台、管令牌。
+- **Host 半边**：在 Node 侧运行，`index.ts` / `token-store.ts` / `sensenova-auth.ts` 这种（源码为 TypeScript，经 tsdown 构建为 `lib/index.js`）。本插件用它注册 HTTP 路由、调商汤控制台、管令牌。
 - **Client 半边**：注入到 Host 的 Web UI 里运行，`client.js` 这种（React 由 Host 提供，不打包）。本插件用它画 Plugins 页的配置卡与账号表单。
 
 两半通过 Host 暴露的上下文（`ctx`）与本地路由（`/api/...`）通信。**插件不是独立进程，也不是独立网页**——它寄生在 DSH 里。
