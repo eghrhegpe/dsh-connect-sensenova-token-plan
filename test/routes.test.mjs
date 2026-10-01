@@ -39,6 +39,7 @@ const API_KEY_PATH = "/api/dsh-connect-sensenova-token-plan/api-key";
 const PROVIDER_PATH = "/api/dsh-connect-sensenova-token-plan/provider";
 const MODELS_PATH = "/api/dsh-connect-sensenova-token-plan/models";
 const DRAW_PATH = "/api/dsh-connect-sensenova-token-plan/draw";
+const RACCOON_PATH = "/api/dsh-connect-sensenova-token-plan/raccoon";
 const RECORD_KEY = credentialKey("dsh-connect-sensenova-token-plan", "sensenova-console");
 
 const POOL_BODY = {
@@ -1302,6 +1303,67 @@ async function withNetwork(stub, body) {
     check("R8 a cross-origin draw POST is refused",
       foreign.statusCode === 403 && foreign.payload.ok === false, JSON.stringify(foreign.payload));
   } catch (error) { fail("R: the draw switch route", error); }
+}
+
+// === S. the /raccoon 401 diagnostics are opt-in (`?debug=1`) ==================
+// The six diagnostic fields were the instrumentation for the Raccoon 401
+// root-cause fix (Bearer dual-shape + the pre-read renewal gate + `/refresh`).
+// The fix landed and the scaffold stayed, while nothing in the client ever read
+// them — and one of them, `hostProxyEnv`, reports environment VALUES. This
+// group pins the retirable shape: an ordinary poll must not carry them, an
+// explicit `?debug=1` may, a POST's re-reported state must not, and a proxy
+// URL's userinfo never leaves the process either way.
+//
+// This is also the FIRST route-level coverage the `/raccoon` handler has: the
+// suite drove snapshot/account/api-key/provider/models/draw only, which is why
+// the scaffold could sit on every response unnoticed.
+{
+  try {
+    const DIAGNOSTIC_KEYS = [
+      "accessTokenPrefix", "credentialSource", "raccoonEnvShadow",
+      "envCredentialFingerprint", "accessTokenFingerprint", "hostProxyEnv"
+    ];
+    const carried = (payload) => DIAGNOSTIC_KEYS.filter((key) => Object.hasOwn(payload, key));
+    const call = await mount(makeCredentials(null));
+
+    const plain = await call(RACCOON_PATH, makeRequest());
+    check("S1 an ordinary raccoon GET carries none of the diagnostics",
+      plain.payload.ok === true && carried(plain.payload).length === 0,
+      JSON.stringify(carried(plain.payload)));
+
+    const debug = await call(RACCOON_PATH, { ...makeRequest(), url: `${RACCOON_PATH}?debug=1` });
+    check("S2 `?debug=1` opts the triage scaffold back in",
+      debug.payload.raccoonEnvShadow === false && Array.isArray(debug.payload.hostProxyEnv),
+      JSON.stringify({ shadow: debug.payload.raccoonEnvShadow, proxy: debug.payload.hostProxyEnv }));
+
+    // `?debug=0` (and any other spelling) must stay quiet: the flag is opt-in,
+    // not a knob that is "on unless zero".
+    const zero = await call(RACCOON_PATH, { ...makeRequest(), url: `${RACCOON_PATH}?debug=0` });
+    check("S3 only `1`/`true` count as opt-in",
+      carried(zero.payload).length === 0, JSON.stringify(carried(zero.payload)));
+
+    // The whole reason the gate exists: these are environment values, and a
+    // corporate proxy is routinely spelled `http://user:pass@proxy:8080`.
+    const PROXY_KEY = "HTTP_PROXY";
+    const before = process.env[PROXY_KEY];
+    process.env[PROXY_KEY] = "http://alice:s3cr3t@proxy.test:8080";
+    try {
+      const withProxy = await call(RACCOON_PATH, { ...makeRequest(), url: `${RACCOON_PATH}?debug=1` });
+      const line = (withProxy.payload.hostProxyEnv ?? []).find((entry) => entry.startsWith(`${PROXY_KEY}=`)) ?? "";
+      check("S4 a proxy URL's userinfo never leaves the process",
+        line.includes("proxy.test:8080") && !line.includes("s3cr3t") && !line.includes("alice"), line);
+    } finally {
+      if (before === undefined) delete process.env[PROXY_KEY];
+      else process.env[PROXY_KEY] = before;
+    }
+
+    // A POST re-reports the same state through `answer()`; the scaffold must
+    // not ride along on a mutation's answer.
+    const posted = await call(RACCOON_PATH, makePost({ action: "models", enabledModelIds: [] }));
+    check("S5 a POST's re-reported state carries none either",
+      posted.payload.ok === true && carried(posted.payload).length === 0,
+      JSON.stringify(carried(posted.payload)));
+  } catch (error) { fail("S: the raccoon diagnostics gate", error); }
 }
 
 // The Host routes are exercised against a stubbed console; nothing here may

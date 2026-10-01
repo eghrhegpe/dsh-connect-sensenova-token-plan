@@ -37,7 +37,22 @@ export const RACCOON_AUTH_PREFIX = "/api/web/auth/v1";
 export const RACCOON_LLM_PREFIX = "/api/web/llm/v2";
 /** Credits (balance). */
 export const RACCOON_POINTS_PREFIX = "/api/web/points/v1";
-/** Desktop one-time login reward. */
+/**
+ * Desktop one-time login reward (`/api/web/desktop/v1`) — INTENTIONALLY UNWIRED.
+ *
+ * Kept as wire knowledge, never as a call site: **nothing in this plugin may
+ * call it.** Two reasons, both measured rather than assumed. ① It is a
+ * MUTATION — a probe sent with a real credential claims the user's one-time
+ * reward for good (PITFALLS §28). ② It belongs to the Raccoon credit pool
+ * (`xiaohuanxiong.com`), not the Token Plan pool, so it cannot serve the
+ * daily-reward boundary either (ROADMAP §6.1.1). The daily grant needs no
+ * endpoint at all: the server awards `daily_grant` on its own, which is why
+ * `fetchRaccoonBalance` below is read-only.
+ *
+ * If a future audit flags this as dead code: read ROADMAP §6.1.4 before
+ * deleting it (the endpoint string is the only code-level breadcrumb) and
+ * before wiring it up (the probe price is the reward itself).
+ */
 export const RACCOON_DESKTOP_PREFIX = "/api/web/desktop/v1";
 
 /** The OpenAI-compatible chat endpoint the adapter targets. */

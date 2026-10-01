@@ -25,6 +25,8 @@ import {
   fetchRaccoonCatalog,
   fetchRaccoonBalance,
   RACCOON_QR_STATUS,
+  RACCOON_QR_POLL_INTERVAL_MS,
+  RACCOON_LOGIN_TIMEOUT_MS,
   RACCOON_FALLBACK_MODELS
 } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
@@ -45,10 +47,12 @@ const DRAW_PATH = `/api/${name}/draw`;
 const RACCOON_PATH = `/api/${name}/raccoon`;
 /** Ceiling on a Raccoon action body: the login POST only needs the scan code. */
 const MAX_RACCOON_BODY_BYTES = 2048;
-/** The QR login's overall deadline; a scan that takes longer is voided. */
-const RACCOON_LOGIN_DEADLINE_MS = 5 * 60 * 1000;
-/** One QR poll cadence, so a login wait loops at the gateway's own rate. */
-const RACCOON_POLL_MS = 2_000;
+// The QR walk's deadline and poll cadence are GATEWAY wire facts, so they live
+// in the protocol layer (`raccoon.ts`) and are imported — never re-declared
+// here. They used to be declared twice with identical values, which is the one
+// shape that drifts in silence: two literals, no runtime assertion able to tell
+// them apart (see ROADMAP §6.1.4 and `test/raccoon.test.mjs`'s single-source
+// check).
 /** Ceiling on a submitted account, so a hostile page cannot stream a body. */
 const MAX_ACCOUNT_BODY_BYTES = 4096;
 /** Ceiling on the curated allow-list: a catalogue this large is a posting accident. */
@@ -125,6 +129,57 @@ function refuseOrigin(response) {
  */
 function refuseMethod(response) {
   writeJson(response, 405, { ok: false, error: "method not allowed" });
+}
+
+/**
+ * Whether a request opted into the Raccoon 401-triage diagnostics (`?debug=1`).
+ *
+ * Those diagnostics are a retirable scaffold: they were the instrumentation for
+ * the 401 root-cause fix (`Bearer` dual-shape + the pre-read renewal gate +
+ * `/refresh`), the fix landed, and nothing in the client has ever rendered
+ * them — so an ordinary poll must not carry them, least of all `hostProxyEnv`,
+ * which reports environment VALUES. A query flag keeps the triage capability
+ * without a config field (a patch change needs a Host restart) and without
+ * widening every response.
+ *
+ * Only `1` / `true` opt in: `?debug=0` must stay quiet, and a malformed URL is
+ * treated as "no".
+ * @param {object} request - the incoming HTTP request.
+ * @returns {boolean} whether the diagnostics were requested.
+ */
+function wantsDiagnostics(request) {
+  const url = str(request?.url, "");
+  if (url === "") return false;
+  try {
+    const flag = new URL(url, "http://localhost").searchParams.get("debug");
+    return flag === "1" || flag === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Mask a proxy URL's userinfo before it leaves the process.
+ *
+ * `hostProxyEnv` answers one question — "is there a hop between this Host and
+ * the gateway?" — and the hop is the host:port. The credentials are not part of
+ * that answer, yet a corporate proxy is routinely spelled
+ * `http://user:password@proxy:8080`, so reporting the value verbatim would put
+ * a live password into an HTTP response body. A diagnostic must never be worth
+ * more than the fact it carries.
+ *
+ * Both spellings are handled (with and without a scheme) and an unparseable
+ * value is masked textually rather than assumed clean; a value with no userinfo
+ * is returned untouched, so the hop still reads.
+ * @param {string} key - the environment variable's name.
+ * @param {string} value - its value.
+ * @returns {string} the `KEY=value` pair, with any userinfo replaced by `***`.
+ */
+function maskProxyUserinfo(key, value) {
+  const text = str(value, "");
+  // `[^/@]*@` cannot cross a `/`, so a path-borne `@` is never mistaken for
+  // userinfo; the optional leading group covers `scheme://` and `//`.
+  return `${key}=${text.replace(/^((?:[a-z][a-z0-9+.-]*:)?\/\/)?[^/@]*@/i, "$1***@")}`;
 }
 
 /**
@@ -631,7 +686,11 @@ export function registerRoutes(ctx, wiring) {
       // The GET's secret-free state, reused by every POST branch so a mutation
       // always re-reports the same facts a GET would. The `scanUrl`/`code` it
       // carries are the scan the pending login walk last issued.
-      const raccoonState = async () => {
+      //
+      // `withDiagnostics` is the one thing a POST never gets: the 401-triage
+      // fields ride only on an explicit `?debug=1` GET (see `wantsDiagnostics`),
+      // so `answer()` below reports the same state minus the scaffold.
+      const raccoonState = async (withDiagnostics = false) => {
         const switchState = await (raccoonSwitch ? raccoonSwitch.enabled() : null).catch(() => null);
         const effectiveEnabled = switchState === true;
         let loggedIn = false;
@@ -640,13 +699,14 @@ export function registerRoutes(ctx, wiring) {
         let balanceBreakdown: { daily?: number; reward?: number; monthly?: number; topup?: number } | null = null;
         let balanceDetail: string | null = null;
         let accessTokenPrefix: string | null = null;
-        // Diagnostics (one-shot, to name the 401's owner): which layer the
-        // credential came from, whether the host's OWN process environment
-        // carries a shadowing RACCOON_CREDENTIAL (the credentials provider's
-        // inherited layer wins over the file), a secret-free fingerprint of
-        // the exact access token the panel read, and the host process's
-        // proxy env (a fresh-process probe has none — a difference here would
-        // mean the same token reaches the gateway through a different hop).
+        // Diagnostics (the 401 triage scaffold, `?debug=1` only — see below):
+        // which layer the credential came from, whether the host's OWN process
+        // environment carries a shadowing RACCOON_CREDENTIAL (the credentials
+        // provider's inherited layer wins over the file), a secret-free
+        // fingerprint of the exact access token the panel read, and the host
+        // process's proxy env (a fresh-process probe has none — a difference
+        // here would mean the same token reaches the gateway through a
+        // different hop).
         let credentialSource: string | null = null;
         let raccoonEnvShadow: boolean | null = null;
         let envCredentialFingerprint: string | null = null;
@@ -692,17 +752,23 @@ export function registerRoutes(ctx, wiring) {
               }
               const { credential } = await raccoonStore.resolve().catch(() => ({ credential: null }));
               if (credential?.accessToken) {
-                // Diagnostic: only the prefix, never the token, so a mismatch
-                // against the stored credential is visible without leaking it.
-                accessTokenPrefix = credential.accessToken.slice(0, 8);
-                // SHA-256 prefix of the EXACT token the panel would send —
-                // a stable, non-reversible identifier to diff against the
-                // file's token (an `eyJhbGci` prefix is useless: every HS256
-                // JWT starts with it).
-                accessTokenFingerprint = createHash("sha256")
-                  .update(credential.accessToken, "utf8")
-                  .digest("hex")
-                  .slice(0, 12);
+                // The two token identifiers are computed ONLY for `?debug=1`:
+                // the prefix and the SHA-256 fingerprint point at one exact
+                // credential, and no client code reads either — so the ordinary
+                // poll neither pays for the hash nor carries the identifier.
+                if (withDiagnostics) {
+                  // Diagnostic: only the prefix, never the token, so a mismatch
+                  // against the stored credential is visible without leaking it.
+                  accessTokenPrefix = credential.accessToken.slice(0, 8);
+                  // SHA-256 prefix of the EXACT token the panel would send —
+                  // a stable, non-reversible identifier to diff against the
+                  // file's token (an `eyJhbGci` prefix is useless: every HS256
+                  // JWT starts with it).
+                  accessTokenFingerprint = createHash("sha256")
+                    .update(credential.accessToken, "utf8")
+                    .digest("hex")
+                    .slice(0, 12);
+                }
                 // `onFail` reports the concrete reason a read came back empty —
                 // a broken request must not look like "the gateway has nothing
                 // to say". Surfaced as `balanceDetail` for debugging.
@@ -725,36 +791,43 @@ export function registerRoutes(ctx, wiring) {
         } catch (why) {
           error = redactSecrets(why instanceof Error ? why.message : String(why));
         }
-        // The host process's OWN launch environment (the credentials
-        // provider's inherited layer, which beats the file): a
-        // RACCOON_CREDENTIAL set there shadows the file credential for THIS
-        // host only — a fresh-process probe never sees it. That is exactly
-        // the shape of "same file, probe 200, panel 401". Presence + a
-        // fingerprint of the shadowing document, never the value.
-        raccoonEnvShadow = Object.hasOwn(process.env, "RACCOON_CREDENTIAL") && process.env.RACCOON_CREDENTIAL !== "";
-        if (raccoonEnvShadow) {
-          // Fingerprint of the SHADOWING document (the serialized reference
-          // value, not a token): lets the panel side diff which copy this
-          // host actually serves without printing either document.
-          envCredentialFingerprint = createHash("sha256")
-            .update(process.env.RACCOON_CREDENTIAL, "utf8")
-            .digest("hex")
-            .slice(0, 12);
+        // The retirable scaffold below is computed only for `?debug=1` — the
+        // values are the host process's own environment, and there is no reason
+        // for a poll the panel makes every cycle to carry them.
+        if (withDiagnostics) {
+          // The host process's OWN launch environment (the credentials
+          // provider's inherited layer, which beats the file): a
+          // RACCOON_CREDENTIAL set there shadows the file credential for THIS
+          // host only — a fresh-process probe never sees it. That is exactly
+          // the shape of "same file, probe 200, panel 401". Presence + a
+          // fingerprint of the shadowing document, never the value.
+          raccoonEnvShadow = Object.hasOwn(process.env, "RACCOON_CREDENTIAL") && process.env.RACCOON_CREDENTIAL !== "";
+          if (raccoonEnvShadow) {
+            // Fingerprint of the SHADOWING document (the serialized reference
+            // value, not a token): lets the panel side diff which copy this
+            // host actually serves without printing either document.
+            envCredentialFingerprint = createHash("sha256")
+              .update(process.env.RACCOON_CREDENTIAL, "utf8")
+              .digest("hex")
+              .slice(0, 12);
+          }
+          // Proxy env is the other per-process difference a fresh probe can't
+          // see: a route through a corporate hop can drop or mangle the
+          // Authorization the direct path carries. Names + the hop, with any
+          // userinfo masked: a proxy URL may legitimately be
+          // `http://user:password@proxy:8080`, and that password is not part of
+          // the fact this line carries.
+          hostProxyEnv = [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "no_proxy"
+          ].filter((key) => process.env[key] !== undefined && process.env[key] !== "")
+            .map((key) => maskProxyUserinfo(key, process.env[key]));
         }
-        // Proxy env is the other per-process difference a fresh probe can't
-        // see: a route through a corporate hop can drop or mangle the
-        // Authorization the direct path carries. Names + values, all
-        // non-secret.
-        hostProxyEnv = [
-          "HTTP_PROXY",
-          "HTTPS_PROXY",
-          "http_proxy",
-          "https_proxy",
-          "ALL_PROXY",
-          "NO_PROXY",
-          "no_proxy"
-        ].filter((key) => process.env[key] !== undefined && process.env[key] !== "")
-          .map((key) => `${key}=${process.env[key]}`);
         // The roster the adapter offers: the live catalogue when a credential
         // exists (the switch's own publish reads it too), else the static
         // fallback so the panel still shows the known models. `modelsSource`
@@ -785,6 +858,18 @@ export function registerRoutes(ctx, wiring) {
         // The pushed-model curation, so the tab's checkboxes render the saved
         // list (`null` = the panel never curated — the whole roster pushes).
         const savedIds = await (raccoonSwitch ? raccoonSwitch.enabledIds() : null).catch(() => null);
+        // The 401-triage scaffold, assembled ONLY under `?debug=1`. It is dead
+        // weight for the panel (no client code reads any of these keys) and one
+        // of them reports environment values, so the ordinary poll must stay
+        // clean; `hostProxyEnv` is masked even here. See ROADMAP §6.1.4.
+        const diagnostics = withDiagnostics ? {
+          ...(accessTokenPrefix !== null ? { accessTokenPrefix } : {}),
+          ...(credentialSource !== null ? { credentialSource } : {}),
+          raccoonEnvShadow: raccoonEnvShadow === true,
+          ...(envCredentialFingerprint !== null ? { envCredentialFingerprint } : {}),
+          ...(accessTokenFingerprint !== null ? { accessTokenFingerprint } : {}),
+          hostProxyEnv
+        } : {};
         return {
           ok: true,
           enabled: effectiveEnabled,
@@ -804,12 +889,7 @@ export function registerRoutes(ctx, wiring) {
           balance,
           ...(balanceBreakdown !== null ? { balanceBreakdown } : {}),
           ...(balanceDetail !== null ? { balanceDetail } : {}),
-          ...(accessTokenPrefix !== null ? { accessTokenPrefix } : {}),
-          ...(credentialSource !== null ? { credentialSource } : {}),
-          ...(raccoonEnvShadow !== null ? { raccoonEnvShadow } : {}),
-          ...(envCredentialFingerprint !== null ? { envCredentialFingerprint } : {}),
-          ...(accessTokenFingerprint !== null ? { accessTokenFingerprint } : {}),
-          hostProxyEnv,
+          ...diagnostics,
           models: roster,
           modelsSource,
           enabledModelIds: savedIds,
@@ -821,7 +901,9 @@ export function registerRoutes(ctx, wiring) {
 
       const method = request.method === undefined ? "GET" : request.method;
       if (method === "GET") {
-        writeJson(response, 200, await raccoonState(), { "cache-control": "no-store" });
+        // Only a GET may opt into the triage scaffold (`?debug=1`); the POST
+        // branches re-report through `answer()`, which passes no flag.
+        writeJson(response, 200, await raccoonState(wantsDiagnostics(request)), { "cache-control": "no-store" });
         return;
       }
       if (method !== "POST") {
@@ -930,7 +1012,7 @@ export function registerRoutes(ctx, wiring) {
         // waiting reports the SAME code/URL (see `raccoonState`), so a refresh
         // or a second tab continues the scan instead of voiding it.
         raccoonScan = { code, url: scanUrl };
-        const deadline = Date.now() + RACCOON_LOGIN_DEADLINE_MS;
+        const deadline = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
         let settled = null;
         let canceled = false;
         while (Date.now() < deadline) {
@@ -943,7 +1025,7 @@ export function registerRoutes(ctx, wiring) {
             canceled = true;
             break;
           }
-          await new Promise((resolve) => setTimeout(resolve, RACCOON_POLL_MS));
+          await new Promise((resolve) => setTimeout(resolve, RACCOON_QR_POLL_INTERVAL_MS));
         }
         raccoonScan = null;
         if (settled === null) {

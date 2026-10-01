@@ -731,6 +731,38 @@ function section(title) {
   }
 }
 
+// --- the wire constants have exactly one home --------------------------------
+// ROADMAP §6.1.4: `routes.ts` used to re-declare the QR walk's deadline and
+// poll cadence, so the same number lived in two files and NOTHING could see
+// them drift — no runtime assertion can, because both copies were simply read.
+// These two checks pin the invariants that a behavioural test cannot reach:
+// the single source, and the deliberate NON-wiring of the desktop reward
+// endpoint (the one probe that would claim the user's reward for good).
+{
+  const { readFileSync, readdirSync, statSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join, basename } = await import("node:path");
+  const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+  const routesSrc = readFileSync(join(srcRoot, "host", "routes.ts"), "utf8");
+  // The declaration is what must be gone; a comment may still name them.
+  const redeclared = ["RACCOON_LOGIN_DEADLINE_MS", "RACCOON_POLL_MS"]
+    .filter((name) => new RegExp(`(?:const|let|var)\\s+${name}\\b`).test(routesSrc));
+  check("the QR walk's deadline/cadence are imported, not re-declared",
+    redeclared.length === 0 &&
+      /RACCOON_LOGIN_TIMEOUT_MS/.test(routesSrc) && /RACCOON_QR_POLL_INTERVAL_MS/.test(routesSrc),
+    redeclared.join(", ") || "routes.ts does not import the protocol constants");
+
+  const walk = (dir) => readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? walk(path) : [path];
+  });
+  const wired = walk(srcRoot)
+    .filter((file) => file.endsWith(".ts") && basename(file) !== "raccoon.ts")
+    .filter((file) => readFileSync(file, "utf8").includes("RACCOON_DESKTOP_PREFIX"));
+  check("the desktop one-time reward endpoint stays unwired",
+    wired.length === 0, wired.map((file) => file.replace(srcRoot, "src")).join(", "));
+}
+
 // --- report ------------------------------------------------------------------
 releaseNetworkGuard();
 const passed = results.filter((result) => result.pass).length;
