@@ -42,7 +42,7 @@ export const PASSWORD_REF = "SENSENOVA_PASSWORD";
  * requiring a password to be available.
  * @returns {Promise<string>} the username, or `""` when none is known.
  */
-export async function readUsername(wiring, state) {
+export async function readUsername(wiring, _state) {
   const { backend, env } = wiring;
   const fromStore = async (ref) => {
     // `resolve` is per-call by contract: a value written a moment ago is

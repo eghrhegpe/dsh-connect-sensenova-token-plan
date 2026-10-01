@@ -110,7 +110,7 @@ export async function readThrottle(wiring, state) {
  * state left under either name survives.
  * @returns {Promise<object|null>} the adopted throttle, or null.
  */
-export async function adoptLegacyThrottle(wiring, state) {
+export async function adoptLegacyThrottle(wiring, _state) {
   const { backend, THROTTLE_KEY, credentialKey, throttleStore, now } = wiring;
   const LEGACY_SCOPE = "dsh-llm-rate-panel";
   const THROTTLE_ID = "sensenova-console-throttle";

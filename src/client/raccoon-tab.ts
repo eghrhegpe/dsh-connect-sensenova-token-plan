@@ -115,8 +115,11 @@ export function RaccoonTab({
   onReportStatus?: (status: { updatedAt: number; error: string | null; onRefresh: () => void } | null) => void;
 }): unknown {
   const [state, setState] = useState<RaccoonState | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // `loading`/`error` are lifted to the header via onReportStatus (see the
+  // props comment above); these local states exist only so the setters called
+  // in load() remain valid, but their values are never rendered here.
+  const [_loading, setLoading] = useState(true);
+  const [_error, setError] = useState<string | null>(null);
   // The in-flight login walk: the route blocks up to its 5-minute deadline,
   // so the button goes to a "waiting" state and the result lands in `state`.
   const [loginBusy, setLoginBusy] = useState(false);

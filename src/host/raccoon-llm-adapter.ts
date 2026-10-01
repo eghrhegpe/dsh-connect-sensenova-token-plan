@@ -22,7 +22,7 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { resolveRetryPolicy, resolveImageAttachmentAccess } from "@deepseek-ai/dsh-llm";
 import { name } from "./host-config.ts";
-import { RACCOON_BASE_URL, RACCOON_DISPLAY_NAME, RACCOON_PROVIDER_ID, buildRaccoonDescriptors, raccoonRoster } from "./raccoon-models.ts";
+import { RACCOON_DISPLAY_NAME, RACCOON_PROVIDER_ID, buildRaccoonDescriptors, raccoonRoster } from "./raccoon-models.ts";
 import { buildRetryPolicyConfig } from "./llm-retry.ts";
 import { reclassifyStream } from "./llm-error-fix.ts";
 import type { RaccoonAdapterOptions } from "./types.ts";

@@ -55,14 +55,12 @@ import { name as RECORD_SCOPE } from "./host-config.ts";
 import { createStoreContext } from "./token-store/state.ts";
 import {
   readStored as readStoredImpl,
-  adoptLegacyGrant as adoptLegacyGrantImpl,
   storeGrant,
   purgeGrant as purgeGrantImpl,
   isFresh as isFreshImpl
 } from "./token-store/grant.ts";
 import {
   throttleError as throttleErrorImpl,
-  localBackoffMs as localBackoffMsImpl,
   readThrottle as readThrottleImpl,
   writeThrottle as writeThrottleImpl,
   clearThrottle as clearThrottleImpl,

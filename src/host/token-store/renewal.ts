@@ -19,7 +19,7 @@ import { pluginError } from "../util.ts";
  * token so a concurrent rotation is detected instead of silently overwritten.
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresAt: number|null}>}
  */
-export async function renewWithRefresh(wiring, state, stored, store) {
+export async function renewWithRefresh(wiring, _state, stored, store) {
   const { auth } = wiring;
   if (stored?.refreshToken === undefined || stored.refreshToken === "") {
     throw pluginError(CODE.NO_REFRESH_TOKEN, "stored grant has no refresh token");

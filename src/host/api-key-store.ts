@@ -46,21 +46,6 @@ export function createApiKeyStore({ credentials = null, env = process.env } = {}
     return value ?? null;
   };
 
-  /** The reference backend: the real service when attached, else memory. */
-  const backend = () =>
-    resolveService() ?? {
-      async resolve(ref) {
-        const value = memory.get(ref);
-        return typeof value === "string" && value !== "" ? { value, source: "memory" } : undefined;
-      },
-      async set(ref, value) {
-        memory.set(ref, value);
-      },
-      async unset(ref) {
-        memory.delete(ref);
-      }
-    };
-
   return {
     /**
      * Persist a typed-in key as the `SENSENOVA_API_KEY` reference.

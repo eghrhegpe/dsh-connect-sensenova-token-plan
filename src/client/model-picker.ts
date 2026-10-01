@@ -162,7 +162,7 @@ export function ModelPicker({ llm, onDone, tt }: {
     setNotice(null);
     const posted = JSON.stringify(ids);
     try {
-      const payload = await postJsonOrThrow(MODELS_PATH, { enabledModelIds: ids });
+      await postJsonOrThrow(MODELS_PATH, { enabledModelIds: ids });
       // Matches hostKey as soon as the poll after onDone() echoes it.
       setSavedKey(posted);
       onDone?.();

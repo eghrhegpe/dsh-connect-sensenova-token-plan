@@ -27,7 +27,7 @@
  * @module dsh-connect-sensenova-token-plan/raccoon-publish
  */
 
-import { RACCOON_PROVIDER_ID, RACCOON_DISPLAY_NAME, raccoonRoster } from "./raccoon-models.ts";
+import { RACCOON_PROVIDER_ID, RACCOON_DISPLAY_NAME } from "./raccoon-models.ts";
 import { str, redactSecrets } from "./util.ts";
 import { name as pluginName } from "./host-config.ts";
 import type { RaccoonPublisherDeps } from "./types.ts";

@@ -67,7 +67,7 @@ export async function readStored(wiring, state) {
  * "please log in again" path just because this plugin was renamed.
  * @returns {Promise<object|undefined>} the adopted grant, or undefined.
  */
-export async function adoptLegacyGrant(wiring, state) {
+export async function adoptLegacyGrant(wiring, _state) {
   const { backend, key, credentialKey } = wiring;
   const LEGACY_SCOPE = "dsh-llm-rate-panel";
   const RECORD_ID = "sensenova-console";

@@ -24,7 +24,7 @@
  * @module dsh-connect-sensenova-token-plan/raccoon-store
  */
 
-import { obj, str, verbatim } from "./util.ts";
+import { obj, str } from "./util.ts";
 import {
   decodeRaccoonJwtExpMs,
   refreshRaccoonCredential
@@ -101,20 +101,6 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
     const value = typeof credentials === "function" ? credentials() : credentials;
     return value ?? null;
   };
-
-  const backend = () =>
-    resolveService() ?? {
-      async resolve(ref) {
-        const held = memory.get(ref);
-        return typeof held === "string" && held !== "" ? { value: held, source: "memory" } : undefined;
-      },
-      async set(ref, value) {
-        memory.set(ref, value);
-      },
-      async unset(ref) {
-        memory.delete(ref);
-      }
-    };
 
   const storeNow = async (credential) => {
     const serialized = serializeRaccoonCredential(credential);
