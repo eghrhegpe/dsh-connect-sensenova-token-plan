@@ -57,6 +57,8 @@ jobs:
         node-version: ['22', '24']
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
@@ -64,6 +66,15 @@ jobs:
           # registry), so the npm cache keys off package.json instead.
           cache: npm
           cache-dependency-path: package.json
+      # Commit floor (zero-dep, test/commit-lint.mjs): checks the new commit
+      # subjects in origin/main..HEAD. It is a hard signal of a *message*
+      # regression, orthogonal to the suites — a bad message should not hide
+      # behind a green test run. Unresolvable base ref → it lints HEAD and says
+      # so, so it never hard-fails on a fetch quirk.
+      - name: Commit floor (message conventions)
+        run: |
+          git fetch --depth=200 origin main || true
+          node test/commit-lint.mjs --range origin/main..HEAD
       # The offline suites run on bare node (they import the src/*.ts sources
       # directly via native type stripping). This install exists for ONE suite:
       # build-gate, which runs the real tsdown build. --legacy-peer-deps is
@@ -113,6 +124,7 @@ jobs:
           node test/draw.test.mjs
           node test/doctor.test.mjs
           node test/raccoon.test.mjs
+          node test/state-segmentation.test.mjs
           # The typecheck gate is not a *.test.mjs (same exemption as the build
           # gate): it runs the local tsc pinned in devDependencies against
           # tsconfig.json, so the strict flags there cannot rot silently. It

@@ -14,6 +14,8 @@
 
 例：`fix: 被拒的登录不再自动重试，避免错密码把账号锁死`
 
+> **提交信息底线（零依赖门禁）**：`npm run commit:lint` 检查最近一条提交，CI 检查 `origin/main..HEAD` 内的新提交。硬性要求：必须有 `type:` 前缀（`feat`/`fix`/`docs`/`test`/`chore`/`style`/`refactor`/`perf`/`build`/`ci`，可选 `type(scope):`）；主题不能是裸文件名；不得含反斜杠（Windows 路径串入）；前缀后至少几个实义字。正文「为什么」靠自觉，机器不查。`test\raccoon.test.mjs`、`小浣熊样式美化` 这类就是被这条挡下的典型。
+
 ---
 
 ## 2. 改动 Host 半边必须重启

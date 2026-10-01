@@ -7,7 +7,8 @@
 ## 1. 运行
 
 ```powershell
-npm test       # 依次跑 auth / store / store-baseline / routes / panel / render / parsers / provider / config / package / docs / wiring / contract / retry / error-fix / peer-contract / draw / doctor / raccoon，末尾 typecheck-gate（用 devDeps 钉住的本地 tsc 跑 tsconfig.json 的严格开关；无 typescript 则 SKIP）+ build-gate（重建 src/ 全部源码并验证 lib/ 与 client.js 产物；无 tsdown 则 SKIP，见 ROADMAP §6.2）+ e2e-gate（无 dsh CLI 则 SKIP）
+npm test       # 依次跑 auth / store / store-baseline / routes / panel / render / parsers / provider / config / package / docs / wiring / contract / retry / error-fix / peer-contract / draw / doctor / raccoon / state-segmentation，末尾 typecheck-gate（用 devDeps 钉住的本地 tsc 跑 tsconfig.json 的严格开关；无 typescript 则 SKIP）+ build-gate（重建 src/ 全部源码并验证 lib/ 与 client.js 产物；无 tsdown 则 SKIP，见 ROADMAP §6.2）+ e2e-gate（无 dsh CLI 则 SKIP）
+npm run commit:lint  # 提交信息底线（零依赖）：检查 HEAD 一条提交；CI 检查 origin/main..HEAD 内的新提交（见下方 commit 红线）
 npm run test:e2e    # 只跑端到端：真 Host + 假平台，需 dsh CLI 在 PATH
 npm run test:live   # 仅 live-jwks.test.mjs，需联网，验证 JWKS 文档可达
 npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_KEY，重放商汤推理契约
@@ -41,6 +42,7 @@ npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_K
 | `test/peer-contract.test.mjs` | **peer 契约护栏（peer 可达时）**：钉死「peer 判 QUOTA + 含限频信号 → 本插件 `reclassifyFinish` 纠正回 RATE_LIMIT」的端到端行为契约；`extractStructuredType` 必须仍能从 peer 拼好的 message 回捞结构化 type；peer 缺席则 SKIP |
 | `test/doctor.test.mjs` | **CLI 诊断（peer-free）**：`doctor.ts` 对状态文件只读扫描——provider / draw / catalog 开关与生效值、profile 分段目录、零凭据读取 |
 | `test/raccoon.test.mjs` | **第二上游（peer-free）**：小浣熊协议层（扫码信封解析、refresh 轮换、余额/目录读取）、两个 store、描述符映射、publisher 状态机、QR 编码器、开关 store |
+| `test/state-segmentation.test.mjs` | **PITFALLS §23 分段形状门禁（peer-free，只读源码）**：catalog / provider / draw / raccoon-switch 四个开关态必须走 `profileStateDir(name, profile)`、`profileStateDir(name, null)` 必须回退共享目录、throttle 与凭据 store（api-key / raccoon）**故意不分段**；`index.ts` 把 `profile` 只传给那四个、`createFileThrottleStore()` 不得带 profile；别名「统一它们」即红 |
 | `test/wiring.test.mjs` | **真实 Cordis 容器**里的装配：`inject` 解析、服务注册、路由挂载与卸载、配置错误；第三步的可选 `ctx.get("llm")` 注册对（`registerAdapter` + `registerConfigurableProviders`，id `sensenova-token-plan`）、opt-in 关闭不注册、fiber dispose 释放注册对与三条路由 |
 | `test/live-jwks.test.mjs` | （仅 `test:live`）真实拉取 JWKS 文档，确认封包公钥可达 |
 | `test/live-contract.mjs` | （仅 `test:live:contract`）重放 `test/baselines/sensenova-contract.json` 对商汤推理端点：`/v1/models` 目录核对 + 少量 `reasoning_effort:"none"` 探针（限流友好，每格 1 请求不重试）；红 = 平台方言漂移，**不是回归**，修法走 `SENSENOVA-API.md` §7 注释层 |

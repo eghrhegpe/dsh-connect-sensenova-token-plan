@@ -35,7 +35,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build:client": "tsdown -c tsdown.config.mjs",
-    "test": "node test/auth.test.mjs && node test/store.test.mjs && node test/store-baseline.test.mjs && node test/routes.test.mjs && node test/panel.test.mjs && node test/render.test.mjs && node test/parsers.test.mjs && node test/provider.test.mjs && node test/config.test.mjs && node test/package.test.mjs && node test/docs.test.mjs && node test/wiring.test.mjs && node test/contract.test.mjs && node test/retry.test.mjs && node test/error-fix.test.mjs && node test/peer-contract.test.mjs && node test/draw.test.mjs && node test/doctor.test.mjs && node test/raccoon.test.mjs && node test/typecheck-gate.mjs && node test/build-gate.mjs && node test/e2e-gate.mjs",
+    "test": "node test/auth.test.mjs && node test/store.test.mjs && node test/store-baseline.test.mjs && node test/routes.test.mjs && node test/panel.test.mjs && node test/render.test.mjs && node test/parsers.test.mjs && node test/provider.test.mjs && node test/config.test.mjs && node test/package.test.mjs && node test/docs.test.mjs && node test/wiring.test.mjs && node test/contract.test.mjs && node test/retry.test.mjs && node test/error-fix.test.mjs && node test/peer-contract.test.mjs && node test/draw.test.mjs && node test/doctor.test.mjs && node test/raccoon.test.mjs && node test/state-segmentation.test.mjs && node test/typecheck-gate.mjs && node test/build-gate.mjs && node test/e2e-gate.mjs",
+    "commit:lint": "node test/commit-lint.mjs",
     "test:live": "node test/live-jwks.test.mjs",
     "test:live:contract": "node test/live-contract.mjs",
     "test:e2e": "node test/e2e.mjs",
