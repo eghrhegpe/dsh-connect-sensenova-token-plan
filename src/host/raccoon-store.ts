@@ -218,16 +218,22 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
 
     /**
      * The secret-free description the routes and panel report.
-     * @returns {Promise<{hasCredential: boolean, source: ("credentials"|"memory"|null), ephemeral: boolean, nickname: string, expiresAtMs: number|null}>}
+     * @returns {Promise<{hasCredential: boolean, source: ("credentials"|"memory"|null), ephemeral: boolean, nickname: string, expiresAtMs: number|null, refreshExpiresAtMs?: number}>}
      */
     async state() {
       const { credential, source } = await this.resolve();
+      // The refresh token's own window (≈30 days): how long the login survives
+      // WITHOUT a re-scan. Absent when the walk never carried one.
+      const refreshExpiresAtMs = credential?.refreshToken !== undefined && credential.refreshToken !== ""
+        ? decodeRaccoonJwtExpMs(credential.refreshToken)
+        : undefined;
       return {
         hasCredential: credential !== null,
         source,
         ephemeral: resolveService() === null,
         nickname: credential?.nickname ?? "",
-        expiresAtMs: credential?.expiresAtMs ?? null
+        expiresAtMs: credential?.expiresAtMs ?? null,
+        ...(refreshExpiresAtMs !== undefined ? { refreshExpiresAtMs } : {})
       };
     }
   };

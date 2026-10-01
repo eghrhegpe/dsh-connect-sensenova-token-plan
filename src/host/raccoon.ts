@@ -298,9 +298,15 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
  * Read the account's credit balance. Read-only: the gateway has NO endpoint
  * for the daily 300-point grant (the server awards it automatically as
  * `daily_grant`), so the panel must not offer a check-in button.
- * @param {object} credential - `{ access_token }`.
+ *
+ * The read carries the gateway's own breakdown of that total (the live
+ * envelope declares `available_points` beside `daily_points`,
+ * `reward_points`, `monthly_points`, `topup_points`): a part is reported
+ * only when the gateway declared it — a zero is a fact, so it is reported
+ * too, and the panel decides what to show.
+ * @param {object} credential - `{ access_token }` (or the parsed store shape).
  * @param {typeof fetch} [fetcher] - injected fetch.
- * @returns {Promise<number|null>} the balance, or `null` when unreadable.
+ * @returns {Promise<object|null>} `{ total, daily?, reward?, monthly?, topup? }` or `null` when unreadable.
  */
 export async function fetchRaccoonBalance(credential: any, fetcher?: typeof fetch, onFail?: (why: string) => void) {
   const effective = fetcher ?? globalThis.fetch;
@@ -323,8 +329,17 @@ export async function fetchRaccoonBalance(credential: any, fetcher?: typeof fetc
       onFail?.(`envelope code=${envelope.code} message=${envelope.message}`);
       return null;
     }
-    const value = numOrNullSafe(envelope.data.available_points ?? envelope.data.balance ?? envelope.data.available ?? envelope.data.amount);
-    return value;
+    const total = numOrNullSafe(envelope.data.available_points ?? envelope.data.balance ?? envelope.data.available ?? envelope.data.amount);
+    const read = { total };
+    const daily = numOrNullSafe(envelope.data.daily_points);
+    const reward = numOrNullSafe(envelope.data.reward_points);
+    const monthly = numOrNullSafe(envelope.data.monthly_points);
+    const topup = numOrNullSafe(envelope.data.topup_points);
+    if (daily !== null) read.daily = daily;
+    if (reward !== null) read.reward = reward;
+    if (monthly !== null) read.monthly = monthly;
+    if (topup !== null) read.topup = topup;
+    return read;
   } catch (why) {
     onFail?.(why instanceof Error ? `${why.name}: ${why.message}` : String(why));
     return null;

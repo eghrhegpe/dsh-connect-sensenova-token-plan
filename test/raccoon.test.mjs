@@ -220,14 +220,24 @@ function section(title) {
     json: async () => body
   });
   try {
-    check("the balance reads the gateway figure",
-      (await fetchRaccoonBalance({ access_token: "t" }, fakeFetcher({ code: 0, data: { balance: 300 } }))) === 300);
+    const read = await fetchRaccoonBalance({ access_token: "t" }, fakeFetcher({ code: 0, data: { balance: 300 } }));
+    check("the balance total is the gateway figure", read !== null && read.total === 300, JSON.stringify(read));
     check("a zero balance is a valid figure, not null",
-      (await fetchRaccoonBalance({ access_token: "t" }, fakeFetcher({ code: 0, data: { balance: 0 } }))) === 0);
+      ((await fetchRaccoonBalance({ access_token: "t" }, fakeFetcher({ code: 0, data: { balance: 0 } })))).total === 0);
     check("an unreadable balance is null, not a throw",
       (await fetchRaccoonBalance({ access_token: "t" }, async () => {
         throw new Error("network down");
       })) === null);
+    // The gateway's own split of the total: a part is carried when declared
+    // (even a zero — a fact), and the total still reads from the legacy
+    // `available_points` alias chain.
+    const split = await fetchRaccoonBalance({ access_token: "t" },
+      fakeFetcher({ code: 0, data: { available_points: 10129, daily_points: 1129, reward_points: 9000, monthly_points: 0, topup_points: 0 } }));
+    check("the balance split carries the declared parts",
+      split.total === 10129 && split.daily === 1129 && split.reward === 9000 && split.monthly === 0 && split.topup === 0, JSON.stringify(split));
+    const noSplit = await fetchRaccoonBalance({ access_token: "t" }, fakeFetcher({ code: 0, data: { balance: 300 } }));
+    check("undeclared parts stay absent, not zero-filled",
+      noSplit.total === 300 && noSplit.daily === undefined && noSplit.reward === undefined && noSplit.monthly === undefined && noSplit.topup === undefined, JSON.stringify(noSplit));
 
     // The catalog: the chat category's visible models, normalized to the row
     // shape the adapter consumes. A missing/failed read is null → fallback.
@@ -251,11 +261,11 @@ function section(title) {
     const seen = [];
     const captureFetcher = async (url, init) => {
       seen.push({ url, headers: init?.headers ?? {} });
-      return { ok: true, status: 200, json: async () => ({ code: 0, data: { balance: 1129, categories: [] } }) };
+      return { ok: true, status: 200, json: async () => ({ code: 0, data: { available_points: 1129, daily_points: 1129, categories: [] } }) };
     };
     const camelCred = { accessToken: "store-token", refreshToken: "rt", officeIdentity: "" };
     check("the balance read sends the Bearer token from a camelCase credential",
-      (await fetchRaccoonBalance(camelCred, captureFetcher)) === 1129 &&
+      ((await fetchRaccoonBalance(camelCred, captureFetcher))).total === 1129 &&
       seen[0]?.headers?.Authorization === "Bearer store-token");
     check("the catalog read sends the Bearer token from a camelCase credential",
       (await fetchRaccoonCatalog(camelCred, captureFetcher)) === null &&
@@ -364,6 +374,20 @@ function section(title) {
     const ephemeral = createRaccoonStore({ credentials: null });
     await ephemeral.save({ accessToken: "mem" });
     check("a Host without a credentials service is ephemeral", (await ephemeral.state()).ephemeral === true && (await ephemeral.state()).hasCredential === true);
+
+    // state() names the refresh window too: the panel's "how long until I
+    // must re-scan" fact. A real JWT `exp` is decoded; an absent refresh
+    // token leaves the field out, never null-fills it.
+    const jwtExp = Math.floor(Date.now() / 1000) + 86_400 * 30;
+    const jwtRefresh = `h.${Buffer.from(JSON.stringify({ exp: jwtExp })).toString("base64url")}.s`;
+    const refreshWindow = createRaccoonStore({ credentials: null });
+    await refreshWindow.save({ accessToken: "mem-a", refreshToken: jwtRefresh });
+    check("state() reports the refresh token's window",
+      (await refreshWindow.state()).refreshExpiresAtMs === jwtExp * 1000);
+    const noRefresh = createRaccoonStore({ credentials: null });
+    await noRefresh.save({ accessToken: "mem-only" });
+    check("state() omits refreshExpiresAtMs when no refresh token is stored",
+      (await noRefresh.state()).refreshExpiresAtMs === undefined);
   } catch (error) {
     fail("credential store", error);
   }

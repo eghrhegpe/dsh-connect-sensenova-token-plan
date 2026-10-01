@@ -46,7 +46,15 @@ interface RaccoonState {
   expiresAtMs?: number | null;
   /** Whether that token has lapsed — `loggedIn` can be true while this is true. */
   credentialExpired?: boolean;
+  /** The refresh token's own window (≈30 days): how long until a re-scan. */
+  refreshExpiresAtMs?: number | null;
   balance?: number | null;
+  /** The gateway's split of the total — only parts it declared. */
+  balanceBreakdown?: { daily?: number; reward?: number; monthly?: number; topup?: number } | null;
+  /** The concrete reason a balance read came back empty (absent when fine). */
+  balanceDetail?: string;
+  /** Which roster the tab is drawing: the gateway catalogue or the built-in table. */
+  modelsSource?: "live" | "fallback";
   models?: RaccoonModel[];
   providerRegistered?: boolean;
   providerError?: string;
@@ -200,6 +208,18 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
   // The credential's own clock (the JWT `exp` the route re-reads after any
   // in-flight rotation): rendered next to the balance it guards.
   const expiresAt = typeof state?.expiresAtMs === "number" ? state.expiresAtMs : null;
+  // The refresh token's window: the deadline after which ONLY a re-scan gets
+  // back in. `when()` carries the day across midnight.
+  const refreshAt = typeof state?.refreshExpiresAtMs === "number" ? state.refreshExpiresAtMs : null;
+  // The gateway's split of the total, as parts it actually declared. A zero
+  // part is still a figure worth showing (it is a fact, not a gap).
+  const breakdown = state?.balanceBreakdown;
+  const breakdownParts = [
+    breakdown?.daily !== undefined ? format(tt("raccoon.partDaily"), { n: count(breakdown.daily) }) : null,
+    breakdown?.reward !== undefined ? format(tt("raccoon.partReward"), { n: count(breakdown.reward) }) : null,
+    breakdown?.monthly !== undefined ? format(tt("raccoon.partMonthly"), { n: count(breakdown.monthly) }) : null,
+    breakdown?.topup !== undefined ? format(tt("raccoon.partTopup"), { n: count(breakdown.topup) }) : null
+  ].filter(Boolean).join(" · ");
 
   return h(
     "div",
@@ -295,11 +315,20 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
             { style: { ...S.muted, fontSize: 12, marginBottom: 8 } },
             // `null` is "the gateway did not answer", not "zero". Reading it as
             // 0 would claim a balance the panel never fetched — the exact lie
-            // the roster block refuses to tell, so say "unknown" instead.
+            // the roster block refuses to tell, so say "unknown" instead, and
+            // quote the route's own reason when it has one.
             typeof state?.balance === "number"
               ? format(tt("raccoon.balance"), { balance: count(state.balance) })
-              : tt("raccoon.balanceUnknown")
+              : state?.balanceDetail !== undefined && state?.balanceDetail !== ""
+                ? format(tt("raccoon.balanceUnknownDetail"), { detail: state.balanceDetail })
+                : tt("raccoon.balanceUnknown")
           ),
+          // The gateway's own split of the total (the parts it declared):
+          // "其中 每日 1,129 · 奖励 9,000". Only drawn when a read carried it.
+          breakdownParts !== ""
+            ? h("div", { style: { ...S.muted, fontSize: 12, marginBottom: 8 } },
+                format(tt("raccoon.balanceBreakdown"), { parts: breakdownParts }))
+            : null,
           // The credential's expiry, beside the balance it guards: `when()`
           // carries the day across midnight (a 22:00 rotation expires 01:00 —
           // a bare time would read as today), and it stays drawn while the
@@ -308,11 +337,23 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
             ? h(
                 "div",
                 { style: { ...S.muted, fontSize: 12, marginBottom: 8 }, role: "status" },
-                format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1000) })
+                format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })
+              )
+            : null,
+          // The re-scan deadline: until the refresh token lives the panel
+          // renews itself; after it, the QR code is the only way back.
+          refreshAt !== null
+            ? h(
+                "div",
+                { style: { ...S.muted, fontSize: 12, marginBottom: 8 }, role: "status" },
+                format(tt("raccoon.refreshUntil"), {
+                  date: when(refreshAt / 1e3),
+                  days: Math.max(1, Math.round((refreshAt - Date.now()) / 86_400_000))
+                })
               )
             : null,
           models.length > 0
-            ? h(RaccoonRoster, { models, tt })
+            ? h(RaccoonRoster, { models, tt, source: state?.modelsSource })
             : null
         )
       : null
@@ -339,14 +380,20 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
  * @param {object} props
  * @param {RaccoonModel[]} props.models - the rows the route reported.
  * @param {import("./runtime.ts").Tt} props.tt - the dictionary.
+ * @param {("live"|"fallback")?} [props.source] - which table these rows came
+ *   from; a silent fallback is named so the panel cannot read the built-in
+ *   table as the gateway's catalogue.
  * @returns {unknown} the roster list element.
  */
-export function RaccoonRoster({ models, tt }: { models: RaccoonModel[]; tt: Tt }): unknown {
+export function RaccoonRoster({ models, tt, source }: { models: RaccoonModel[]; tt: Tt; source?: "live" | "fallback" }): unknown {
   const rows = Array.isArray(models) ? models : [];
   return h(
     "div",
     { style: S.modelPanel },
     h("div", { style: { ...S.muted, fontSize: 12, marginBottom: 6 } }, format(tt("raccoon.models"), { count: count(rows.length) })),
+    source === "fallback"
+      ? h("div", { style: { ...S.muted, fontSize: 11, marginBottom: 6 } }, tt("raccoon.modelsFallback"))
+      : null,
     h(
       "ul",
       { style: S.modelList, role: "list" },

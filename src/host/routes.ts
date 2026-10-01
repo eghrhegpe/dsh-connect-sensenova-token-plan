@@ -636,6 +636,7 @@ export function registerRoutes(ctx, wiring) {
         let loggedIn = false;
         let nickname = "";
         let balance = null;
+        let balanceBreakdown: { daily?: number; reward?: number; monthly?: number; topup?: number } | null = null;
         let balanceDetail: string | null = null;
         let accessTokenPrefix: string | null = null;
         // Diagnostics (one-shot, to name the 401's owner): which layer the
@@ -657,8 +658,11 @@ export function registerRoutes(ctx, wiring) {
         // registration stayed up (the publish gate only asks "is there a
         // token?", not "is it live?"), so every request failed with a 401 the
         // panel could not name.
-        let expiresAtMs = null;
+        let expiresAtMs: number | null = null;
         let credentialExpired = false;
+        // The refresh token's window (≈30 days): how long the login survives
+        // before a re-scan is the ONLY way back.
+        let refreshExpiresAtMs: number | null = null;
         try {
           if (raccoonStore !== null && raccoonStore !== undefined) {
             let state = await raccoonStore.state().catch(() => null);
@@ -682,6 +686,9 @@ export function registerRoutes(ctx, wiring) {
                 expiresAtMs = state.expiresAtMs;
                 credentialExpired = Date.now() >= state.expiresAtMs;
               }
+              if (typeof state?.refreshExpiresAtMs === "number") {
+                refreshExpiresAtMs = state.refreshExpiresAtMs;
+              }
               const { credential } = await raccoonStore.resolve().catch(() => ({ credential: null }));
               if (credential?.accessToken) {
                 // Diagnostic: only the prefix, never the token, so a mismatch
@@ -698,10 +705,19 @@ export function registerRoutes(ctx, wiring) {
                 // `onFail` reports the concrete reason a read came back empty —
                 // a broken request must not look like "the gateway has nothing
                 // to say". Surfaced as `balanceDetail` for debugging.
-                balance = await fetchRaccoonBalance(credential, undefined, (why) => { balanceDetail = why; }).catch((why) => {
+                const balanceRead = await fetchRaccoonBalance(credential, undefined, (why) => { balanceDetail = why; }).catch((why) => {
                   balanceDetail = `call rejected: ${why instanceof Error ? why.message : String(why)}`;
                   return null;
                 });
+                balance = balanceRead?.total ?? null;
+                if (balanceRead !== null && balanceRead !== undefined) {
+                  const parts = {};
+                  if (balanceRead.daily !== undefined) parts.daily = balanceRead.daily;
+                  if (balanceRead.reward !== undefined) parts.reward = balanceRead.reward;
+                  if (balanceRead.monthly !== undefined) parts.monthly = balanceRead.monthly;
+                  if (balanceRead.topup !== undefined) parts.topup = balanceRead.topup;
+                  if (Object.keys(parts).length > 0) balanceBreakdown = parts;
+                }
               }
             }
           }
@@ -740,7 +756,9 @@ export function registerRoutes(ctx, wiring) {
           .map((key) => `${key}=${process.env[key]}`);
         // The roster the adapter offers: the live catalogue when a credential
         // exists (the switch's own publish reads it too), else the static
-        // fallback so the panel still shows the known models.
+        // fallback so the panel still shows the known models. `modelsSource`
+        // names which one the panel is looking at — a silent fallback reads
+        // as "the gateway says" when it is actually the built-in table.
         let models = null;
         try {
           if (raccoonStore !== null && raccoonStore !== undefined) {
@@ -752,9 +770,8 @@ export function registerRoutes(ctx, wiring) {
         } catch {
           models = null;
         }
-        const roster = models !== null && Array.isArray(models) && models.length > 0
-          ? models
-          : RACCOON_FALLBACK_MODELS;
+        const rosterLive = models !== null && Array.isArray(models) && models.length > 0;
+        const roster = rosterLive ? models : RACCOON_FALLBACK_MODELS;
         const publisherState = raccoonPublisher?.state ?? null;
         return {
           ok: true,
@@ -767,11 +784,13 @@ export function registerRoutes(ctx, wiring) {
           // tab renders a distinct re-login affordance on this flag.
           credentialExpired,
           ...(expiresAtMs !== null ? { expiresAtMs } : {}),
+          ...(refreshExpiresAtMs !== null ? { refreshExpiresAtMs } : {}),
           // The in-flight scan (if a login walk is waiting): the tab re-renders
           // its QR from this on every poll, so a second tab / a refresh
           // continues the SAME scan instead of voiding it.
           ...(raccoonScan !== null ? { scanUrl: raccoonScan.url, scanCode: raccoonScan.code } : {}),
           balance,
+          ...(balanceBreakdown !== null ? { balanceBreakdown } : {}),
           ...(balanceDetail !== null ? { balanceDetail } : {}),
           ...(accessTokenPrefix !== null ? { accessTokenPrefix } : {}),
           ...(credentialSource !== null ? { credentialSource } : {}),
@@ -780,6 +799,7 @@ export function registerRoutes(ctx, wiring) {
           ...(accessTokenFingerprint !== null ? { accessTokenFingerprint } : {}),
           hostProxyEnv,
           models: roster,
+          modelsSource: rosterLive ? "live" : "fallback",
           providerRegistered: publisherState?.registered === true,
           ...(publisherState?.error !== null && publisherState?.error !== undefined ? { providerError: publisherState.error } : {}),
           ...(error !== null ? { error } : {})
