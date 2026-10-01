@@ -17,7 +17,7 @@
  * the hook-free {@link RaccoonRoster}, which the suite CAN mount and pin, and
  * this tab's route is covered by `test/raccoon.test.mjs`.
  */
-import { RACCOON_PATH } from "./const.ts";
+import { RACCOON_PATH, RACCOON_SITE_URL } from "./const.ts";
 import { count, format, tokenSize, when } from "./format.ts";
 import { postJson, postJsonOrThrow } from "./http.ts";
 import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
@@ -419,12 +419,16 @@ export function RaccoonTab({
     // The "what is this" explanation is the tab's footer, not its lead: a
     // reader working top-down hits the actionable controls first, and the
     // background ("independent of the credit pools") lands once it can be
-    // understood.
+    // understood. The client download rides in the same footer — resident,
+    // state-independent (the credits offer holds whether or not the panel
+    // session is signed in), and the same visual contract as the API-key
+    // form's official-site link.
     h(
       "div",
       { style: { ...S.muted, fontSize: 12, marginTop: 14 } },
       tt("raccoon.desc")
-    )
+    ),
+    h("a", { href: RACCOON_SITE_URL, target: "_blank", rel: "noreferrer", style: { color: "var(--dsw-alias-label-primary)", fontSize: 12, marginTop: 10, display: "inline-block", textDecoration: "underline", cursor: "pointer" } }, tt("raccoon.clientLink"))
   );
 }
 

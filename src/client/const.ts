@@ -34,3 +34,10 @@ export const RACCOON_PATH = "/api/dsh-connect-sensenova-token-plan/raccoon";
  * sends it in a credentialed request.
  */
 export const SENSENOVA_SIGNUP_URL = "https://www.sensenova.cn/token-plan";
+
+/**
+ * The Raccoon gateway's own site (desktop client download / limited-time
+ * credits). Same discipline as {@link SENSENOVA_SIGNUP_URL}: a plain public
+ * URL, opened in a new tab only, never used in a credentialed request.
+ */
+export const RACCOON_SITE_URL = "https://xiaohuanxiong.com/";
