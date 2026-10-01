@@ -192,13 +192,13 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
         start();
       }
     };
-    if (typeof document !== "undefined" && document.addEventListener) {
+    if (typeof document !== "undefined" && "addEventListener" in document) {
       document.addEventListener("visibilitychange", onVisibility);
     }
     return () => {
       alive = false;
       stop();
-      if (typeof document !== "undefined" && document.addEventListener) {
+      if (typeof document !== "undefined" && "addEventListener" in document) {
         document.removeEventListener("visibilitychange", onVisibility);
       }
     };

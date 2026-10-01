@@ -1,10 +1,10 @@
 {
-  "$comment": "Per-file strictNullChecks allowlist — the first wedge of docs/IMPROVEMENTS.md §8: `src/client/qr.ts` is zero-import and peer-free (pure QR matrix math), so it is the one SNC-clean subset whose failure mode is a mis-drawn QR, never a locked account. Main tsconfig EXCLUDES this file; this config checks it with strictNullChecks ON. Every module the allowlist graduates into strictNullChecks moves from the main config's include to a line here (and gets added back to the main config's include ONLY after the whole project flips). Run through test/typecheck-gate.mjs, which executes both configs.",
+  "$comment": "Per-file strictNullChecks allowlist (docs/IMPROVEMENTS.md §8). The whole-project flip costs ~170 sites with no per-file granularity, so modules graduate ONE AT A TIME: the main tsconfig EXCLUDES every file listed here, and each must hold strictNullChecks + noUncheckedIndexedAccess clean. Graduated so far: the whole client half — qr.ts (pure QR math, zero imports, verified by a jsQR decode round-trip) and the render/form layer (cards/account-form/panel-page; failure mode is a mis-drawn panel, never a locked account). Next in line: the non-red-line host modules (store/catalog/parse); LAST: the ~40 login-path sites (routes/token-store/auth/publish), which need frame-by-frame review like the store-baseline split. A graduating file moves into `include` here AND gets added to the main config's `exclude` — both in the same commit, or typecheck-gate runs it twice under different rules.",
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noUncheckedIndexedAccess": true,
     "strictNullChecks": true
   },
-  "include": ["src/client/qr.ts", "types/*.d.ts"],
+  "include": ["src/client/qr.ts", "src/client/cards.ts", "src/client/account-form.ts", "src/client/panel-page.ts", "types/*.d.ts"],
   "exclude": []
 }

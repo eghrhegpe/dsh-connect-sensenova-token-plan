@@ -26,5 +26,5 @@
     "resolveJsonModule": true
   },
   "include": ["src/host", "src/client", "types/*.d.ts"],
-  "exclude": ["node_modules", "upstream", "lib", "test", "assets", "docs", ".github", ".box-agent", ".box-agent-scratch", "src/client/qr.ts"]
+  "exclude": ["node_modules", "upstream", "lib", "test", "assets", "docs", ".github", ".box-agent", ".box-agent-scratch", "src/client/qr.ts", "src/client/cards.ts", "src/client/account-form.ts", "src/client/panel-page.ts"]
 }

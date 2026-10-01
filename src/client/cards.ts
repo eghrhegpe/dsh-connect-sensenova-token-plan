@@ -66,7 +66,14 @@ export function usageTone(pct: number): { fill: Record<string, unknown>; color: 
  */
 export function QuotaCard({ label, window, tt }: { label: string; window: QuotaWindow | null | unknown; tt: Tt }): unknown {
   if (window === null || typeof window !== "object") return null;
-  const { limit, used, remaining, resetAt } = window as QuotaWindow;
+  // Optional on the wire (parsePools normalizes, but the client keeps reading
+  // defensively). `limit`/`used` default to 0: absent figures fail the `> 0`
+  // guard exactly as the old `undefined > 0 === false` did — "unknown", not
+  // a fake percentage. `remaining` stays undefined on purpose: ANY numeric
+  // default would light one of the two comparisons (0 <= 0 shows the
+  // exhaustion chip, a positive number shows a reset line), while the old
+  // undefined made both read false — "say nothing when nothing is known".
+  const { limit = 0, used = 0, remaining, resetAt } = window as QuotaWindow;
   // A missing/zero limit is UNKNOWN, not "0.0% remaining" — claiming the
   // window is drained when the platform simply said nothing is a lie, so
   // the headline reads "—" and the bar stays empty.
@@ -81,7 +88,10 @@ export function QuotaCard({ label, window, tt }: { label: string; window: QuotaW
       "div",
       { style: S.quotaTop },
       h("span", { style: S.quotaLabel }, label),
-      remaining <= 0
+      // An absent `remaining` renders NEITHER chip (see the destructure
+      // comment): the guard is the old `undefined <= 0 === false` made
+      // explicit for the type checker.
+      typeof remaining === "number" && remaining <= 0
         ? h("span", { style: { ...S.chip, color: "var(--dsw-alias-state-error-primary)", borderColor: "var(--dsw-alias-state-error-primary)" } }, tt("pool.exhausted"))
         : null
     ),
@@ -103,7 +113,7 @@ export function QuotaCard({ label, window, tt }: { label: string; window: QuotaW
       h("span", { style: S.quotaUsed }, `${tt("pool.used")} ${count(used)} / ${count(limit)}`),
       // `when` not `clock`: the weekly reset can land on another day, and
       // a bare HH:MM reads as "later today" — wrong and alarming.
-      remaining > 0 && resetAt ? h("span", { style: S.quotaReset }, format(tt("pool.reset"), { time: when(resetAt) })) : null
+      typeof remaining === "number" && remaining > 0 && resetAt ? h("span", { style: S.quotaReset }, format(tt("pool.reset"), { time: when(resetAt) })) : null
     )
   );
 }
@@ -128,7 +138,9 @@ export function PoolCard({ pool, tt }: { pool: PoolData; tt: Tt }): unknown {
       h("span", { style: S.chip }, pool.poolType === "dedicated" ? tt("pool.dedicated") : tt("pool.default")),
       h("span", { style: S.spacer }),
       // Spendable grant money belongs up with the headline, not buried.
-      pool.grantBalance > 0
+      // `grantBalance` is optional on the wire; `?? 0` keeps the `> 0` guard
+      // reading exactly as the old implicit `undefined > 0 === false` did.
+      (pool.grantBalance ?? 0) > 0
         ? h("span", { style: S.grantChip, title: format(tt("pool.grant"), { balance: count(pool.grantBalance) }) }, format(tt("pool.grant"), { balance: count(pool.grantBalance) }))
         : null
     ),

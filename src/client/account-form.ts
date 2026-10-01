@@ -127,8 +127,10 @@ export function AccountForm({ auth, onDone, tt, bare, snapshotAt }: {
       }
       // Only say "wrong password" when the platform said so. Every other
       // refusal gets its own line, and anything unrecognised shows the
-      // platform's own words rather than a guess.
-      if (typeof REFUSAL_TEXT[code] === "string") {
+      // platform's own words rather than a guess. A missing `code` is by
+      // definition not a known refusal — the old `REFUSAL_TEXT[undefined]`
+      // read missed and fell through to the same lines the guard takes now.
+      if (typeof code === "string" && typeof REFUSAL_TEXT[code] === "string") {
         setFormError(tt(REFUSAL_TEXT[code]));
         setFormDetail(typeof body?.detail === "string" && body.detail !== "" ? body.detail : null);
         return;

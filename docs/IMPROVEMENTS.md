@@ -480,17 +480,25 @@ tsconfig 严格开关分档推进的收尾评估。前四档（零成本 8 项 �
    的验证纪律相悖。
 
 **裁定（2026-10-01 更新，最低风险子集已毕业）**：整体硬开判为"下一档独立大 PR"，不动；
-但本档描述的**第一把楔子已落地**——`src/client/qr.ts` 经 `tsconfig.strict-null.json`
-（per-file strictNullChecks allowlist，主配置排除该文件）纳入 SNC 强制，由
-`test/typecheck-gate.mjs` 跑两份 config 守门。毕业手法是逐处 `!` 断言（下标越界由
-size×size 循环构造排除）+ 常量表补类型，**运行期语义零改动**；正确性由 raccoon.test
-的 **jsQR 解码回原 payload**（v1–v10 各一探针 + 真登录 URL）背书——这是该文件注释
-自陈的 ground-truth（"结构断言测不出能不能扫，解码能"），比任何类型注解都硬。
+但本档描述的**最低风险子集已全部落地**——**整个 client 半区**经 `tsconfig.strict-null.json`
+（per-file strictNullChecks allowlist，主配置排除这些文件）纳入 SNC + `noUncheckedIndexedAccess`
+强制，由 `test/typecheck-gate.mjs` 跑两份 config 守门。毕业一个文件=移进本 include +
+加进主配置 exclude（同一 commit，否则同一文件被两套规则跑两遍）。
 
-**剩余（真·backlog，非本档范围）**：`strictNullChecks` 其余 ~94 处按风险递增序切——
-client 渲染散布（cards/account-form/panel-page，改坏只影响显示）→ **最后**才是
-host 登录红线的 ~40（routes/token-store/auth/publish），逐处需人判 null 语义，
-按 `store-baseline` 那样的"逐帧评审 + 显式重生成"规格做，独立大 PR，绝不搭本轮顺风车。
-一个文件一个文件地毕业：移进 `tsconfig.strict-null.json` 的 include、从主配置 exclude，
-门禁自动覆盖。
+已毕业（client 半区，SNC 计数 0）：
+- **`src/client/qr.ts`（48 处）**：零 import、peer-free、纯点阵数学；`!` 断言（越界由
+  size×size 循环构造排除）+ 两张 ISO 常量表补类型，运行期语义零改动。正确性由 raccoon.test
+  的 **jsQR 解码回原 payload**（v1–v10 探针 + 真登录 URL）背书——该文件注释自陈的 ground-truth。
+- **`cards.ts` / `account-form.ts` / `panel-page.ts`（9 处）**：渲染/表单层，失败模式是"面板画错"，
+  不是"锁号"。手法是**保持旧运行期语义**的显式化，不是改写：`undefined <= 0` 本就 `=== false`，
+  故把两处 `remaining` 比较前加 `typeof === "number"` 守卫（旧的"不知道就什么都不画"一字不差）；
+  `REFUSAL_TEXT[code]` 的 `code` 先判 `typeof === "string"`（旧 `REFUSAL_TEXT[undefined]` 本就不命中、
+  落到同一 else 分支）；`limit/used` 默认 0（旧的 `undefined > 0 === false` 等价）。`panel-page.ts`
+  顺带把恒真的 `document.addEventListener` 真值判断改成 `"addEventListener" in document`
+  （TS2774 提示：函数引用恒真，本意是探测存在性）。
+
+**剩余（真·backlog）**：host 半区 **85 处**（client 已清零）。按风险递增序切——
+非红线的 store/catalog/parse（`catalog-store` 9 / `doctor` 8 / `llm-models` 6 / 各 *-store 5 上）
+→ **最后**才是登录红线 ~40（`routes` 18 / `token-store` 5 / `auth` / 两个 `publish` 各 5），
+逐处需人判 null 语义，按 `store-baseline` 那样的"逐帧评审 + 显式重生成"规格做，独立大 PR。
 
