@@ -528,11 +528,17 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
   check("a non-zero window keeps its reset line and no exhausted chip",
     texts(ok).includes(zh["pool.reset"].replace("{time}", when(1800003600))) && !texts(ok).includes(zh["pool.exhausted"]),
     texts(ok).join("\n"));
-  // 1800003600 is 2027-01-15 17:00 local, months from now, so the day must
-  // travel with the time. The old assertion pinned the bare "重置 17:00", which
-  // read as "resets later TODAY" — the weekly-reset bug.
+  // 1800003600 is 2027-01-15, months from now, so the day must travel with the
+  // time. The old assertion pinned the bare "重置 17:00", which read as "resets
+  // later TODAY" — the weekly-reset bug.
+  //
+  // Both sides derive from the same epoch: `when()` renders in the runner's
+  // LOCAL timezone, and pinning "01-15 17:00" is +0800's rendering — that made
+  // this suite red on every UTC runner (the §30 gate incident).
+  const reset = when(1800003600);
+  const timeOnly = reset.split(" ").pop();
   check("a cross-day weekly reset carries its MM-DD date",
-    texts(ok).join("\n").includes("01-15 17:00") && !texts(ok).join("\n").includes("重置 17:00"),
+    texts(ok).join("\n").includes(reset) && !texts(ok).join("\n").includes(zh["pool.reset"].replace("{time}", timeOnly)),
     texts(ok).join("\n"));
 }
 
@@ -558,8 +564,11 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     when(tomorrow) === `${pad(tomorrowDate.getMonth() + 1)}-${pad(tomorrowDate.getDate())} 18:10`,
     when(tomorrow));
 
+  const farOff = 1800003600;
+  const farOffDate = new Date(farOff * 1000);
   check("a far-off weekly reset still carries its MM-DD date",
-    when(1800003600) === "01-15 17:00", when(1800003600));
+    when(farOff) === `${pad(farOffDate.getMonth() + 1)}-${pad(farOffDate.getDate())} ${pad(farOffDate.getHours())}:${pad(farOffDate.getMinutes())}`,
+    when(farOff));
 
   check("a junk reset time degrades to the em dash",
     when(null) === "—" && when(0) === "—" && when(-1) === "—",
