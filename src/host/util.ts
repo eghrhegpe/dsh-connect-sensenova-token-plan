@@ -72,6 +72,42 @@ export function obj(value?: any): any {
 }
 
 /**
+ * Wait for something that may arrive late, inside a bounded window.
+ *
+ * Mount-time reads run against a Host that is still assembling itself: the
+ * credentials, settings, tools and `llm` services may all register AFTER this
+ * plugin mounts, and a one-shot read that misses one leaves a capability
+ * absent for the whole session with no line anywhere naming the reason. This
+ * is the one loop both such callers use — `resolveServiceWithRetry` in
+ * `lifecycle.ts` (retries a service READ) and the Raccoon mount seed in
+ * `index.ts` (retries a whole seed pass) — so the backoff shape cannot drift
+ * between them.
+ *
+ * The window LENGTH stays with the caller: those two need different budgets
+ * (a single service read settles in a few hundred ms; a seed that must wait
+ * for two services and then fetch a catalogue needs longer), and that is a
+ * design choice, not an accident.
+ * @param {object} job
+ * @param {number} job.attempts - how many attempts the window holds.
+ * @param {number} job.delayMs - backoff base; the wait before attempt N is
+ *   `delayMs * N` (linear, so a slow Host is not hammered).
+ * @param {(attempt: number) => boolean|Promise<boolean>} job.run - one
+ *   attempt; returns true to stop (succeeded, or gave up deliberately), false
+ *   to keep trying inside the window.
+ * @returns {Promise<boolean>} true when an attempt stopped the loop, false
+ *   when the window ran out.
+ */
+export async function retryBounded({ attempts, delayMs, run }) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await run(attempt)) return true;
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+    }
+  }
+  return false;
+}
+
+/**
  * Read a string exactly as it was given, else the fallback.
  *
  * The companion to `str()` for secrets: a password is stored, read back and

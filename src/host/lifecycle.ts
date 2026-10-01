@@ -20,6 +20,7 @@
  */
 import { defineDrawTool } from "./draw.ts";
 import { seedPublisherFromCatalog, catalogSignature } from "./provider-publish.ts";
+import { retryBounded } from "./util.ts";
 import { name } from "./host-config.ts";
 
 /** How many times a mount-time optional-service read is retried. */
@@ -43,6 +44,9 @@ const SERVICE_RETRY_DELAY_MS = 300;
  * This retries the READ ONLY. Whatever it returns is used exactly once by the
  * caller: retrying a call that mutates (a tool registration) would register
  * the same tool twice, and the tools registry cannot tell.
+ *
+ * The loop itself is the shared `retryBounded` (`util.ts`) — the same backoff
+ * shape the Raccoon mount seed uses; only the window length is set here.
  * @param {object} ctx - the host root context.
  * @param {string} service - the service name for `ctx.get`.
  * @param {object} [options]
@@ -68,19 +72,25 @@ export async function resolveServiceWithRetry(
     attempts = SERVICE_RETRY_ATTEMPTS,
     delayMs = SERVICE_RETRY_DELAY_MS
   } = options;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (isDisposed()) return null;
-    try {
-      const value = ctx.get?.(service) ?? ctx[service] ?? null;
-      if (value !== null && value !== undefined) return value;
-    } catch {
-      // A resolver that refuses a read is treated like an absent service.
+  let found = null;
+  await retryBounded({
+    attempts,
+    delayMs,
+    run: () => {
+      if (isDisposed()) return true;
+      try {
+        const value = ctx.get?.(service) ?? ctx[service] ?? null;
+        if (value !== null && value !== undefined) {
+          found = value;
+          return true;
+        }
+      } catch {
+        // A resolver that refuses a read is treated like an absent service.
+      }
+      return false;
     }
-    if (attempt < attempts - 1) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
-    }
-  }
-  return null;
+  });
+  return found;
 }
 
 /**
