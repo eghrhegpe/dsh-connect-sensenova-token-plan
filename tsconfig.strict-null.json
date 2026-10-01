@@ -1,0 +1,10 @@
+{
+  "$comment": "Per-file strictNullChecks allowlist — the first wedge of docs/IMPROVEMENTS.md §8: `src/client/qr.ts` is zero-import and peer-free (pure QR matrix math), so it is the one SNC-clean subset whose failure mode is a mis-drawn QR, never a locked account. Main tsconfig EXCLUDES this file; this config checks it with strictNullChecks ON. Every module the allowlist graduates into strictNullChecks moves from the main config's include to a line here (and gets added back to the main config's include ONLY after the whole project flips). Run through test/typecheck-gate.mjs, which executes both configs.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "strictNullChecks": true
+  },
+  "include": ["src/client/qr.ts", "types/*.d.ts"],
+  "exclude": []
+}

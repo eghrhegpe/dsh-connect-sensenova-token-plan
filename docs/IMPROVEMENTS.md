@@ -450,3 +450,47 @@ no-op 兼容层，**不删**——老 peer 仍需要它）。**不删补丁**是
 验证钉：`render` G4（1M/×N/额度耗尽/档位列表本地化/默认值不逐行重复 + `tokenSize` 直测）、
 `routes` Q2（行含 `maxOutputLength`/`multiplier`/`thinkingLevels` 与 `llm.thinkingDefault`）、
 `retry` §5（投影层 0=未声明 + 档位过滤与 pi-ai 规则一致）。
+
+---
+
+## 8. `strictNullChecks`：为什么它是"另一档"，不是"再开一个开关"（2026-10-01 评估）
+
+tsconfig 严格开关分档推进的收尾评估。前四档（零成本 8 项 → 挂门禁 → `useUnknownInCatchVariables`）
+都是**运行期行为不变的纯类型操作**：要么实测 0 错直接开，要么 cast/改名即可，`store-baseline`
+零漂移 + 全量 e2e 绿就是全部证明。`strictNullChecks` 破了这个模式，故**判为独立 backlog、不在本轮开**。
+
+**实测（2026-10-01，叠加在已开的 10 个严格开关之上）**：`tsc --strictNullChecks` 报 **142** 处
+（早先单测基线 93；差额是 `noUncheckedIndexedAccess` 与本开关的叠加——下标访问同时满足"可能 undefined"
+两个条件后成倍暴露）。分布高度不均：
+
+| 集中度 | 文件 | 处数 | 性质 |
+|---|---|---|---|
+| 一个文件占 1/3 | `src/client/qr.ts` | 48 | 纯渲染数学（QR 点阵生成），peer-free、自成一体 |
+| **登录红线路径** | `routes.ts`(18) + `token-store.ts`(5) + `sensenova-auth.ts`(1) + 两个 publish(各5) + `raccoon.ts`(1) | **~40** | null 语义要人判：该 `??` 还是加守卫还是确认可信 |
+| 其余 | 18 个文件散布 | ~54 | 状态存储、解析、面板渲染 |
+
+**为什么不能像前几档一样硬开**：
+
+1. **无 per-file 粒度**——`strictNullChecks` 是全有或全无，一旦进 tsconfig 就得 142 处全修。
+2. **每处都是运行期决策，不是类型层**：`error?.code` 那种 cast 能机械做（§useUnknownInCatchVariables），
+   但 `obj[key]` 变 `T | undefined` 后，"这里到底会不会 undefined、该给什么默认"必须人判——**猜错就是 bug**，
+   而这些点 40 处落在 AGENTS.md 红线 1/5 的登录路径（错密码锁号、trace 必须落盘）。红线区的 null 决策
+   不能用"全量 e2e 绿"背书——e2e 走的是 happy path + 固定假平台，覆盖不到所有 undefined 分支。
+3. **收益递减**：前四档已把"零风险"的红利吃完；SNC 是"高判断成本换高表达力"，与"按域裁剪、禁止无脑全量"
+   的验证纪律相悖。
+
+**裁定（2026-10-01 更新，最低风险子集已毕业）**：整体硬开判为"下一档独立大 PR"，不动；
+但本档描述的**第一把楔子已落地**——`src/client/qr.ts` 经 `tsconfig.strict-null.json`
+（per-file strictNullChecks allowlist，主配置排除该文件）纳入 SNC 强制，由
+`test/typecheck-gate.mjs` 跑两份 config 守门。毕业手法是逐处 `!` 断言（下标越界由
+size×size 循环构造排除）+ 常量表补类型，**运行期语义零改动**；正确性由 raccoon.test
+的 **jsQR 解码回原 payload**（v1–v10 各一探针 + 真登录 URL）背书——这是该文件注释
+自陈的 ground-truth（"结构断言测不出能不能扫，解码能"），比任何类型注解都硬。
+
+**剩余（真·backlog，非本档范围）**：`strictNullChecks` 其余 ~94 处按风险递增序切——
+client 渲染散布（cards/account-form/panel-page，改坏只影响显示）→ **最后**才是
+host 登录红线的 ~40（routes/token-store/auth/publish），逐处需人判 null 语义，
+按 `store-baseline` 那样的"逐帧评审 + 显式重生成"规格做，独立大 PR，绝不搭本轮顺风车。
+一个文件一个文件地毕业：移进 `tsconfig.strict-null.json` 的 include、从主配置 exclude，
+门禁自动覆盖。
+

@@ -31,7 +31,7 @@ export interface QrMatrix {
 const DATA_CODEWORDS = [0, 16, 28, 44, 64, 86, 108, 124, 154, 182, 216];
 
 /** The EC block structure at level M (ISO/IEC 18004 Table 9, versions 1–10). */
-const EC_BLOCKS_M = [
+const EC_BLOCKS_M: { ecPerBlock: number; groups: [number, number][] }[] = [
   { ecPerBlock: 10, groups: [[1, 16]] },
   { ecPerBlock: 16, groups: [[1, 28]] },
   { ecPerBlock: 26, groups: [[1, 44]] },
@@ -56,19 +56,19 @@ const GF_LOG = new Uint8Array(256);
     x <<= 1;
     if ((x & 0x100) !== 0) x ^= 0x11d;
   }
-  for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
+  for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255]!;
 }
 
 function gfMul(a: number, b: number): number {
   if (a === 0 || b === 0) return 0;
-  return GF_EXP[GF_LOG[a] + GF_LOG[b]];
+  return GF_EXP[GF_LOG[a]! + GF_LOG[b]!]!;
 }
 
 function polyMul(a: number[], b: number[]): number[] {
   const result = new Array<number>(a.length + b.length - 1).fill(0);
   for (let i = 0; i < a.length; i++) {
     for (let j = 0; j < b.length; j++) {
-      result[i + j] ^= gfMul(a[i], b[j]);
+      result[i + j]! ^= gfMul(a[i]!, b[j]!);
     }
   }
   return result;
@@ -76,7 +76,7 @@ function polyMul(a: number[], b: number[]): number[] {
 
 function rsGeneratorPoly(degree: number): number[] {
   let poly: number[] = [1];
-  for (let i = 0; i < degree; i++) poly = polyMul(poly, [1, GF_EXP[i]]);
+  for (let i = 0; i < degree; i++) poly = polyMul(poly, [1, GF_EXP[i]!]);
   return poly;
 }
 
@@ -85,9 +85,9 @@ function rsEncode(data: number[], ecCount: number): number[] {
   const generator = rsGeneratorPoly(ecCount);
   const buffer = data.concat(new Array<number>(ecCount).fill(0));
   for (let i = 0; i < data.length; i++) {
-    const coefficient = buffer[i];
+    const coefficient = buffer[i]!;
     if (coefficient === 0) continue;
-    for (let j = 0; j < generator.length; j++) buffer[i + j] ^= gfMul(generator[j], coefficient);
+    for (let j = 0; j < generator.length; j++) buffer[i + j]! ^= gfMul(generator[j]!, coefficient);
   }
   return buffer.slice(data.length);
 }
@@ -112,7 +112,7 @@ function alignmentCentres(version: number): number[] {
 /** Pick the smallest version (1–10) that holds `byteLength` bytes, or -1. */
 function pickVersion(byteLength: number): number {
   for (let version = 1; version <= 10; version++) {
-    const capacityBits = DATA_CODEWORDS[version] * 8;
+    const capacityBits = DATA_CODEWORDS[version]! * 8;
     // mode indicator (4 bits) + the byte-count field (8 for v1–9, 16 for v10).
     const overheadBits = 4 + (version <= 9 ? 8 : 16);
     if (overheadBits + byteLength * 8 <= capacityBits) return version;
@@ -122,7 +122,7 @@ function pickVersion(byteLength: number): number {
 
 /** Encode the payload bytes as the bit stream the codeword interleave consumes. */
 function buildCodewords(bytes: number[], version: number): number[] {
-  const capacityBits = DATA_CODEWORDS[version] * 8;
+  const capacityBits = DATA_CODEWORDS[version]! * 8;
   const bits: number[] = [];
   const pushBits = (value: number, length: number): void => {
     for (let i = length - 1; i >= 0; i--) bits.push((value >> i) & 1);
@@ -139,13 +139,15 @@ function buildCodewords(bytes: number[], version: number): number[] {
   const dataCodewords: number[] = [];
   for (let i = 0; i < bits.length; i += 8) {
     let byte = 0;
-    for (let j = 0; j < 8; j++) byte = (byte << 1) | bits[i + j];
+    for (let j = 0; j < 8; j++) byte = (byte << 1) | bits[i + j]!;
     dataCodewords.push(byte);
   }
 
   // Split into blocks, compute the EC per block, then interleave: all data
   // codewords in block order first, then all EC codewords in block order.
-  const blocks = EC_BLOCKS_M[version - 1];
+  // `version` is 1–10 (pickVersion's contract, checked by buildQrMatrix before
+  // this runs), so the row and its group entries are in-bounds by construction.
+  const blocks = EC_BLOCKS_M[version - 1]!;
   const dataBlocks: number[][] = [];
   const ecBlocks: number[][] = [];
   let offset = 0;
@@ -160,10 +162,10 @@ function buildCodewords(bytes: number[], version: number): number[] {
   const result: number[] = [];
   const maxDataLen = Math.max(...dataBlocks.map((block) => block.length));
   for (let i = 0; i < maxDataLen; i++) {
-    for (const block of dataBlocks) if (i < block.length) result.push(block[i]);
+    for (const block of dataBlocks) if (i < block.length) result.push(block[i]!);
   }
   for (let i = 0; i < blocks.ecPerBlock; i++) {
-    for (const block of ecBlocks) if (i < block.length) result.push(block[i]);
+    for (const block of ecBlocks) if (i < block.length) result.push(block[i]!);
   }
   return result;
 }
@@ -185,8 +187,8 @@ function buildMatrix(size: number, codewords: number[], version: number): { modu
   }
 
   const set = (row: number, col: number, dark: boolean): void => {
-    modules[row][col] = dark;
-    isFunction[row][col] = true;
+    modules[row]![col]! = dark;
+    isFunction[row]![col]! = true;
   };
 
   // Timing patterns FIRST (drawing order is load-bearing): row 6 / column 6
@@ -241,8 +243,8 @@ function buildMatrix(size: number, codewords: number[], version: number): { modu
   // values here are overwritten by `writeFormat` once the mask is chosen.
   const reserveFormat = (row: number, col: number) => {
     if (row >= 0 && row < size && col >= 0 && col < size) {
-      modules[row][col] = false;
-      isFunction[row][col] = true;
+      modules[row]![col]! = false;
+      isFunction[row]![col]! = true;
     }
   };
   for (let i = 0; i <= 8; i++) { reserveFormat(i, 8); reserveFormat(8, i); }
@@ -260,6 +262,9 @@ function buildMatrix(size: number, codewords: number[], version: number): { modu
 
   // Data placement in the ISO zig-zag, two-column strips from the right edge,
   // alternating upward / downward, with the timing column (col 6) skipped.
+  // Every (row, col) below is inside the size×size grid the loops build, and
+  // a bit is consumed only while `bitIndex < codewords.length * 8`, so the
+  // indexed reads are in-bounds by construction.
   let bitIndex = 0;
   for (let right = size - 1; right >= 1; right -= 2) {
     if (right === 6) right = 5; // skip the timing column
@@ -268,10 +273,10 @@ function buildMatrix(size: number, codewords: number[], version: number): { modu
       for (let j = 0; j < 2; j++) {
         const col = right - j;
         const row = upward ? size - 1 - vert : vert;
-        if (isFunction[row][col]) continue;
+        if (isFunction[row]![col]!) continue;
         if (bitIndex < codewords.length * 8) {
-          const byte = codewords[bitIndex >> 3];
-          modules[row][col] = ((byte >> (7 - (bitIndex & 7))) & 1) === 1;
+          const byte = codewords[bitIndex >> 3]!;
+          modules[row]![col]! = ((byte >> (7 - (bitIndex & 7))) & 1) === 1;
           bitIndex++;
         }
       }
@@ -328,8 +333,8 @@ function writeFormat(modules: boolean[][], isFunction: boolean[][], mask: number
   //   finder's edge); bits 8–14 → (row size-15+(i-8), col 8, down the
   //   bottom-left finder's edge). Dark module: (row size-8, col 8).
   const set = (row: number, col: number, dark: boolean): void => {
-    modules[row][col] = dark;
-    isFunction[row][col] = true;
+    modules[row]![col]! = dark;
+    isFunction[row]![col]! = true;
   };
   for (let i = 0; i <= 5; i++) set(i, 8, bit(i));
   set(7, 8, bit(6));
@@ -348,8 +353,8 @@ function writeVersion(modules: boolean[][], isFunction: boolean[][], version: nu
   for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25);
   const bits = (version << 12) | rem;
   const set = (row: number, col: number, dark: boolean): void => {
-    modules[row][col] = dark;
-    isFunction[row][col] = true;
+    modules[row]![col]! = dark;
+    isFunction[row]![col]! = true;
   };
   for (let i = 0; i < 18; i++) {
     const dark = ((bits >> i) & 1) === 1;
@@ -397,17 +402,19 @@ function penaltyScore(modules: boolean[][]): number {
     }
     return result;
   };
-  for (let row = 0; row < size; row++) score += linePenalty(modules[row]);
+  // `row`/`col` iterate the size×size grid built by buildMatrix, so every read
+  // below is in-bounds by construction.
+  for (let row = 0; row < size; row++) score += linePenalty(modules[row]!);
   for (let col = 0; col < size; col++) {
     const column: boolean[] = [];
-    for (let row = 0; row < size; row++) column.push(modules[row][col]);
+    for (let row = 0; row < size; row++) column.push(modules[row]![col]!);
     score += linePenalty(column);
   }
   // N2: 2×2 blocks of the same colour — 3 points each.
   for (let row = 0; row < size - 1; row++) {
     for (let col = 0; col < size - 1; col++) {
-      const value = modules[row][col];
-      if (value === modules[row][col + 1] && value === modules[row + 1][col] && value === modules[row + 1][col + 1]) score += 3;
+      const value = modules[row]![col]!;
+      if (value === modules[row]![col + 1]! && value === modules[row + 1]![col]! && value === modules[row + 1]![col + 1]!) score += 3;
     }
   }
   // N4: the dark fraction deviating from 50%, in 10%-steps of 10 points.
@@ -439,8 +446,10 @@ export function buildQrMatrix(text: string): QrMatrix {
   for (let mask = 0; mask < 8; mask++) {
     for (let row = 0; row < size; row++) {
       for (let col = 0; col < size; col++) {
-        if (isFunction[row][col]) continue;
-        if (maskInvert(row, col, mask)) modules[row][col] = !modules[row][col];
+        // The loops walk exactly the size×size grid buildMatrix produced, so
+        // every cell below exists; the assertions state that invariant.
+        if (isFunction[row]![col]!) continue;
+        if (maskInvert(row, col, mask)) modules[row]![col]! = !modules[row]![col]!;
       }
     }
     writeFormat(modules, isFunction, mask);
@@ -452,8 +461,10 @@ export function buildQrMatrix(text: string): QrMatrix {
     }
     for (let row = 0; row < size; row++) {
       for (let col = 0; col < size; col++) {
-        if (isFunction[row][col]) continue;
-        if (maskInvert(row, col, mask)) modules[row][col] = !modules[row][col];
+        // The loops walk exactly the size×size grid buildMatrix produced, so
+        // every cell below exists; the assertions state that invariant.
+        if (isFunction[row]![col]!) continue;
+        if (maskInvert(row, col, mask)) modules[row]![col]! = !modules[row]![col]!;
       }
     }
   }
@@ -461,8 +472,8 @@ export function buildQrMatrix(text: string): QrMatrix {
   // Apply the winning mask for good and write its format block.
   for (let row = 0; row < size; row++) {
     for (let col = 0; col < size; col++) {
-      if (isFunction[row][col]) continue;
-      if (maskInvert(row, col, bestMask)) modules[row][col] = !modules[row][col];
+      if (isFunction[row]![col]!) continue;
+      if (maskInvert(row, col, bestMask)) modules[row]![col]! = !modules[row]![col]!;
     }
   }
   writeFormat(modules, isFunction, bestMask);
@@ -486,7 +497,7 @@ export function qrDataUrl(text: string, options: { size?: number } = {}): string
   const segments: string[] = [];
   for (let row = 0; row < size; row++) {
     for (let col = 0; col < size; col++) {
-      if (modules[row][col]) segments.push(`M${col + margin} ${row + margin}h1v1h-1z`);
+      if (modules[row]![col]!) segments.push(`M${col + margin} ${row + margin}h1v1h-1z`);
     }
   }
   const px = options.size ?? 200;

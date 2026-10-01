@@ -17,6 +17,11 @@
  * Not a *.test.mjs, so it lives OUTSIDE test/package.test.mjs's three-way
  * roster pin — it is listed explicitly in package.json's `test` chain and in
  * ci.yml's offline job, exactly like build-gate.mjs.
+ *
+ * TWO configs run: tsconfig.json (everything, strict flags at project level)
+ * and tsconfig.strict-null.json (the per-file strictNullChecks allowlist from
+ * docs/IMPROVEMENTS.md §8 — a file graduates by moving from the main config's
+ * exclude to an include line here). A green gate means BOTH are clean.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -37,23 +42,37 @@ if (!existsSync(TS_PKG)) {
 }
 
 const pinned = JSON.parse(readFileSync(TS_PKG, "utf8")).version;
-process.stdout.write(`[typecheck-gate] typescript ${pinned} (local) — tsc -p tsconfig.json\n`);
+const TSC = join(root, "node_modules", "typescript", "bin", "tsc");
 
-const tsc = spawnSync(process.execPath, [join(root, "node_modules", "typescript", "bin", "tsc"), "-p", "tsconfig.json"], {
-  cwd: root,
-  encoding: "utf8",
-  timeout: 300_000,
-});
+// Two configs: the project-wide check, then the per-file strictNullChecks
+// allowlist. Both must be clean for the gate to pass. A missing allowlist
+// config is a hard failure — the gate would otherwise green-light a silent
+// removal of the §8 graduation track.
+const CONFIGS = ["tsconfig.json", "tsconfig.strict-null.json"];
 
-const out = `${tsc.stdout ?? ""}${tsc.stderr ?? ""}`;
-if (out.trim() !== "") process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
-
-if (tsc.error) {
-  console.error(`FAIL typecheck could not run — ${String(tsc.error)}`);
-  process.exit(1);
+let failed = false;
+for (const config of CONFIGS) {
+  if (!existsSync(join(root, config))) {
+    console.error(`FAIL typecheck — ${config} is listed by the gate but absent on disk`);
+    failed = true;
+    continue;
+  }
+  process.stdout.write(`[typecheck-gate] typescript ${pinned} (local) — tsc -p ${config}\n`);
+  const tsc = spawnSync(process.execPath, [TSC, "-p", config], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 300_000,
+  });
+  const out = `${tsc.stdout ?? ""}${tsc.stderr ?? ""}`;
+  if (out.trim() !== "") process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
+  if (tsc.error) {
+    console.error(`FAIL typecheck (${config}) could not run — ${String(tsc.error)}`);
+    failed = true;
+  } else if (tsc.status !== 0) {
+    console.error(`FAIL typecheck (${config}) — tsc exited ${tsc.status} (see the errors above)`);
+    failed = true;
+  }
 }
-if (tsc.status !== 0) {
-  console.error(`FAIL typecheck — tsc exited ${tsc.status} (see the errors above; the strict flags in tsconfig.json are gated here)`);
-  process.exit(1);
-}
-console.log(`\nall typecheck checks passed (typescript ${pinned}, 0 errors)`);
+
+if (failed) process.exit(1);
+console.log(`\nall typecheck checks passed (typescript ${pinned}, ${CONFIGS.length} config(s), 0 errors)`);
