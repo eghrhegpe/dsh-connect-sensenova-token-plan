@@ -2,6 +2,22 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
+## [0.4.6] — 2026-10-01
+
+小浣熊面板把「凭据已过期」当成了「已登录」：access token 早已失效时，登录卡仍显示「已登录：退出登录」，注册也照样成立，于是模型能选、请求却一个个 401——用户只能靠猜。
+
+- **过期状态暴露到面板**（`src/host/routes.ts`）：`/raccoon` 的 GET 状态新增 `credentialExpired` 与 `expiresAtMs`。此前 `raccoonStore.state()` 已经解析出 JWT `exp`，但 `raccoonState()` 只取了 `hasCredential`，把过期信息整个丢掉——这是「已登录」与「能请求」混为一谈的根源。
+- **客户端区分两种登录态**（`src/client/raccoon-tab.ts`）：`credentialExpired === true` 时登录卡改渲染红色警示「登录已过期」，按钮换成「重新登录」（触发扫码 walk），不再走「退出登录」；未过期走原样。
+- **双语文案**（`src/client/i18n.ts`）：新增 `raccoon.expired` / `raccoon.reLogin`，中英文成对。
+- 凭据本身仍留在 DSH 凭据服务（`RACCOON_CREDENTIAL`），过期后靠面板提示重新扫码续期，而不是让用户误以为模型坏了。
+
+### 真凭据复测暴露的两处抄录偏差（2026-10-01 首测）
+
+带有效凭据逐个实测网关端点，发现参考件路径没变、是本插件抄录时走了样：
+
+- **refresh 端点路径修正**（`src/host/raccoon.ts`）：`/api/web/auth/v1/refresh_token` → `/api/web/auth/v1/refresh`。前者用无效 token 实测得纯文本 `404 page not found`（路径不存在）；后者得 `400 {"code":100002,"message":"params_invalid_error"}`（路径存在、已抵达业务层）。此前多抄的 `_token` 后缀让**每次续期都失败**——access token 过期后只能重新扫码登录。
+- **balance 字段名补齐 `available_points`**（`src/host/raccoon.ts`）：实测响应为 `{"available_points":10129,...}`，旧解析只认 `balance / available / amount`，读不到即返回 `null`，于是面板把拿不到当「积分余额 0」显示。
+
 ## [0.4.5] — 2026-10-01
 
 出图请求体对齐官方文档：`sensenova_draw_image` 现在会显式携带 `output_format` 与 `watermark`，并在 agent 工具参数面暴露对应入口。

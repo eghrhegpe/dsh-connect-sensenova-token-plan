@@ -38,6 +38,7 @@ import { createRaccoonStore } from "./raccoon-store.ts";
 import { createFileRaccoonStore } from "./raccoon-switch-store.ts";
 import { createRaccoonPublisher } from "./raccoon-publish.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
+import { filterRaccoonRows } from "./raccoon-models.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
 import { registerRoutes } from "./routes.ts";
 import { startSideEffects, teardown } from "./lifecycle.ts";
@@ -245,35 +246,55 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // there is nothing to offer, so the publisher stays pristine and the tab
   // keeps its "switch on — scan to log in" state.
   void (async () => {
+    // The bounded retry window. The two "late to mount" failures this guards
+    // against are the credentials service registering AFTER this plugin, and
+    // the `llm` registration service appearing late — neither surfaces a
+    // reason anywhere, so a single-pass seed left the picker empty for the
+    // whole session while the tab said "logged in". The loop re-reads BOTH
+    // every attempt and only stops when `state.registered` flips.
+    const seedAttempts = 6;
+    const seedDelayMs = 300;
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     try {
-      const switchState = await raccoonSwitch.enabled().catch(() => null);
-      if (switchState !== true) return;
-      const { credential } = await raccoonStore.resolve().catch(() => ({ credential: null }));
-      if (!credential?.accessToken) return;
-      // Keep the credential inside its expiry window before the catalogue
-      // call — the same eager refresh the request path uses.
-      if (await raccoonStore.isExpired().catch(() => false)) {
-        await raccoonStore.refresh().catch(() => {});
-      }
-      const { credential: live } = await raccoonStore.resolve().catch(() => ({ credential: null }));
-      let rows = RACCOON_FALLBACK_MODELS;
-      if (live?.accessToken) {
-        const catalog = await fetchRaccoonCatalog(live).catch(() => null);
-        if (catalog !== null && catalog.length > 0) rows = catalog;
-      }
-      // Unlike the Token Plan provider (whose next catalogue poll republishes
-      // anyway), Raccoon has NO poll that heals a missed registration — the
-      // only re-publish points are the seed, the switch, login and logout. So
-      // a transient failure at boot (the `llm` service not yet resolvable, a
-      // peer module still loading) must not leave the picker empty for the
-      // whole session: retry the publish a bounded number of times. A
-      // permanent failure (a missing peer, a refusing registry) fails fast
-      // after the same bounded window and is surfaced on the tab.
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const result = await raccoonPublisher.publish(rows, live?.officeIdentity ?? "").catch(() => ({ ok: false }));
-        if (result?.ok !== false) break;
-        if (raccoonPublisher.isDisposed()) break;
-        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+      for (let attempt = 0; attempt < seedAttempts; attempt += 1) {
+        if (raccoonPublisher.isDisposed()) return;
+        const switchState = await raccoonSwitch.enabled().catch(() => null);
+        // Opt-in default OFF: a deployment that never touched the tab stays
+        // pristine. Re-checked each attempt so a concurrent panel flip to OFF
+        // is honoured instead of being raced.
+        if (switchState !== true) return;
+        const { credential } = await raccoonStore.resolve().catch(() => ({ credential: null }));
+        if (!credential?.accessToken) {
+          // No credential yet — most likely the credentials service has not
+          // registered at this point in the mount. Give it a bounded window
+          // rather than giving up on the first read.
+          if (attempt < seedAttempts - 1) await wait(seedDelayMs * (attempt + 1));
+          continue;
+        }
+        // Keep the credential inside its expiry window before the catalogue
+        // call — the same eager refresh the request path uses.
+        if (await raccoonStore.isExpired().catch(() => false)) {
+          await raccoonStore.refresh().catch(() => {});
+        }
+        const { credential: live } = await raccoonStore.resolve().catch(() => ({ credential: null }));
+        let rows = RACCOON_FALLBACK_MODELS;
+        if (live?.accessToken) {
+          const catalog = await fetchRaccoonCatalog(live).catch(() => null);
+          if (catalog !== null && catalog.length > 0) rows = catalog;
+        }
+        // The seed honours the panel's pushed-model curation too: a restart
+        // must not widen the offer back to the whole roster behind the tab's
+        // back (the switch/login/models handlers all publish filtered).
+        const curated = await raccoonSwitch.enabledIds().catch(() => null);
+        await raccoonPublisher.publish(filterRaccoonRows(rows, curated), live?.officeIdentity ?? "").catch(() => {});
+        if (raccoonPublisher.state.registered === true) return;
+        if (raccoonPublisher.isDisposed()) return;
+        // Still unregistered: the `llm` service may not be resolvable yet, or a
+        // peer module is still loading. Back off and try the whole build again
+        // (a fresh roster read is harmless — publish is idempotent). A
+        // permanent failure fails fast after the bounded window and stays
+        // visible on the tab.
+        if (attempt < seedAttempts - 1) await wait(seedDelayMs * (attempt + 1));
       }
     } catch {
       // No seed: the first switch/login publishes.

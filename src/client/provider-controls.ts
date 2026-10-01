@@ -180,53 +180,57 @@ export function DrawSwitch({ llm, onDone, tt }: {
   // catalog with image-capable models.
   const pickerRows = hasKey && candidates.length > 0
     ? h(
-        "ul",
-        { style: S.modelList, role: "radiogroup", "aria-label": tt("draw.title") },
+        "div",
+        { style: S.modelPanel },
         h(
-          "li",
-          { style: enabled ? S.modelRow : { ...S.modelRow, ...S.modelRowOff }, key: "auto" },
+          "ul",
+          { style: S.modelList, role: "radiogroup", "aria-label": tt("draw.title") },
           h(
-            "div",
-            { style: S.modelRowHead },
+            "li",
+            { style: enabled ? S.modelRow : { ...S.modelRow, ...S.modelRowOff }, key: "auto" },
             h(
-              "label",
-              { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy ? "default" : "pointer" } },
-              h("input", {
-                type: "radio", name: "draw-model", checked: preferred === null && enabled, disabled: busy || !enabled,
-                onChange: () => void saveModel(null), style: S.modelCheck
-              }),
-              h("span", { style: S.modelName }, tt("draw.autoOption"))
-            ),
-            // The auto badge shows WHICH model the auto-pick addresses: "image ·
-            // <model>" when the catalog yields one, bare "image · (none)" when the
-            // catalogue holds no image model yet (key not saved, first poll
-            // pending, or the plan has no draw model) — so an empty list is not
-            // silently read as "auto = any model" but as "there is no model".
-            h("span", { style: S.modelBadge },
-              effective !== ""
-                ? `${tt("draw.badge")} · ${effective}`
-                : `${tt("draw.badge")} · ${tt("draw.badgeNone")}`
+              "div",
+              { style: S.modelRowHead },
+              h(
+                "label",
+                { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy ? "default" : "pointer" } },
+                h("input", {
+                  type: "radio", name: "draw-model", checked: preferred === null && enabled, disabled: busy || !enabled,
+                  onChange: () => void saveModel(null), style: S.modelCheck
+                }),
+                h("span", { style: S.modelName }, tt("draw.autoOption"))
+              ),
+              // The auto badge shows WHICH model the auto-pick addresses: "image ·
+              // <model>" when the catalog yields one, bare "image · (none)" when the
+              // catalogue holds no image model yet (key not saved, first poll
+              // pending, or the plan has no draw model) — so an empty list is not
+              // silently read as "auto = any model" but as "there is no model".
+              h("span", { style: S.modelBadge },
+                effective !== ""
+                  ? `${tt("draw.badge")} · ${effective}`
+                  : `${tt("draw.badge")} · ${tt("draw.badgeNone")}`
+              )
             )
-          )
-        ),
-        ...candidates.map((id) => h(
-          "li",
-          { style: enabled ? S.modelRow : { ...S.modelRow, ...S.modelRowOff }, key: id },
-          h(
-            "div",
-            { style: S.modelRowHead },
+          ),
+          ...candidates.map((id) => h(
+            "li",
+            { style: enabled ? S.modelRow : { ...S.modelRow, ...S.modelRowOff }, key: id },
             h(
-              "label",
-              { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy ? "default" : "pointer" } },
-              h("input", {
-                type: "radio", name: "draw-model", checked: preferred === id && enabled, disabled: busy || !enabled,
-                onChange: () => void saveModel(id), style: S.modelCheck
-              }),
-              h("span", { style: S.modelName, title: id }, id)
-            ),
-            h("span", { style: S.modelBadge }, effective === id && enabled ? `${tt("draw.badge")} · ${tt("draw.effective")}` : tt("draw.badge"))
-          )
-        ))
+              "div",
+              { style: S.modelRowHead },
+              h(
+                "label",
+                { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy ? "default" : "pointer" } },
+                h("input", {
+                  type: "radio", name: "draw-model", checked: preferred === id && enabled, disabled: busy || !enabled,
+                  onChange: () => void saveModel(id), style: S.modelCheck
+                }),
+                h("span", { style: S.modelName, title: id }, id)
+              ),
+              h("span", { style: S.modelBadge }, effective === id && enabled ? `${tt("draw.badge")} · ${tt("draw.effective")}` : tt("draw.badge"))
+            )
+          ))
+        )
       )
     : null;
   // When the list cannot be drawn (no key, or a key whose catalogue holds no

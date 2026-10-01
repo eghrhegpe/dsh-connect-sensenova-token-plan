@@ -249,7 +249,7 @@ export function ModelPicker({ llm, onDone, tt }: {
           ),
           visible.length === 0
             ? h("p", { style: S.empty }, tt("llm.rosterNoMatch"))
-            : h(ModelRoster, {
+            : h("div", { style: S.modelPanel }, h(ModelRoster, {
                 models: visible,
                 enabledIds: ids,
                 busy,
@@ -261,7 +261,7 @@ export function ModelPicker({ llm, onDone, tt }: {
                   setIds(toggleModelIn(ids, models.map((model) => String(model?.id ?? "")), id));
                   setNotice(null);
                 }
-              }),
+              })),
           dirty
             ? h(
                 "div",

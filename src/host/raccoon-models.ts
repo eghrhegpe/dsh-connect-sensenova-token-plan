@@ -79,6 +79,24 @@ export function raccoonRoster(catalog) {
 }
 
 /**
+ * Apply the panel's pushed-model curation to a roster.
+ *
+ * `null` (the panel never saved a list) keeps the roster WHOLE — curation is
+ * opt-in, like the switch itself. A saved list filters by id; a list that
+ * names no current id publishes an empty offer (the picker showing zero
+ * Raccoon models IS the curation the panel asked for, not a fault).
+ * @param {object[]} [rows] - the `raccoonRoster` result.
+ * @param {string[]|null} [enabledIds] - the curated ids, or `null`.
+ * @returns {object[]} the filtered roster.
+ */
+export function filterRaccoonRows(rows, enabledIds) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(enabledIds)) return list;
+  const wanted = new Set(enabledIds);
+  return list.filter((row) => wanted.has(str(row?.id, "")));
+}
+
+/**
  * Map one Raccoon row onto the pi-ai model descriptor the adapter offers.
  * @param {object} row - a {@link raccoonRoster} row (must carry `id`).
  * @param {object} [options] - `{ officeIdentity }` for the request headers.

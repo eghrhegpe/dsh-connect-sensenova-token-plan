@@ -184,13 +184,17 @@ export const zh = {
   "raccoon.models": "模型（{count}）",
   "raccoon.modelsFallback": "网关目录暂不可读——以下为内置备用模型",
   "raccoon.modelsEmpty": "网关当前没有开放可见模型——以下为内置备用模型",
+  "raccoon.pushHint": "勾选决定哪些模型推送进 DSH 模型列表，改动即时生效",
+  "raccoon.registeredChip": "已注册",
+  "raccoon.unregisteredChip": "未注册",
+  "raccoon.modelsSaved": "已保存",
+  "raccoon.modelsError": "保存失败：{error}",
   // Zero multiplier: a statement about the model, not a rate of zero.
   "raccoon.free": "free",
   // NOT `llm.rosterRateTitle`: that one says the rate is the operator's own
   // pseudo figure ("非官方"). This one IS the gateway catalogue's own field,
   // and quoting the other tooltip here would libel real data as invented.
   "raccoon.rateTitle": "网关目录声明的积分倍率（0 为免费）",
-  "raccoon.registered": "已注册 raccoon 提供方：{count} 个模型。",
   "raccoon.unregistered": "未注册——勾选上方开关即可开启。",
   "raccoon.awaitingLogin": "已启用——登录后即可注册模型。",
   "raccoon.error": "小浣熊操作失败：{error}"
@@ -371,9 +375,13 @@ export const en: typeof zh = {
   "raccoon.models": "Models ({count})",
   "raccoon.modelsFallback": "Live catalogue unreadable — showing the built-in roster",
   "raccoon.modelsEmpty": "The gateway offers no visible models right now — showing the built-in roster",
+  "raccoon.pushHint": "Ticks decide which models are pushed into DSH's model list; changes apply immediately",
+  "raccoon.registeredChip": "Registered",
+  "raccoon.unregisteredChip": "Not registered",
+  "raccoon.modelsSaved": "Saved",
+  "raccoon.modelsError": "Save failed: {error}",
   "raccoon.free": "free",
   "raccoon.rateTitle": "Credit multiplier as declared by the gateway catalogue (0 = free)",
-  "raccoon.registered": "Raccoon registered with DSH: {count} model(s).",
   "raccoon.unregistered": "Not registered — tick the switch above.",
   "raccoon.awaitingLogin": "Enabled — log in to register the models.",
   "raccoon.error": "Raccoon operation failed: {error}"

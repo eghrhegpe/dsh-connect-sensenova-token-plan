@@ -37,6 +37,23 @@ export function normalizeRaccoonEnabled(raw) {
 }
 
 /**
+ * Normalize the pushed-model list: `null`/absent means "no curation — push
+ * the whole roster"; an array keeps only non-empty strings, deduped. Any
+ * other shape reads as "not set" (the same anything-unrecognised-is-null
+ * discipline as the switch itself).
+ * @param {unknown} raw - the persisted or posted value.
+ * @returns {string[]|null} the curated ids, or `null` when the roster pushes whole.
+ */
+export function normalizeRaccoonIds(raw) {
+  if (!Array.isArray(raw)) return null;
+  const seen = new Set();
+  for (const entry of raw) {
+    if (typeof entry === "string" && entry !== "") seen.add(entry);
+  }
+  return [...seen];
+}
+
+/**
  * The file-backed Raccoon provider switch.
  * @param {object} [options]
  * @param {string} [options.dir] - override the state directory (tests).
@@ -58,15 +75,22 @@ export function createFileRaccoonStore(options: StoreOptions = {}) {
   const legacyFile = dir === undefined && profile ? join(sharedStateDir(name), "raccoon-provider.json") : null;
   const parseSwitch = (raw) => {
     const source = obj(raw);
-    return source.version === RACCOON_SWITCH_VERSION ? normalizeRaccoonEnabled(source.enabled) : null;
+    if (source.version !== RACCOON_SWITCH_VERSION) return null;
+    // The ids ride beside the switch: a v1 file written before the picker
+    // existed simply has no field, which normalizes to "push the whole
+    // roster" — old state needs no migration.
+    return {
+      enabled: normalizeRaccoonEnabled(source.enabled),
+      enabledModelIds: normalizeRaccoonIds(source.enabledModelIds)
+    };
   };
 
   const cache = createStateReadCache(async () => parseSwitch(await readStateJson(filePath)), {
     ttlMs,
     inheritFrom: legacyFile === null ? null : {
       read: async () => parseSwitch(await readStateJson(legacyFile)),
-      write: async (enabled) => {
-        await writePayload({ version: RACCOON_SWITCH_VERSION, enabled, updatedAt: new Date().toISOString() });
+      write: async (value) => {
+        await writePayload({ version: RACCOON_SWITCH_VERSION, enabled: value.enabled, ...(value.enabledModelIds !== null ? { enabledModelIds: value.enabledModelIds } : {}), updatedAt: new Date().toISOString() });
       }
     }
   });
@@ -75,18 +99,34 @@ export function createFileRaccoonStore(options: StoreOptions = {}) {
   return {
     /** The saved switch value. */
     async enabled() {
-      return read();
+      return (await read())?.enabled ?? null;
+    },
+    /** The saved pushed-model list; `null` = the whole roster pushes. */
+    async enabledIds() {
+      return (await read())?.enabledModelIds ?? null;
     },
     /** Whether the panel has ever saved a value here. */
     async isSet() {
       return (await read()) !== null;
     },
-    /** Persist a switch value (atomic). */
+    /** Persist a switch value (atomic), preserving the saved id list. */
     async save(value) {
       const enabled = normalizeRaccoonEnabled(value);
       if (enabled === null) throw new TypeError("the raccoon switch expects a boolean");
-      await writePayload({ version: RACCOON_SWITCH_VERSION, enabled, updatedAt: new Date().toISOString() });
-      cache.remember(enabled);
+      const current = (await read())?.enabledModelIds ?? null;
+      await writePayload({ version: RACCOON_SWITCH_VERSION, enabled, ...(current !== null ? { enabledModelIds: current } : {}), updatedAt: new Date().toISOString() });
+      cache.remember({ enabled, enabledModelIds: current });
+    },
+    /** Persist the pushed-model list (atomic), preserving the saved switch. */
+    async saveIds(value) {
+      const ids = normalizeRaccoonIds(value);
+      if (ids === null) throw new TypeError("the raccoon id list expects an array of strings");
+      const enabled = (await read())?.enabled ?? null;
+      // An EMPTY list is a real curation ("push nothing"), not "not set" —
+      // it must persist, or the next read would widen back to the whole
+      // roster. Only `null` means uncurated, and `saveIds` never takes it.
+      await writePayload({ version: RACCOON_SWITCH_VERSION, ...(enabled !== null ? { enabled } : {}), enabledModelIds: ids, updatedAt: new Date().toISOString() });
+      cache.remember({ enabled, enabledModelIds: ids });
     },
     /** Forget the panel-saved value. */
     async forget() {

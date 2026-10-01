@@ -331,6 +331,24 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 用）；② 复测只能证明**路由还在**，不能替代带凭据的端到端验证——真凭据下的信封形态、
 `refresh` 单用轮换、倍率字段都以 `test/raccoon.test.mjs` 的离线 fixture 为契约，需**（定期人工复核）**。
 
+### 6.1.3 真凭据复测：2026-10-01（首次带凭据做端到端）
+
+§6.1.2 那次复测**不带任何凭据**，只能证明「路由还在」。本节是**首次**用面板扫码得到的有效凭据逐个实测（每个请求均带 `Authorization` 与 `X-Org-Code`），把「路由存在但需鉴权」与「路径真的不存在」分开判。
+
+| 端点 | 带有效凭据实测 | 判读 |
+|---|---|---|
+| `GET /api/web/llm/v2/model_catalog` | `200 {"code":0,...}`，`categories[].models[]` 6 个 `sn-*` 可见模型 | 通；前 3 个 `raccoon-*` 隐形模型 `id` 字段为空、`model_name` 有值 |
+| `GET /api/web/points/v1/balance` | `200 {"code":0,"data":{"available_points":10129,...}}` | 通，但**字段名是 `available_points`**，旧解析只认 `balance/available/amount` → 读成 `null` |
+| `POST /api/web/auth/v1/refresh`（**假 token**） | `400 {"code":100002,"message":"params_invalid_error","details":"param token invalid format invalid"}` | 路径**存在**，抵达业务层 |
+| `POST /api/web/auth/v1/refresh_token`（**假 token**） | `404 page not found`（纯文本） | 路径**不存在** |
+
+**结论：参考件（`dsh-raccoon-work`）的路径没错，是本插件抄录时走了样，两处已随 0.4.6 修正**：
+
+- refresh 端点把 `/refresh` 抄成了 `/refresh_token`（多了 `_token`），于是**每次续期都 404**——access token 过期后只能重新扫码，这正是 0.4.6「凭据过期」一节的深层成因；
+- balance 解析字段漏了 `available_points`，拿真实余额读成 `null`、面板显示假 0。
+
+**探活纪律（沿用 §6.1.2 的判据）**：刷新/续期端点用**假的 `refresh_token`** 探活——真 token 是单用的，烧掉会让用户下次无法续期；假 token 同样能区分「400 = 路径在」与「404 = 路径不在」，零代价。
+
 ## 7. 优先级与时间盒
 
 | 优先级 | 项 | 侵入性 | 门禁 |

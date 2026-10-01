@@ -27,6 +27,7 @@ import {
   RACCOON_QR_STATUS,
   RACCOON_FALLBACK_MODELS
 } from "./raccoon.ts";
+import { filterRaccoonRows } from "./raccoon-models.ts";
 
 /** The one read-only route the Client panel polls. */
 const SNAPSHOT_PATH = `/api/${name}/snapshot`;
@@ -781,6 +782,9 @@ export function registerRoutes(ctx, wiring) {
         const roster = rosterLive ? models : RACCOON_FALLBACK_MODELS;
         const modelsSource = rosterLive ? "live" : catalogReadFailed ? "unreadable" : "empty";
         const publisherState = raccoonPublisher?.state ?? null;
+        // The pushed-model curation, so the tab's checkboxes render the saved
+        // list (`null` = the panel never curated — the whole roster pushes).
+        const savedIds = await (raccoonSwitch ? raccoonSwitch.enabledIds() : null).catch(() => null);
         return {
           ok: true,
           enabled: effectiveEnabled,
@@ -808,6 +812,7 @@ export function registerRoutes(ctx, wiring) {
           hostProxyEnv,
           models: roster,
           modelsSource,
+          enabledModelIds: savedIds,
           providerRegistered: publisherState?.registered === true,
           ...(publisherState?.error !== null && publisherState?.error !== undefined ? { providerError: publisherState.error } : {}),
           ...(error !== null ? { error } : {})
@@ -833,6 +838,29 @@ export function registerRoutes(ctx, wiring) {
         const state = await raccoonState();
         writeJson(response, 200, { ...state, ...extra }, { "cache-control": "no-store" });
       };
+      // The publish payload every registration-driving action shares: the live
+      // catalogue when a credential exists, else the static fallback, MINUS
+      // the panel's curated-away ids (filterRaccoonRows). `switch`, `models`
+      // and the settled `login` walk all drive the same publisher with it.
+      const collectRaccoonRows = async (catalogToken) => {
+        let rows = RACCOON_FALLBACK_MODELS;
+        let officeIdentity = "";
+        try {
+          const { credential } = raccoonStore ? await raccoonStore.resolve().catch(() => ({ credential: null })) : { credential: null };
+          if (catalogToken !== undefined && catalogToken !== null && catalogToken !== "") {
+            const live = await fetchRaccoonCatalog({ access_token: catalogToken }).catch(() => null);
+            if (live !== null && live.length > 0) rows = live;
+          } else if (credential?.accessToken) {
+            const live = await fetchRaccoonCatalog(credential).catch(() => null);
+            if (live !== null && live.length > 0) rows = live;
+            officeIdentity = credential.officeIdentity ?? "";
+          }
+        } catch {
+          // Fallback roster is already the safe default.
+        }
+        const ids = await (raccoonSwitch ? raccoonSwitch.enabledIds() : null).catch(() => null);
+        return { rows: filterRaccoonRows(rows, ids), officeIdentity };
+      };
 
       // ── switch: register / deregister the Raccoon provider with DSH ──
       if (action === "switch") {
@@ -850,18 +878,7 @@ export function registerRoutes(ctx, wiring) {
           // whether the models are offered at all. A missing token degrades to
           // a clean release inside the publisher (the `not_configured` reason).
           if (raccoonPublisher !== null && raccoonPublisher !== undefined) {
-            let rows = RACCOON_FALLBACK_MODELS;
-            let officeIdentity = "";
-            try {
-              const { credential } = raccoonStore ? await raccoonStore.resolve().catch(() => ({ credential: null })) : { credential: null };
-              if (credential?.accessToken) {
-                const live = await fetchRaccoonCatalog(credential).catch(() => null);
-                if (live !== null && live.length > 0) rows = live;
-                officeIdentity = credential.officeIdentity ?? "";
-              }
-            } catch {
-              // Fallback roster is already the safe default.
-            }
+            const { rows, officeIdentity } = await collectRaccoonRows(null);
             await raccoonPublisher.publish(rows, officeIdentity);
           }
         } catch (error) {
@@ -869,6 +886,35 @@ export function registerRoutes(ctx, wiring) {
           return;
         }
         await answer();
+        return;
+      }
+
+      // ── models: save the pushed-model curation and rebuild the offer ──
+      if (action === "models") {
+        const ids = body.value.enabledModelIds;
+        if (!Array.isArray(ids) || ids.some((entry) => typeof entry !== "string")) {
+          writeJson(response, 400, { ok: false, error: "expected { action: \"models\", enabledModelIds: string[] }" }, { "cache-control": "no-store" });
+          return;
+        }
+        if (ids.length > MAX_ENABLED_MODEL_IDS) {
+          writeJson(response, 400, { ok: false, error: "too many model ids" }, { "cache-control": "no-store" });
+          return;
+        }
+        if (raccoonSwitch === null || raccoonSwitch === undefined) {
+          await answer({ ok: false, error: "the raccoon switch is unavailable" });
+          return;
+        }
+        try {
+          await raccoonSwitch.saveIds(ids);
+          if (raccoonPublisher !== null && raccoonPublisher !== undefined) {
+            const { rows, officeIdentity } = await collectRaccoonRows(null);
+            await raccoonPublisher.publish(rows, officeIdentity);
+          }
+        } catch (error) {
+          await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          return;
+        }
+        await answer({ ok: true, saved: true });
         return;
       }
 
@@ -924,12 +970,7 @@ export function registerRoutes(ctx, wiring) {
         if (raccoonPublisher !== null && raccoonPublisher !== undefined && raccoonPublisher.isDisposed() === false) {
           const switchState = raccoonSwitch ? await raccoonSwitch.enabled().catch(() => null) : null;
           if (switchState === true) {
-            let rows = RACCOON_FALLBACK_MODELS;
-            let officeIdentity = "";
-            const live = settled.accessToken ? await fetchRaccoonCatalog({ access_token: settled.accessToken }).catch(() => null) : null;
-            if (live !== null && live.length > 0) rows = live;
-            const liveCredential = await raccoonStore.resolve().catch(() => ({ credential: null }));
-            officeIdentity = liveCredential?.credential?.officeIdentity ?? officeIdentity;
+            const { rows, officeIdentity } = await collectRaccoonRows(settled.accessToken);
             await raccoonPublisher.publish(rows, officeIdentity);
           }
         }
@@ -956,7 +997,7 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
 
-      writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
+      writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
     }
   });
 
