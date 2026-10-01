@@ -317,41 +317,41 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
             // 0 would claim a balance the panel never fetched — the exact lie
             // the roster block refuses to tell, so say "unknown" instead, and
             // quote the route's own reason when it has one.
-            typeof state?.balance === "number"
-              ? format(tt("raccoon.balance"), { balance: count(state.balance) })
-              : state?.balanceDetail !== undefined && state?.balanceDetail !== ""
-                ? format(tt("raccoon.balanceUnknownDetail"), { detail: state.balanceDetail })
-                : tt("raccoon.balanceUnknown")
+            h(
+              "span",
+              null,
+              typeof state?.balance === "number"
+                ? format(tt("raccoon.balance"), { balance: count(state.balance) })
+                : state?.balanceDetail !== undefined && state?.balanceDetail !== ""
+                  ? format(tt("raccoon.balanceUnknownDetail"), { detail: state.balanceDetail })
+                  : tt("raccoon.balanceUnknown")
+            ),
+            // The gateway's split of the total rides in parentheses, one size
+            // down: a detail of the figure above, not its own line.
+            breakdownParts !== ""
+              ? h("span", { style: { fontSize: 11 } }, `（${breakdownParts}）`)
+              : null
           ),
-          // The gateway's own split of the total (the parts it declared):
-          // "其中 每日 1,129 · 奖励 9,000". Only drawn when a read carried it.
-          breakdownParts !== ""
-            ? h("div", { style: { ...S.muted, fontSize: 12, marginBottom: 8 } },
-                format(tt("raccoon.balanceBreakdown"), { parts: breakdownParts }))
-            : null,
-          // The credential's expiry, beside the balance it guards: `when()`
-          // carries the day across midnight (a 22:00 rotation expires 01:00 —
-          // a bare time would read as today), and it stays drawn while the
-          // token is lapsed so the expired alert above is dated, not vague.
-          expiresAt !== null
-            ? h(
-                "div",
-                { style: { ...S.muted, fontSize: 12, marginBottom: 8 }, role: "status" },
-                format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })
-              )
-            : null,
-          // The re-scan deadline: until the refresh token lives the panel
-          // renews itself; after it, the QR code is the only way back.
-          refreshAt !== null
-            ? h(
-                "div",
-                { style: { ...S.muted, fontSize: 12, marginBottom: 8 }, role: "status" },
-                format(tt("raccoon.refreshUntil"), {
-                  date: when(refreshAt / 1e3),
-                  days: Math.max(1, Math.round((refreshAt - Date.now()) / 86_400_000))
-                })
-              )
-            : null,
+          // The credential's clock, one line: the access window and the
+          // re-scan deadline, dot-separated. `when()` carries the day across
+          // midnight; the deadline keeps drawing while the token is lapsed so
+          // the expired alert above is dated, not vague. The "N days" detail
+          // lives in a tooltip, not the line — a fact you need once, not
+          // every poll.
+          (() => {
+            const children = [];
+            if (expiresAt !== null) children.push(format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) }));
+            if (refreshAt !== null) {
+              if (children.length > 0) children.push(" · ");
+              const days = Math.max(1, Math.round((refreshAt - Date.now()) / 86_400_000));
+              const tip = format(tt("raccoon.refreshTip"), { days });
+              const label = format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) });
+              children.push(h("span", { title: tip }, label));
+            }
+            return children.length > 0
+              ? h("div", { style: { ...S.muted, fontSize: 12, marginBottom: 8 }, role: "status" }, ...children)
+              : null;
+          })(),
           models.length > 0
             ? h(RaccoonRoster, { models, tt, source: state?.modelsSource })
             : null
