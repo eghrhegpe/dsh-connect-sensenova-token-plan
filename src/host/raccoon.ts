@@ -94,7 +94,17 @@ export function decodeRaccoonJwtExpMs(token) {
  * header, with an empty value for personal). The optional client-identity
  * headers let a Host pose as the desktop client's family; they are advisory —
  * the gateway does not gate on them.
- * @param {object} credential - `{ access_token, office_identity?, device_id? }`.
+ *
+ * The credential arrives in EITHER shape: the raw document's snake_case
+ * (`{ access_token, office_identity, device_id }` — the chat path's
+ * per-request token view) or the store's parsed camelCase
+ * (`{ accessToken, officeIdentity, deviceId }` — `parseRaccoonCredential`'s
+ * output, what the panel routes hold). When both are present the raw
+ * snake_case field wins. The dual read closes a real bug: a route once
+ * passed the camelCase object and read `access_token` off it — an undefined
+ * read that silently produced `Authorization: Bearer ` (empty) and a
+ * gateway 401 the whole time, while the raw-doc path kept working.
+ * @param {object} credential - `{ access_token|accessToken, office_identity|officeIdentity?, device_id|deviceId? }`.
  * @param {object} [options]
  * @param {string} [options.platform] - `X-Client-Platform` (e.g. `desktop-windows`).
  * @param {string} [options.version] - `X-Client-Version` (e.g. `v1.0.35`).
@@ -105,14 +115,15 @@ export function raccoonHeaders(credential: any, options: { platform?: string; ve
   const headers = {
     Accept: "application/json",
     "Content-Type": "application/json",
-    Authorization: `Bearer ${str(source.access_token, "")}`,
+    Authorization: `Bearer ${str(source.access_token ?? source.accessToken, "")}`,
     // Personal accounts send an empty org code; the header itself is always present.
-    "X-Org-Code": str(source.office_identity, ""),
+    "X-Org-Code": str(source.office_identity ?? source.officeIdentity, ""),
     "X-Raccoon-Language": "zh"
   };
   if (typeof options.platform === "string" && options.platform !== "") headers["X-Client-Platform"] = options.platform;
   if (typeof options.version === "string" && options.version !== "") headers["X-Client-Version"] = options.version;
-  if (typeof source.device_id === "string" && source.device_id !== "") headers["X-Client-Device-ID"] = source.device_id;
+  const deviceId = source.device_id ?? source.deviceId;
+  if (typeof deviceId === "string" && deviceId !== "") headers["X-Client-Device-ID"] = deviceId;
   return headers;
 }
 
@@ -206,7 +217,14 @@ export async function refreshRaccoonCredential(
   let envelope;
   try {
     const response = await effective(
-      `${RACCOON_API_BASE}${RACCOON_AUTH_PREFIX}/refresh_token`,
+      // Path verified 2026-10-01 with a LIVE credential: `/refresh_token`
+      // answers a bare `404 page not found` (path absent), while `/refresh`
+      // answers `400 params_invalid_error` with a deliberately bogus token —
+      // the path exists and reaches the business layer. The `_token` suffix
+      // this code used to append was the copy-over from the reference
+      // plugin's constant set, and it made every refresh fail, so an expired
+      // access token could only be recovered by re-scanning the QR code.
+      `${RACCOON_API_BASE}${RACCOON_AUTH_PREFIX}/refresh`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -284,19 +302,31 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
  * @param {typeof fetch} [fetcher] - injected fetch.
  * @returns {Promise<number|null>} the balance, or `null` when unreadable.
  */
-export async function fetchRaccoonBalance(credential: any, fetcher?: typeof fetch) {
+export async function fetchRaccoonBalance(credential: any, fetcher?: typeof fetch, onFail?: (why: string) => void) {
   const effective = fetcher ?? globalThis.fetch;
   try {
     const response = await effective(
       `${RACCOON_API_BASE}${RACCOON_POINTS_PREFIX}/balance`,
       { headers: raccoonHeaders(credential), signal: AbortSignal.timeout(30_000) }
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const bodyText = await response.text().catch(() => "");
+      // A 401 body distinguishes "the gateway never saw our Authorization"
+      // (`authorization_empty_error`) from "it saw one and rejected it"
+      // (`invalid_token` / a JWT reason). That split decides whether the fault
+      // is in the transport (a header-stripping fetch) or the token itself.
+      onFail?.(`HTTP ${response.status} ${bodyText.slice(0, 160)}`);
+      return null;
+    }
     const envelope = parseRaccoonEnvelope(await response.json().catch(() => ({})), response.status);
-    if (envelope.code !== 0 || envelope.data === null) return null;
-    const value = numOrNullSafe(envelope.data.balance ?? envelope.data.available ?? envelope.data.amount);
+    if (envelope.code !== 0 || envelope.data === null) {
+      onFail?.(`envelope code=${envelope.code} message=${envelope.message}`);
+      return null;
+    }
+    const value = numOrNullSafe(envelope.data.available_points ?? envelope.data.balance ?? envelope.data.available ?? envelope.data.amount);
     return value;
-  } catch {
+  } catch (why) {
+    onFail?.(why instanceof Error ? `${why.name}: ${why.message}` : String(why));
     return null;
   }
 }

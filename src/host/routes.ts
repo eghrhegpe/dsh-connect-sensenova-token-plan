@@ -10,6 +10,7 @@
  *
  * @module dsh-connect-sensenova-token-plan/routes
  */
+import { createHash } from "node:crypto";
 import { isAdmitted, name } from "./host-config.ts";
 import { buildSnapshotBody, failureCode } from "./snapshot-aggregate.ts";
 import { CODE } from "./codes.ts";
@@ -635,22 +636,108 @@ export function registerRoutes(ctx, wiring) {
         let loggedIn = false;
         let nickname = "";
         let balance = null;
+        let balanceDetail: string | null = null;
+        let accessTokenPrefix: string | null = null;
+        // Diagnostics (one-shot, to name the 401's owner): which layer the
+        // credential came from, whether the host's OWN process environment
+        // carries a shadowing RACCOON_CREDENTIAL (the credentials provider's
+        // inherited layer wins over the file), a secret-free fingerprint of
+        // the exact access token the panel read, and the host process's
+        // proxy env (a fresh-process probe has none — a difference here would
+        // mean the same token reaches the gateway through a different hop).
+        let credentialSource: string | null = null;
+        let raccoonEnvShadow: boolean | null = null;
+        let envCredentialFingerprint: string | null = null;
+        let accessTokenFingerprint: string | null = null;
+        let hostProxyEnv: string[] | null = null;
         let error = null;
+        // The credential's own expiry facts. `raccoonStore.state()` already
+        // resolves them (from the JWT `exp` claim); dropping them here is what
+        // made the tab say "已登录" long after the access token died — the
+        // registration stayed up (the publish gate only asks "is there a
+        // token?", not "is it live?"), so every request failed with a 401 the
+        // panel could not name.
+        let expiresAtMs = null;
+        let credentialExpired = false;
         try {
           if (raccoonStore !== null && raccoonStore !== undefined) {
-            const state = await raccoonStore.state().catch(() => null);
+            let state = await raccoonStore.state().catch(() => null);
             loggedIn = state?.hasCredential === true;
             nickname = state?.nickname ?? "";
+            credentialSource = state?.source ?? null;
             if (loggedIn) {
+              // The same pre-request eager refresh the seed path uses: a
+              // lapsed 3-hour access token with a live 30-day refresh must not
+              // 401 the panel. Rotate in place (single-flight, whole-pair
+              // re-store), then re-read state so the surfaced expiry facts
+              // describe the pair that will actually serve the calls below.
+              if (await raccoonStore.isExpired().catch(() => false)) {
+                await raccoonStore.refresh().catch(() => {});
+                state = await raccoonStore.state().catch(() => state);
+                loggedIn = state?.hasCredential === true;
+                nickname = state?.nickname ?? "";
+                credentialSource = state?.source ?? null;
+              }
+              if (typeof state?.expiresAtMs === "number") {
+                expiresAtMs = state.expiresAtMs;
+                credentialExpired = Date.now() >= state.expiresAtMs;
+              }
               const { credential } = await raccoonStore.resolve().catch(() => ({ credential: null }));
               if (credential?.accessToken) {
-                balance = await fetchRaccoonBalance(credential).catch(() => null);
+                // Diagnostic: only the prefix, never the token, so a mismatch
+                // against the stored credential is visible without leaking it.
+                accessTokenPrefix = credential.accessToken.slice(0, 8);
+                // SHA-256 prefix of the EXACT token the panel would send —
+                // a stable, non-reversible identifier to diff against the
+                // file's token (an `eyJhbGci` prefix is useless: every HS256
+                // JWT starts with it).
+                accessTokenFingerprint = createHash("sha256")
+                  .update(credential.accessToken, "utf8")
+                  .digest("hex")
+                  .slice(0, 12);
+                // `onFail` reports the concrete reason a read came back empty —
+                // a broken request must not look like "the gateway has nothing
+                // to say". Surfaced as `balanceDetail` for debugging.
+                balance = await fetchRaccoonBalance(credential, undefined, (why) => { balanceDetail = why; }).catch((why) => {
+                  balanceDetail = `call rejected: ${why instanceof Error ? why.message : String(why)}`;
+                  return null;
+                });
               }
             }
           }
         } catch (why) {
           error = redactSecrets(why instanceof Error ? why.message : String(why));
         }
+        // The host process's OWN launch environment (the credentials
+        // provider's inherited layer, which beats the file): a
+        // RACCOON_CREDENTIAL set there shadows the file credential for THIS
+        // host only — a fresh-process probe never sees it. That is exactly
+        // the shape of "same file, probe 200, panel 401". Presence + a
+        // fingerprint of the shadowing document, never the value.
+        raccoonEnvShadow = Object.hasOwn(process.env, "RACCOON_CREDENTIAL") && process.env.RACCOON_CREDENTIAL !== "";
+        if (raccoonEnvShadow) {
+          // Fingerprint of the SHADOWING document (the serialized reference
+          // value, not a token): lets the panel side diff which copy this
+          // host actually serves without printing either document.
+          envCredentialFingerprint = createHash("sha256")
+            .update(process.env.RACCOON_CREDENTIAL, "utf8")
+            .digest("hex")
+            .slice(0, 12);
+        }
+        // Proxy env is the other per-process difference a fresh probe can't
+        // see: a route through a corporate hop can drop or mangle the
+        // Authorization the direct path carries. Names + values, all
+        // non-secret.
+        hostProxyEnv = [
+          "HTTP_PROXY",
+          "HTTPS_PROXY",
+          "http_proxy",
+          "https_proxy",
+          "ALL_PROXY",
+          "NO_PROXY",
+          "no_proxy"
+        ].filter((key) => process.env[key] !== undefined && process.env[key] !== "")
+          .map((key) => `${key}=${process.env[key]}`);
         // The roster the adapter offers: the live catalogue when a credential
         // exists (the switch's own publish reads it too), else the static
         // fallback so the panel still shows the known models.
@@ -675,11 +762,23 @@ export function registerRoutes(ctx, wiring) {
           switchSource: switchState === null ? "off" : "panel",
           loggedIn,
           nickname,
+          // Whether the stored access token has lapsed. `loggedIn` alone says
+          // "a credential exists"; this says whether it can still serve. The
+          // tab renders a distinct re-login affordance on this flag.
+          credentialExpired,
+          ...(expiresAtMs !== null ? { expiresAtMs } : {}),
           // The in-flight scan (if a login walk is waiting): the tab re-renders
           // its QR from this on every poll, so a second tab / a refresh
           // continues the SAME scan instead of voiding it.
           ...(raccoonScan !== null ? { scanUrl: raccoonScan.url, scanCode: raccoonScan.code } : {}),
           balance,
+          ...(balanceDetail !== null ? { balanceDetail } : {}),
+          ...(accessTokenPrefix !== null ? { accessTokenPrefix } : {}),
+          ...(credentialSource !== null ? { credentialSource } : {}),
+          ...(raccoonEnvShadow !== null ? { raccoonEnvShadow } : {}),
+          ...(envCredentialFingerprint !== null ? { envCredentialFingerprint } : {}),
+          ...(accessTokenFingerprint !== null ? { accessTokenFingerprint } : {}),
+          hostProxyEnv,
           models: roster,
           providerRegistered: publisherState?.registered === true,
           ...(publisherState?.error !== null && publisherState?.error !== undefined ? { providerError: publisherState.error } : {}),

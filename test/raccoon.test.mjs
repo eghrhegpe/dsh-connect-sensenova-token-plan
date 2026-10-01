@@ -120,6 +120,21 @@ function section(title) {
       headers["X-Client-Platform"] === "desktop-windows" && headers["X-Client-Version"] === "v1.0.35" && headers["X-Client-Device-ID"] === "dev-1");
     check("the content type is JSON", headers["Content-Type"] === "application/json");
 
+    // Dual-shape regression: the panel routes hold the STORE's parsed
+    // credential (camelCase, `parseRaccoonCredential`'s output) while the raw
+    // document path stays snake_case. A camelCase object read through the
+    // snake_case fields once produced `Authorization: Bearer ` (empty) and a
+    // permanent gateway 401 — the token must reach the header from either
+    // shape, with the raw field winning when both are present.
+    const camelHeaders = raccoonHeaders({ accessToken: "tok-camel", officeIdentity: "" });
+    check("a camelCase store credential reaches the Bearer header", camelHeaders.Authorization === "Bearer tok-camel");
+    check("a camelCase office identity reaches X-Org-Code", camelHeaders["X-Org-Code"] === "");
+    const bothShapes = raccoonHeaders({ access_token: "snake", accessToken: "camel", office_identity: "org-s", officeIdentity: "org-c" });
+    check("when both shapes are present the raw snake_case field wins",
+      bothShapes.Authorization === "Bearer snake" && bothShapes["X-Org-Code"] === "org-s");
+    const camelDevice = raccoonHeaders({ accessToken: "t", deviceId: "dev-2" });
+    check("a camelCase device id reaches the client header", camelDevice["X-Client-Device-ID"] === "dev-2");
+
     // The fallback roster: the six known models, in order, the two free ones
     // at multiplier 0, the rest priced.
     check("the fallback roster holds the six known models",
@@ -227,6 +242,34 @@ function section(title) {
       (await fetchRaccoonCatalog({ access_token: "t" }, async () => {
         throw new Error("down");
       })) === null);
+
+    // The store-shape regression, pinned at the function level: the panel
+    // routes resolve the credential through `raccoonStore` (camelCase) and
+    // hand THAT object to these reads. The Authorization the gateway
+    // receives must be the real Bearer token — not `Bearer ` (the empty read
+    // that made the panel 401 while every fresh-process probe passed).
+    const seen = [];
+    const captureFetcher = async (url, init) => {
+      seen.push({ url, headers: init?.headers ?? {} });
+      return { ok: true, status: 200, json: async () => ({ code: 0, data: { balance: 1129, categories: [] } }) };
+    };
+    const camelCred = { accessToken: "store-token", refreshToken: "rt", officeIdentity: "" };
+    check("the balance read sends the Bearer token from a camelCase credential",
+      (await fetchRaccoonBalance(camelCred, captureFetcher)) === 1129 &&
+      seen[0]?.headers?.Authorization === "Bearer store-token");
+    check("the catalog read sends the Bearer token from a camelCase credential",
+      (await fetchRaccoonCatalog(camelCred, captureFetcher)) === null &&
+      seen[1]?.url?.includes("/model_catalog") && seen[1]?.headers?.Authorization === "Bearer store-token");
+    check("the org code rides from the camelCase office identity",
+      seen[0]?.headers?.["X-Org-Code"] === "" &&
+      (await (async () => {
+        const seenOrg = [];
+        await fetchRaccoonBalance({ accessToken: "t", officeIdentity: "org-7" }, async (url, init) => {
+          seenOrg.push(init?.headers ?? {});
+          return { ok: true, status: 200, json: async () => ({ code: 0, data: { balance: 1 } }) };
+        });
+        return seenOrg[0]?.["X-Org-Code"] === "org-7";
+      })()));
   } catch (error) {
     fail("balance + catalog", error);
   }
