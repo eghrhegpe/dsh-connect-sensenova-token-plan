@@ -351,6 +351,35 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 
 **扫码登录信封实测（2026-10-01，真扫码）**：`login_with_qrcode_code` 成功信封的 `data` **只含 `access_token`、`refresh_token`、`status` 三个字段**——没有用户对象、没有头像/手机号/用户 ID。面板展示的昵称**确定来自 access token JWT 的 `name` claim**（`extractRaccoonNickname` 的 JWT 兜底分支命中；claims 全集为 `exp/iss/jti/name/nation_code/nbf/owner_type/sid`）。这销案了「信封从未被探测、昵称来源未证实」的悬案：网关能给的全部账号信息就是这一条昵称，面板无需也无从展示更多；`raccoon.ts` 里信封字段的防御梯子保留（代价为零，防网关将来加字段）。
 
+### 6.1.4 接入面盘点：未接的数据、死负载与「自动」的边界（2026-10-01：报告 → 当天处置）
+
+> 起因：0.4.6 收尾时把「Host 已经拿到、插件却没用」的数据逐条过了一遍。三条发现当天**按下表处置落地**
+> （先只报告、再拍板动手是刻意的两拍：处置顺序由「有没有真实下行风险」决定，不由「代码脏不脏」决定）；
+> 本节同时把「自动续期 / 自动登录 / 签到」三件常被混成一件的事按事实拆开。
+
+| 未接入项 | 现状（证据） | 处置 |
+|---|---|---|
+| `RACCOON_DESKTOP_PREFIX`（`/api/web/desktop/v1`） | **定义了但零引用**：唯一出处在 `src/host/raccoon.ts` 的常量区，全仓无调用点；构建产物 `lib/` 里连字符串都被 tree-shake 掉。**同类死常量还有两个**：`RACCOON_QR_POLL_INTERVAL_MS` / `RACCOON_LOGIN_TIMEOUT_MS`——`src/host/routes.ts` 把同样的值**又本地定义了一遍**（`RACCOON_LOGIN_DEADLINE_MS` / `RACCOON_POLL_MS`），实际逻辑走本地那对 | ✅ 分两种处置：`routes.ts` 的两个副本**删掉、改从 `raccoon.ts` 导入**（两个真源是唯一会静默漂移的形态）；桌面前缀**保留但写明「故意不接线」**（它是端点级唯一代码路标，删了会把「探针即领取」的知识挤回文档） |
+| 401 诊断六字段 | Host **一直在发**：`accessTokenPrefix` / `credentialSource` / `raccoonEnvShadow` / `envCredentialFingerprint` / `accessTokenFingerprint` / `hostProxyEnv`（`src/host/routes.ts` 的 `raccoonState()`）。客户端**一个都没读**（`client.js` 里只有 `balanceDetail` / `modelsSource`）。是排查 401 时的脚手架，线上无害但属死负载——其中 `hostProxyEnv` 还是**无条件**上报（非 `null` 省略） | ✅ 全部收进 **`?debug=1`** 显式开关（GET 才认；免配置字段、免重启，POST 的回报一律干净），且 `hostProxyEnv` 的**代理 userinfo 一律遮蔽**后才出门 |
+| 目录字段 `model_name` | **从未被读**。目录归一化只认 `id` / `name` / `multiplier` / `vision` / `context_window` / `max_output_*`；`id` 为空的行**显式跳过**（实测前 3 个 `raccoon-*` 隐形模型正是 `id` 空、`model_name` 有值——那是有意过滤，不是静默丢弃）。风险只在：若哪天可见模型的显示名改走 `model_name`，会静默退化成用 `id` 当名字（不炸、但难看） | ➖ 不动（`id === ""` 的跳过是设计），仅登记为「字段已观测、未消费」 |
+
+余额侧**无静默丢弃**：总量抽 `available_points`（`balance` / `available` / `amount` 兜底），拆分 `daily` / `reward` / `monthly` / `topup_points` 四条零也照报；读失败必报原因（`balanceDetail`），目录侧「读失败」与「读成功但无可见模型」分开报（`modelsSource` 的 `unreadable` vs `empty`）。
+
+**优先级判据（为什么是这个顺序）**：六字段里只有 `hostProxyEnv` 有**真实下行风险**——它回吐的是环境变量的**值**，而企业代理常写成 `http://user:pass@proxy:8080`，userinfo 就是凭据（本机 7 个代理变量全未设置，属**潜在**而非活跃；但代码路径对所有用户通用，且该路由的信任边界是浏览器、不是机器，本地任意进程都能读）。其余五字段（8 字符前缀、来源字符串、布尔、两个 12-hex 指纹）无秘密、无消费者，是纯死负载。**常量单真源**略高于纯卫生：两份字面量一旦漂移，没有任何运行期断言看得见。故顺序为「诊断字段（含遮蔽）→ 常量单真源 → 其余」。
+
+**验证方式（无门禁可依赖，所以用反证）**：这六字段与那两个副本常量在 `test/` 里**零覆盖**——删掉它们不会有任何测试变红，安全性只能靠「grep 证明无消费者」这一条人工证据。因此在补齐守门断言之外，做了两个**故意破坏**的反证：把开关写死成常开 → 负向断言点名泄漏的键；摘掉遮蔽 → 断言原样吐出 `alice:s3cr3t`。两条都实测红过再还原（同 [PITFALLS.md](./PITFALLS.md) §25 的验收纪律）。为什么脚手架能长期无人发现，已收进 [PITFALLS.md](./PITFALLS.md) §29。
+
+#### 「自动」的边界：自动的是续期，不是登录，更不是签到
+
+- **自动续期**（Token Plan / 小浣熊都有）：Token Plan 走 `acquire()`（节流闸 → 新鲜度 → refresh → 登录兜底）；小浣熊的 refresh 是**单用轮换**、整对回写，并在每次请求前 eager refresh。触发是**惰性**的——Host 半边零 `setInterval`，靠面板轮询打路由时按需触发。
+- **密码自动重登**（仅 Token Plan）：**opt-in**，必须 `SENSENOVA_PASSWORD` 在 Host 进程环境里且账号已存；没有它，refresh 一死就回面板要手动登录。平台要短信/图形验证码时自动化注定失败（面板文案 `auth.verification`）。
+- **登录本身**永远需要用户在场一次：Token Plan 是浏览器 OIDC+PKCE，小浣熊是微信扫码（阻塞最多 5 分钟等扫）。
+- **签到 / 每日领取：没有做，也没有可调的端点**。Token Plan 侧从未证实存在这样的端点（§6「先证商汤有端点，否则不吸」与 §7「明确不做」仍然有效）；小浣熊侧日发积分是**服务端自动发的 `daily_grant`**（网关没给这个发放的端点），面板只读余额、把日发那部分当 breakdown 展示。所以**不存在「靠自动登录刷签到」这回事**——本插件从未发出任何签到/领取请求。
+
+#### 探针提醒：`desktop/v1/login/points/grant` 不能拿真凭据试
+
+该端点是「桌面端登录奖励（**每号一次**）」且属**小浣熊域**（不是 Token Plan 积分池），对 §6 的签到边界不适用。更要紧的是它的属性：**有副作用且不可逆**——带真凭据请求即把一次性奖励真实领走。所以「先人工探针确认契约」只能做**无凭据的路由存在性探测**（判据沿用 §6.1.2：结构化信封 `401` vs 纯文本 `404`）；带凭据的契约验证必须等真决定接入时再做，并明确接受当次奖励被领走。已收进 [PITFALLS.md](./PITFALLS.md) §28。
+
 ## 7. 优先级与时间盒
 
 | 优先级 | 项 | 侵入性 | 门禁 |
@@ -362,7 +391,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 | **P1 ✅** | 出图吸收（§5.4 接法 B）：`draw.ts`（peer-free：结构化识别 / 端点拼接 / 429 分诊 / 失败冷却）+ `index.ts` opt-in 接线（`drawEnabled` 默认关，无 tools 服务即缺席）；快照契约零改动 | 低 | `test/draw.test.mjs`（56 项）已落地；离线 12 套件全绿 |
 | **P1** | `doctor --json` | 低 | `config` / `parsers` 套件 |
 | P1（可选） | §4 官方文档保真（改名/链接，不提炼不 `git rm`） | 低（仅重命名 + 链接） | `docs.test.mjs` |
-| **P2 ✅ 部分落地** | 第二上游 provider：已随 0.4.3 落地（三个 tab 之一 + `sensenova-raccoon`），2026-10-01 补做网关契约复测，**契约成立**（§6.1.2）；剩余未做的是 desktop 融合路径（第二**登录路径**，见 §6.1.1）——它已实测判死，维持观望 | 高（新上游 + 新凭据生命周期） | 已落地部分：`test/raccoon.test.mjs` 离线 101 项 + `docs.test.mjs` 检查 9；**仍缺**：带凭据的 live 端到端探针（比照 §2.2 给商汤做的 `live-contract`） |
+| **P2 ✅ 部分落地** | 第二上游 provider：已随 0.4.3 落地（三个 tab 之一 + `sensenova-raccoon`），2026-10-01 补做网关契约复测，**契约成立**（§6.1.2）；剩余未做的是 desktop 融合路径（第二**登录路径**，见 §6.1.1）——它已实测判死，维持观望。接入面盘点与死负载处置见 §6.1.4（2026-10-01：诊断收进 `?debug=1` + 常量单真源） | 高（新上游 + 新凭据生命周期） | 已落地部分：`test/raccoon.test.mjs` 离线 101 项 + `docs.test.mjs` 检查 9；**仍缺**：带凭据的 live 端到端探针（比照 §2.2 给商汤做的 `live-contract`） |
 | 明确不做 | 多 Key / 签到 / 跨 provider 聚合 | — | — |
 | 明确不做 | 伪倍率折进注册模型名（qoder ② 法：把倍率嵌进 DSH 原生选择器的模型名里，绕「选择器无旁路字段」限制）。2026-09-30 决议 | 低 | 现状即决议：`×N` 只作**面板侧标记**（模型花名册行尾 + 趋势图，同一匹配器、同一数值，均标「非官方」）。理由：① 倍率是操作者手填的对比数据、非平台计费事实，折进 DSH 全局模型名会把个人配置泄漏给所有会话；② qoder 嵌名是「DSH 无字段携带平台真实倍率」的 workaround，本插件的倍率本就没有平台出处，面板就是它唯一合理的位置；③ 模型名是 DSH 配置 / 选择器的稳定标识（id 匹配），加 `×N` 会破坏 id 语义 |
 

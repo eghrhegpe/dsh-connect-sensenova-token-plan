@@ -63,6 +63,8 @@
 - 续期失败（refresh_token 被吊销）且环境已无密码时，面板明确提示需要重新登录，而不是静默显示旧数据。
 - 续期状态写入凭据记录 `dsh-connect-sensenova-token-plan/sensenova-console`（含 `hasRefreshToken` / `expiresAt`）。
 
+**「自动」到哪一步为止**（三个常被混成一件事的边界）：本节说的自动，指的是**令牌续期**——它不需要用户在场。**登录本身永远需要用户在场一次**（浏览器 OIDC 授权码 + PKCE），此后才谈得上静默续期；「密码自动重登」是**显式 opt-in**：只有 `SENSENOVA_PASSWORD` 在 Host 进程环境里、且账号已存，refresh_token 被吊销时才会用密码重登（面板文案 `auth.autoRecoverOn`），没有它则明确要求重新登录；平台要短信/图形验证码时自动化注定完不成（`auth.verification`，见 §7）。另外，**本插件不含任何签到 / 每日领取调用**——自动续期不产生积分副作用，别把它读成「在后台刷签到」（第二上游的日发积分由服务端自动发放，见 [ROADMAP.md](./ROADMAP.md) §6.1.4）。
+
 ---
 
 ## 6. 登录节流（防锁号的核心）
