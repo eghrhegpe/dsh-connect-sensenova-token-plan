@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "capturedAt": "2026-10-01",
+    "baseUrl": "https://xiaohuanxiong.com",
+    "source": "docs/ROADMAP.md §6.1.3（首次带真凭据的逐端点实测）与 §6.1.2（无凭据路由存在性复测）",
+    "note": "冻结的是网关 Dialekt 的形状，不是某个账号的数字。余额值天天变，故不冻结任何金额；冻结的是「总量走哪个字段」「明细走哪四个字段」「哪些模型 id 应可见」这类契约事实。",
+    "refreshRule": "勘误钉子：0.4.6 之前本插件把 refresh 路径抄成 /api/web/auth/v1/refresh_token（多了 _token），每次续期必 404 —— access token 过期后只能重新扫码。真路径是 /refresh。此条由 fake-token 探活证实：假 token 打 /refresh 得到 400 params_invalid_error（路径存在、抵达业务层），打 /refresh_token 得到纯文本 404 page not found（路径不存在）。",
+    "balanceRule": "勘误钉子：余额总量的字段名是 available_points，旧解析只认 balance/available/amount，于是拿真实余额读成 null、面板显示假 0（0.4.6 修正）。此基线把 available_points 钉成主字段，后三者降为兜底。"
+  },
+  "routes": [
+    {
+      "id": "catalog",
+      "method": "GET",
+      "path": "/api/web/llm/v2/model_catalog",
+      "auth": "required",
+      "probeWithoutAuth": "structured-401"
+    },
+    {
+      "id": "balance",
+      "method": "GET",
+      "path": "/api/web/points/v1/balance",
+      "auth": "required",
+      "probeWithoutAuth": "structured-401"
+    },
+    {
+      "id": "refresh",
+      "method": "POST",
+      "path": "/api/web/auth/v1/refresh",
+      "auth": "bogus-token-probe",
+      "probeWithoutAuth": "structured-400",
+      "expectedCode": 100002,
+      "expectedMessage": "params_invalid_error",
+      "note": "只能用假 token 探：真 refresh token 是单用轮换，烧掉一次用户就得重扫码。"
+    }
+  ],
+  "absentRouteControls": [
+    {
+      "id": "refresh-token-suffix",
+      "method": "POST",
+      "path": "/api/web/auth/v1/refresh_token",
+      "expect": "text-404",
+      "note": "对照组：这个路径 0.4.6 之前被当成 refresh 用。它必须仍然不存在，否则说明网关改版或本插件的勘误结论失效。"
+    },
+    {
+      "id": "nonexistent-canary",
+      "method": "GET",
+      "path": "/api/web/llm/v2/__canary_should_not_exist__",
+      "expect": "text-404",
+      "note": "对照组：证明「纯文本 404」确实是这台网关的「路径不存在」答法。没有这条对照组，上面每条 structured-401 判定都只是无根据的信念。"
+    }
+  ],
+  "catalog": {
+    "categoryType": "chat",
+    "visibleIds": [
+      "sn-sensenova-6-8-flash",
+      "sn-sensenova-6-8-flash-lite",
+      "sn-glm-5-3",
+      "sn-kimi-k3",
+      "sn-glm-5-3-flash",
+      "sn-deepseek-v4-1-flash"
+    ],
+    "visibleIdsPolicy": "list-not-subset",
+    "note": "这 6 个是 2026-09~10 实测的 visible chat 模型，也是 src/host/raccoon.ts RACCOON_FALLBACK_MODELS 的内容。网关随时可能增删，故采用「至少还认得冻结里的 N 个」而非「必须完全相等」—— 新增模型不是漂移，全部消失才是。",
+    "invisibleCount": 3,
+    "invisibleNote": "实测另有 3 个 raccoon-* 隐形模型：id 字段为空而 model_name 有值。归一化按 id===\"\" 显式跳过是有意设计（不是静默丢弃），此处的数字仅供人工核对网关是否还在下发隐形条目。"
+  },
+  "balance": {
+    "totalField": "available_points",
+    "fallbackFields": ["balance", "available", "amount"],
+    "partFields": ["daily_points", "reward_points", "monthly_points", "topup_points"],
+    "note": "主字段 available_points 必须仍在网关响应里 —— 它一消失，旧解析就会静默读成 null（0.4.6 事故）。四个 part 字段是「网关声明了才上报」，故只校验声明的值是有限数，不要求都存在。"
+  },
+  "envelope": {
+    "successCode": 0,
+    "codeField": "code",
+    "dataField": "data",
+    "note": "code===0 才是成功。切勿把 code 送进 src 里那个拒绝 0 的 num() 辅助 —— 那会把每次成功读成 -1 拒绝（raccoon.ts parseRaccoonEnvelope 里已有同名警告）。"
+  },
+  "forbidden": [
+    {
+      "method": "POST",
+      "path": "/api/web/desktop/v1/login/points/grant",
+      "reason": "桌面端登录奖励，每号一次且有副作用不可逆：带真凭据请求即把一次性奖励真实领走。见 ROADMAP §6.1.4「探针提醒」与 PITFALLS §28。探针脚本必须永不对它携带凭据，只能做无凭据的路由存在性探测。"
+    }
+  ]
+}

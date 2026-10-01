@@ -12,6 +12,7 @@ npm run commit:lint  # 提交信息底线（零依赖）：检查 HEAD 一条提
 npm run test:e2e    # 只跑端到端：真 Host + 假平台，需 dsh CLI 在 PATH
 npm run test:live   # 仅 live-jwks.test.mjs，需联网，验证 JWKS 文档可达
 npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_KEY，重放商汤推理契约
+npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（小浣熊）网关契约；无凭据跑 L1 路由存在性，带 RACCOON_ACCESS_TOKEN 跑 L2 读取契约
 ```
 
 测试**无需 `npm install`**：`@deepseek-ai/dsh-credentials` 等是 Host 里的 peer 依赖，由 `test/peer-roots.mjs` 就地解析（`$DSH_HOME` → 插件 `node_modules` → 默认安装位置 `~/.dsh/dsh-asar-unpacked` → 打包安装目录 → 工作区内的 `@deepseek-ai/dsh` 元包 → **npm 全局 CLI 的运行时树**，最后两项是为「没装 Host 的机器」准备的，CI 正属此类）。找不到时会列出每个候选根**各自失败的原因**，而不是静默跳过或只报搜索路径。`config.test.mjs` 不依赖任何 peer，干净检出即可跑。
@@ -46,6 +47,7 @@ npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_K
 | `test/wiring.test.mjs` | **真实 Cordis 容器**里的装配：`inject` 解析、服务注册、路由挂载与卸载、配置错误；第三步的可选 `ctx.get("llm")` 注册对（`registerAdapter` + `registerConfigurableProviders`，id `sensenova-token-plan`）、opt-in 关闭不注册、fiber dispose 释放注册对与三条路由 |
 | `test/live-jwks.test.mjs` | （仅 `test:live`）真实拉取 JWKS 文档，确认封包公钥可达 |
 | `test/live-contract.mjs` | （仅 `test:live:contract`）重放 `test/baselines/sensenova-contract.json` 对商汤推理端点：`/v1/models` 目录核对 + 少量 `reasoning_effort:"none"` 探针（限流友好，每格 1 请求不重试）；红 = 平台方言漂移，**不是回归**，修法走 `SENSENOVA-API.md` §7 注释层 |
+| `test/live-raccoon.mjs` | （仅 `test:live:raccoon`）重放 `test/baselines/raccoon-contract.json` 对第二上游网关（`xiaohuanxiong.com`）。**两档**：L1 无需凭据，只探路由存在性（存在的路径答结构化 `401`/`400` 信封，不存在的答纯文本 `404 page not found`），并跑两条**对照组**证明该判据仍成立；L2 需 `RACCOON_ACCESS_TOKEN`，守两条真用过的事实——目录里 6 个可见 `sn-*` 未整体消失、余额主字段仍是 `available_points`（这是 0.4.6「余额读成假 0」的回归钉子）。**红线**：`desktop/v1/login/points/grant` 永不带凭据（一次性登录奖励，请求即领走不可逆，ROADMAP §6.1.4 / PITFALLS §28），脚本对自己的源码做静态自证；真实 refresh 需二级 opt-in（`RACCOON_LIVE_ALLOW_REFRESH=1`），因为它轮换时会烧掉这对 token |
 
 不碰真实账号的保证：网络层打桩，密码用临时密钥加密，不发往商汤；`routes.test.mjs` 用真实响应形状但全 stub。
 
@@ -64,7 +66,7 @@ npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_K
 > 本文曾记载「`wiring.test.mjs` 缺失、`panel.test.mjs` 有失败用例」。两条都已不成立：`wiring.test.mjs` 现在 24 项全过，`panel.test.mjs` 41 项全过。后来记载的「同源校验挡不住 DNS rebinding」「密码会被静默 trim」也已收口：前者由 `isAdmitted` 的 Host 白名单（`index.ts`，`routes.test.mjs` D2 守住「Origin 与 Host 一致的陷阱」），后者由 `token-store.ts` 的 `verbatim()`（密码按原样进 JWE，store.test.mjs 断言「密文不含明文、且密码不写入凭据服务」）。「渲染层没有被测到」同样不再成立：`test/render.test.mjs` 通过 `panel-render.js` 检查上屏数字，`used/limit` 写反的演练实测 5 项变红。文档比代码先过期也是一类缺陷，所以这里只保留仍然真实的缺口：
 
 - **`AccountForm` 的渲染没有被测到。** 它建立在 `useState`/`useEffect` 之上，React 替身只会无脑返回初值——测的会是那个假件。宁可留着缺口也不假装覆盖；表单的行为部分由 `store`/`routes` 套件在 Host 侧守住。`ModelPicker` 同属这类 hook 组件，草稿/保存态也未被渲染层覆盖；它的**可测部分**已被拆出来守住：勾选行的 `ModelRoster`（不依赖 hook）由 `test/render.test.mjs` G4 组覆盖，而「勾选 → 允许清单」的推导（含空清单折叠与 `__hide_all__` 哨兵）由 `test/provider.test.mjs` 5.6c 组以面板与 Host 两侧逐值相等钉死。
-- **`test:live` 是唯一允许联网的检查**（只拉公开 JWKS，不带凭据、不发登录请求）。默认不跑它，避免「测试会因与插件无关的外部原因失败」，也守住那条界线：验证不该默认等于对真实服务发请求。
+- **联网档（`test:live` / `test:live:contract` / `test:live:raccoon`）默认一律不跑。** `test:live` 只拉公开 JWKS、不带凭据、不发登录请求；另两个分别对真实商汤推理端点与真实小浣熊网关发请求（后者在无凭据时只做路由存在性探测，不携带任何凭据、无副作用）。默认不打它们，一是避免「测试会因与插件无关的外部原因失败」，二是守住那条界线：验证不该默认等于对真实服务发请求。
 - **本机的 `SENSENOVA_*` 环境变量被测试隔离。** `index.ts` 在挂载时从 `process.env` 读 API key，一台真配了它的机器会走进套件从未打桩的分支（真去拉模型目录，并把一个非控制台 token 混进断言）。只在一台干净机器上绿、在作者机器上红的套件不叫离线，叫「通常离线」——`test/peer-roots.mjs` 的 `isolateHostEnv()` 负责这件事。
 - **`credentialKey` 形状有双保险。** 它是 `index.ts` 一处照抄 `@deepseek-ai/dsh-credentials` 格式（`"scope/id"`）的 shim，为让测试不解析 peer 就能跑。`config.test.mjs` 在**任何机器**（含干净检出）钉死其字面形状，`store.test.mjs` 在 peer 可解析的机器上再断言与真实实现**逐值相等**——格式一变，无论是插件这侧手抖还是 peer 包升级改了分隔符，都会红，而不是等到运行时面板读不到自己的 grant。
 - **`isAdmitted` 的 IPv6 裸写形态（已修，钉在 `test/config.test.mjs`）。** 旧 `hostName()` 对裸 `::1:19387` 走 `split(":")[0]` 得空串，白名单里的 `::1` 永远命中不了——裸 IPv6 客户端被误拒。修法：`hostName` 按「最后一对冒号后若全为数字且倒数第二段也为数字（裸 IPv6 末组 + 端口）」剥端口；`::1`、`2001:db8::1` 等无端口字面量原样保留。`config.test.mjs` 有 14 条 `hostName` 用例 + 8 条 `isAdmitted` 白名单用例钉住全部形态。
