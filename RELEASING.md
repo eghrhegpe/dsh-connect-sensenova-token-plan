@@ -6,6 +6,83 @@
 > 你在 GitHub Releases 页面看到的「更新日记框」是**手动** `gh release create` 出来的，CI 不会、npm 成功也不会自动建。
 > 这正是历史上最容易漏的一步：它对 CI / 测试 / 安装**都没有任何影响**，漏掉时没有任何东西报错，只能靠「发布清单里写着」来保证。
 
+## 0. 先给 AI / 操作者一个清晰目的
+
+这份文档的目标不是“把六步一字不差念一遍”，而是让操作者在**任意时刻**都能回答三个问题：
+
+1. **我现在卡在发版链的哪一环？**
+2. **还缺哪些环节才算完整发布？**
+3. **哪些动作可以补，哪些动作不可逆？**
+
+所以使用方式是：
+
+- **新发版**：按第 1 → 6 步做。
+- **断点续发**：先跳到「发版状态判定表」，确认当前状态，再只补缺的那几步。
+- **已发生 tag / npm / Release 任一动作**：先看「不可逆点」，再决定能不能修、如何修。
+
+## 1. 发版状态判定表（先判断，再动手）
+
+先跑下面 5 条命令，把当前状态定位到某一个格子。定位错了，后面的顺序会全错。
+
+```bash
+# A. 仓库侧：tag 是否存在、指向哪里
+git tag -l vX.Y.Z
+git rev-list -n1 vX.Y.Z          # tag 指向的 commit
+
+# B. 仓库侧：main 是否已推
+git status -sb
+git log --oneline -5
+
+# C. 版本侧：package.json / CHANGELOG 是否已落到目标版本
+grep '"version"' package.json
+head -n 40 CHANGELOG.md
+
+# D. npm 侧：是否已发布
+npm view dsh-connect-sensenova-token-plan version --registry=https://registry.npmjs.org
+
+# E. GitHub 侧：是否已建 Release
+gh release view vX.Y.Z --json name,tagName,isDraft,isPrerelease,assets
+```
+
+按下表判断：
+
+| 状态 | 特征 | 还缺什么 | 下一步 |
+|---|---|---|---|
+| S0 未开始 | 无 tag、npm 还是旧版、无 Release | 全流程 | 从第 1 步走完整链路 |
+| S1 代码已进 main | 修复已提交、已 push；`package.json` 尚未升版 | 版本文件、tag、npm、Release | 先补齐 2/3/4，再走 5/6 |
+| S2 已 tag | 有 tag、main 已推；npm 未发 | npm、Release | 走 5、6 |
+| S3 已 npm | 有 tag、npm 已发；无 Release | Release | 只走 6 |
+| S4 完整 | tag、main、npm、Release 都有 | 无 | 做最终核对即可 |
+
+**本仓库当前典型真实状态**（0.4.5 这条线就出现过）：
+
+- **S1**：出图修复先进库，`package.json` / `CHANGELOG` 后才追平
+- **S3**：npm 已发到 0.4.5，但 GitHub Release 还没建
+
+这说明：**“tag 已推”或“npm 已发”都不等于发版完成**，必须按 S0–S4 判状态，而不是凭感觉。
+
+## 2. 不可逆点（先记住这三条）
+
+在动手前，先把这三条钉死，避免走到一半才发现只能发新版本：
+
+1. **npm 已发布 ⇒ 该版本号不可覆盖**
+   - 目标版本若已在 npm 列表里，不能把 tag 移回去假装“补上一版”。
+   - 正确动作是开下一个 `X.Y.(Z+1)`。
+2. **GitHub Release 已建 ⇒ tag 基本钉死**
+   - 尤其当该 Release 与 npm 版本已同时存在时，移动 tag 会让“用户装到的内容”与“Release 指向的内容”分叉。
+3. **`--verify-tag` 漏掉 ⇒ 可能悄悄新建 tag**
+   - 若 tag 不存在，`gh release create` 会把 tag 指向当前 HEAD。
+   - 所以补 Release 时务必先确认 tag 已存在，再建。
+
+判断某个 tag 是否还能动，用下面两条：
+
+```bash
+npm view dsh-connect-sensenova-token-plan versions --registry=https://registry.npmjs.org
+gh release view vX.Y.Z --json tagName
+```
+
+只要任一已发生（版本在列 / Release 已存在），**不要移 tag，只发下一版**。
+
 ## 前置条件
 
 - `gh` 已登录且带 `repo` 权限：`gh auth status` 应显示 `Logged in to github.com account eghrhegpe`、scope 含 `repo`。
@@ -100,6 +177,11 @@ npm view dsh-connect-sensenova-token-plan version --registry=https://registry.np
 - `package.json` 的 `files` 字段已限定发布内容，测试与 `node_modules/` 不会进包。
 - 发布前可用 `npm pack --dry-run` 预览 tarball 内容。
 - **（可选，与发版解耦）收录到插件市场**：向 `awesome-dsh-plugin/awesome-dsh-plugin` 提 PR 增加 `data/plugins/eghrhegpe__dsh-connect-sensenova-token-plan.yml`（描述只能陈述功能、不带营销词），详情见 `docs/CONTRIBUTING.md` §8。列表会按下载量自动关联本仓库，yml 里无需任何 npm 字段。
+- **断点续发：npm 已成功但会话中断 / 忘了下一步**
+  - 先回读第 1 节判定表，确认当前是 **S3**（有 tag、npm 已发、无 Release）。
+  - 此时不要再重跑 `npm publish`；唯一缺口是第 6 步。
+  - 先 `gh release view vX.Y.Z --json tagName` 确认“没建过”，再补建。
+  - 这样能把“以为发完了”的错觉，收敛成一条明确的状态判断。
 
 ### 6. 创建 GitHub Release（**最容易漏，务必做**）
 
@@ -117,6 +199,11 @@ gh release create vX.Y.Z \
 - **`--notes-file` 指向临时文件**。不要用 `--notes-from-tag`（tag message 只有一行，正文会空得离谱），也不要用 `--generate-notes`（那是自动 commit 列表，与历史形态不符）。
 - 不加 `--draft`、不加 `--prerelease`：均为正式发布。
 - **不附任何构建产物**：本插件经 DSH 注册表 / npm 分发，不通过 Release 发二进制。不要在这一步突然塞 `.tgz`。
+- **断点续发：npm 已发、只缺 Release 时**
+  - 这就是第 1 节判定表里的 **S3**。
+  - 此时目标非常单一：只补 Release，不再碰 tag、不再重发 npm。
+  - 先确认 tag 指向的 commit 就是本次要发的内容，再建 Release。
+  - 建完后用同一节清单核对，避免“发了一半却不知道哪边缺”。
 
 **正文形态**（注意：它与 `CHANGELOG.md` 那一节**不是同一份文本**）：
 
@@ -149,6 +236,21 @@ gh release view vX.Y.Z --json name,tagName,isDraft,isPrerelease,assets
 ```
 
 > **为什么这一步必须写进文件**：它对 CI、对 npm、对测试**都没有任何影响**，所以漏掉时不会有任何东西报错——这正是它容易被漏掉的原因。它只能靠「发布清单里写着」来保证。
+
+## 最终闭环清单（完成判定，不再凭感觉）
+
+发版是否完成，只看下面 5 个事实是否全部成立：
+
+- [ ] **仓库可查**：`vX.Y.Z` tag 存在，且 `git rev-list -n1 vX.Y.Z` 指向本次要发布的 commit。
+- [ ] **main 可查**：该 commit 已在 `origin/main`，`git log --oneline -5` 能追到版本提交。
+- [ ] **版本文件可查**：`package.json` 的 `version` 与目标版本一致；`CHANGELOG.md` 顶部已有该版本节。
+- [ ] **npm 可查**：`npm view dsh-connect-sensenova-token-plan version --registry=https://registry.npmjs.org` 返回目标版本。
+- [ ] **GitHub Release 可查**：`gh release view vX.Y.Z --json tagName` 能查到，且 `isDraft=false`、`isPrerelease=false`、`assets=[]`。
+
+只要有一个缺，就是“未完整发布”。  
+**AI 的执行目的**应当始终是：
+
+> 先判状态（S0–S4），再补缺口，最后用这 5 条收口；任何一步都不得假设“前面那一步已经做完了”。
 
 ## 常见问题
 
