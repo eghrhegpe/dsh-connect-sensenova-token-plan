@@ -18,7 +18,7 @@
  * this tab's route is covered by `test/raccoon.test.mjs`.
  */
 import { RACCOON_PATH } from "./const.ts";
-import { count, format, tokenSize } from "./format.ts";
+import { count, format, tokenSize, when } from "./format.ts";
 import { postJson, postJsonOrThrow } from "./http.ts";
 import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
@@ -42,6 +42,10 @@ interface RaccoonState {
   switchSource?: string;
   loggedIn?: boolean;
   nickname?: string;
+  /** The stored access token's JWT `exp`, in ms (absent when unknowable). */
+  expiresAtMs?: number | null;
+  /** Whether that token has lapsed — `loggedIn` can be true while this is true. */
+  credentialExpired?: boolean;
   balance?: number | null;
   models?: RaccoonModel[];
   providerRegistered?: boolean;
@@ -188,7 +192,14 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
 
   const enabled = state?.enabled === true;
   const loggedIn = state?.loggedIn === true;
+  // The gateway's login response does not always carry a nickname; rendering
+  // "已登录：" with an empty tail reads as broken, so a blank nick drops the
+  // suffix rather than showing a dangling colon.
+  const nick = String(state?.nickname ?? "");
   const models = Array.isArray(state?.models) ? state.models : [];
+  // The credential's own clock (the JWT `exp` the route re-reads after any
+  // in-flight rotation): rendered next to the balance it guards.
+  const expiresAt = typeof state?.expiresAtMs === "number" ? state.expiresAtMs : null;
 
   return h(
     "div",
@@ -235,9 +246,23 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
         ? h(
             "div",
             null,
-            h("div", { style: { fontSize: 13 }, role: "status" },
-              format(tt("raccoon.loggedIn"), { nick: String(state?.nickname ?? "") })),
-            h("button", { type: "button", style: S.button, onClick: () => void logout() }, tt("raccoon.logout"))
+            // An expired access token is a DIFFERENT fact from "not logged in":
+            // the credential row still exists (and the registration may well be
+            // up), so `loggedIn` alone reads as healthy while every request
+            // 401s. Surface the expiry as an alert with its own affordance.
+            state?.credentialExpired === true
+              ? h("div", { style: { ...S.formError, fontSize: 13 }, role: "alert" },
+                  nick === "" ? tt("raccoon.expiredPlain") : format(tt("raccoon.expired"), { nick }))
+              : h("div", { style: { fontSize: 13 }, role: "status" },
+                  nick === "" ? tt("raccoon.loggedInPlain") : format(tt("raccoon.loggedIn"), { nick })),
+            state?.credentialExpired === true
+              ? h("button", {
+                  type: "button",
+                  style: S.button,
+                  onClick: () => void startLogin(),
+                  disabled: loginBusy
+                }, loginBusy ? tt("raccoon.loggingIn") : tt("raccoon.reLogin"))
+              : h("button", { type: "button", style: S.button, onClick: () => void logout() }, tt("raccoon.logout"))
           )
         : h(
             "div",
@@ -268,8 +293,24 @@ export function RaccoonTab({ tt }: { tt: Tt }): unknown {
           h(
             "div",
             { style: { ...S.muted, fontSize: 12, marginBottom: 8 } },
-            format(tt("raccoon.balance"), { balance: count(state?.balance ?? 0) })
+            // `null` is "the gateway did not answer", not "zero". Reading it as
+            // 0 would claim a balance the panel never fetched — the exact lie
+            // the roster block refuses to tell, so say "unknown" instead.
+            typeof state?.balance === "number"
+              ? format(tt("raccoon.balance"), { balance: count(state.balance) })
+              : tt("raccoon.balanceUnknown")
           ),
+          // The credential's expiry, beside the balance it guards: `when()`
+          // carries the day across midnight (a 22:00 rotation expires 01:00 —
+          // a bare time would read as today), and it stays drawn while the
+          // token is lapsed so the expired alert above is dated, not vague.
+          expiresAt !== null
+            ? h(
+                "div",
+                { style: { ...S.muted, fontSize: 12, marginBottom: 8 }, role: "status" },
+                format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1000) })
+              )
+            : null,
           models.length > 0
             ? h(RaccoonRoster, { models, tt })
             : null
