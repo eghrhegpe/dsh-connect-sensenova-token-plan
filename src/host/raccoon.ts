@@ -73,13 +73,13 @@ export const RACCOON_QR_STATUS = Object.freeze({
 });
 
 /**
- * Extract the account display name from a login payload, defensively across
- * the field spellings a gateway plausibly uses. The success envelope was
- * never probed for a nickname (only `access_token`/`refresh_token` were
- * recorded), so the extraction tries the flat fields and a nested user
- * object, then falls back to JWT claims — and the caller logs the envelope's
- * FIELD NAMES (never values) so the next real scan settles the question with
- * evidence instead of another silent gap.
+ * Extract the account display name from a login payload. The fallback ladder
+ * below was written when the success envelope had never been probed; a real
+ * scan (2026-10-01, see docs/ROADMAP.md §6.1.2) settled it: the envelope's
+ * `data` carries ONLY `access_token`/`refresh_token`/`status` — no user
+ * object, no profile fields — so in practice the name always comes from the
+ * JWT's `name` claim. The envelope ladder stays: it costs nothing and would
+ * catch a gateway that starts shipping a user object.
  * @param {object} data - the success envelope's `data` object.
  * @param {string} [accessToken] - the JWT, whose payload may carry the name.
  * @returns {string} the nickname, or `""` when none is found.

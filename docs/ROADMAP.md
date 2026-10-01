@@ -349,6 +349,8 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 
 **探活纪律（沿用 §6.1.2 的判据）**：刷新/续期端点用**假的 `refresh_token`** 探活——真 token 是单用的，烧掉会让用户下次无法续期；假 token 同样能区分「400 = 路径在」与「404 = 路径不在」，零代价。
 
+**扫码登录信封实测（2026-10-01，真扫码）**：`login_with_qrcode_code` 成功信封的 `data` **只含 `access_token`、`refresh_token`、`status` 三个字段**——没有用户对象、没有头像/手机号/用户 ID。面板展示的昵称**确定来自 access token JWT 的 `name` claim**（`extractRaccoonNickname` 的 JWT 兜底分支命中；claims 全集为 `exp/iss/jti/name/nation_code/nbf/owner_type/sid`）。这销案了「信封从未被探测、昵称来源未证实」的悬案：网关能给的全部账号信息就是这一条昵称，面板无需也无从展示更多；`raccoon.ts` 里信封字段的防御梯子保留（代价为零，防网关将来加字段）。
+
 ## 7. 优先级与时间盒
 
 | 优先级 | 项 | 侵入性 | 门禁 |
