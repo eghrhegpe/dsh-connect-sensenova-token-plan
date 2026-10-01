@@ -111,6 +111,12 @@ jobs:
           node test/draw.test.mjs
           node test/doctor.test.mjs
           node test/raccoon.test.mjs
+          # The typecheck gate is not a *.test.mjs (same exemption as the build
+          # gate): it runs the local tsc pinned in devDependencies against
+          # tsconfig.json, so the strict flags there cannot rot silently. It
+          # SKIPs loudly when typescript is not installed — which CI always has,
+          # because the dev-dependency step above installs it.
+          node test/typecheck-gate.mjs
           # The build gate is not a *.test.mjs, so it stays outside the
           # three-way roster pin; it is listed here because CI is exactly
           # where the build must be proven (artifacts are gitignored, so a

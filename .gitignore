@@ -12,6 +12,9 @@ tmp/
 
 # 依赖与构建（link 安装下通常没有实体目录，保险起见）
 node_modules/
+# 无锁文件是设计决定（ci.yml：peer 包解析不到任何 registry，缓存键故意用
+# package.json）；本机 `npm install` 生成的锁是副产物，绝不误卷入提交。
+package-lock.json
 dist/
 build/
 *.tsbuildinfo
