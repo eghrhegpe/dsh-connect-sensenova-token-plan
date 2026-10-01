@@ -234,7 +234,7 @@ budget` 等），`isQuotaExceededError` 命中该措辞 → `classifyPiAiError` 
 
 | 选项 | 做法 | 风险 | 工作量 | 可行性 |
 |---|---|---|---|---|
-| **① 契约护栏（已落地，2026-09-29）** | `test/peer-contract.test.mjs`：**当真实 peer 可达时**（`peer-roots.mjs` 本地解析），钉死"peer 判 QUOTA + 含限频信号 → 本插件 `reclassifyFinish` 纠正回 RATE_LIMIT"这一**端到端行为契约**，并另设两道漂移护栏——`extractStructuredType` 必须仍能从 peer 拼好的 message 回捞结构化 type（peer 改拼接格式即红）、peer 根因未修（`isQuotaExceededError` 仍命中类型名）有显式现状钉；peer 缺席（干净检出/CI）则 SKIP。 | 低（纯测试，不碰运行时） | 已完成 | 已进 `npm test` 链 + CI offline job（三方名册钉子，见 §7 门禁） |
+| **① 契约护栏（已落地，2026-09-29）** | `test/peer-contract.test.mjs`：**当真实 peer 可达时**（`peer-roots.mjs` 本地解析），钉死"peer 判 QUOTA + 含限频信号 → 本插件 `reclassifyFinish` 纠正回 RATE_LIMIT"这一**端到端行为契约**，并另设两道漂移护栏——`extractStructuredType` 必须仍能从 peer 拼好的 message 回捞结构化 type（peer 改拼接格式即红）、peer 根因未修（`isQuotaExceededError` 仍命中类型名）有显式现状钉；peer 缺席（没装 Host 的机器）则 SKIP；**CI 已由 workflow 供应运行时，故那边不再缺席**（见 [PITFALLS.md](./PITFALLS.md) §30）。 | 低（纯测试，不碰运行时） | 已完成 | 已进 `npm test` 链 + CI offline job（三方名册钉子，见 §7 门禁） |
 | ② 上游修 peer（长期） | 向 `deepseek-harness`（peer 在 `packages/llm/llm`）提 PR：`isQuotaExceededError` 排除 `quota_exceeded_error` 类型名误匹配（要求 `quota` 与 `exceeded` 间非 `_` 连接，或命中时再查限频信号）。 | 高（依赖上游版本节奏，插件不可控） | 中 | 中（上游是公共仓 `github.com/deepseek-ai/deepseek-harness`，可提；但 peer 范围 `>=0.1.5 <0.3` 意味着旧 Host 仍可能跑 bug 版） |
 | ③ 收紧 peer 版本（护栏） | `package.json` peer 范围 `dsh-llm/dsh-llm-pi-ai` 现为 `>=0.1.5 <0.3`。若上游修了，可收紧到 `>=0.2.x`（修后版本）并在 README 注明"需 Host ≥0.2.x 才吃满 429 修复"。 | 中（老 Host 不升级则 429 修复不可用） | 小 | 中（需上游先出修版） |
 

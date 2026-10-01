@@ -305,3 +305,16 @@
 - **修法**（2026-10-01 已做）：整块收进显式 `?debug=1`（免配置字段、免重启；POST 的回报一律干净，因为 `answer()` 不带这个 flag），`hostProxyEnv` 的 userinfo 出门前一律遮蔽，并给 `/raccoon` 补上**第一条路由级覆盖**——正向断言「`?debug=1` 能拿回来」+ 负向断言「平时一个都不许出现」。
 - **验证**（无门禁可依赖，所以靠反证）：两个**故意破坏**都必须红——① 把开关写死成常开 → 负向断言点名 `["raccoonEnvShadow","hostProxyEnv"]`；② 摘掉 userinfo 遮蔽 → 断言原样吐出 `HTTP_PROXY=http://alice:s3cr3t@proxy.test:8080`。两条实测红过再还原，之后 167 项路由用例全绿。
 - **教训**：**排障脚手架要按「临时物」对待，而不是按「代码」对待**。给它一个到期条件（修完即收进 debug 开关或删除），给它至少一条断言——**负向断言最便宜**（「这些键平时不许出现」几乎零成本，却是唯一能防它悄悄长回来的东西）。更要紧的是：**「诊断字段」不是天然安全的**——字段名与注释里的「non-secret」是作者当时的判断，不是事实；凡是要把环境、URL、文件路径一类的原样值写进响应的，先问「这个值里可能裹着什么」（同 §28：探针的代价是奖励，诊断的代价可能是凭据）。
+
+---
+
+## 30. 硬门禁的依赖来源假设了「开发机的形状」，于是它红了一整天而没人知道
+
+- **现象**：CI 每一次 push 都红，回溯至少一整天（`0.4.3` / `0.4.4` / `0.4.5` 三个 release 全在红着的门禁下发出）。日志永远是同一句，出现在 offline job（唯一的硬门禁）的**第二个**套件：`Error: cannot resolve the peer dependency @deepseek-ai/dsh-credentials. Looked in: <repo>/node_modules: no @deepseek-ai scope`。而本机 `npm test` 全绿。
+- **根因**（三层，缺一层都不至于此）：
+  1. **依赖来源与 runner 不匹配**：`test/peer-roots.mjs` 的候选根全是「装了 DSH 的机器」形状（`$DSH_HOME` → 插件 `node_modules` → `~/.dsh/dsh-asar-unpacked` → 打包安装目录）。干净 runner 上只剩 `<repo>/node_modules`，而 `npm install --legacy-peer-deps` 对它**跳过 peer**——`--force` 也不行，实测 `dsh-credentials` / `cordis` 都没落地，只有未被声明为 peer 的 `dsh-credentials-local` 进去了。**门禁在这台机器上永远不可能绿。**
+  2. **`set -e` + 19 个套件写在同一个 step**：第 2 个套件一抛错，后面 17 个（含 `build-gate`）**一次都没跑过**。于是「门禁红」看起来像某个用例失败，实际是**门禁根本没在验证**。
+  3. **注释替这堆问题背了书**：workflow 写着这些套件「resolve peers from stubs」——`peer-roots.mjs` 里**没有任何 stub**，只有真实运行时查找；又写 peer「cannot resolve from any registry」——包其实都在 registry 上，只是**只发预发布版**，而声明范围 `>=0.1.5 <0.3` 在 npm 默认 semver 规则下**不匹配预发布**（`npm view '@deepseek-ai/dsh-credentials@>=0.1.5 <0.3'` 直接 E404）。两条加起来，读注释的人会得出「CI 本来就这样」——**这正是它红了一整天没人管的原因**。
+- **修法**（2026-10-01 已做）：offline job 增加 `npm install -g @deepseek-ai/dsh`（**全局**装：不读本仓 manifest，npm 才会去拉运行时自己的 peer 闭包），`test/peer-roots.mjs` 新增 `cliRuntimeModules()`（从 `test/e2e.mjs` 抽出并共享；`npm root -g` → `<prefix>/@deepseek-ai/dsh/node_modules`，marker `dsh-base`，每进程 memo 一次）作为**最后**一个候选根。本地优先级不变，开发机仍优先跑它真正运行的那份运行时。
+- **验证**（不 push 也能验，且必须这么做）：把开发机的运行时候选**全部屏蔽**——`USERPROFILE` / `LOCALAPPDATA` / `DSH_HOME` 指向空目录（`APPDATA` 不能动：Windows 上 npm 的全局前缀取自它）——此时 `findPeerRoot()` 必须落到 CLI 运行时树，然后跑**完整 19 套件 + build-gate**，全绿才算修好（本机实测：屏蔽后 19 套件 + build-gate 全绿，`e2e` 44/44）。反证也做过：该条件下只装 2–3 个 registry 包，`store.test.mjs` 会以 `Cannot find package '@deepseek-ai/dsh-atomic-write'` 崩——**DSH 整套包互相以 peerDependencies 咬合，装子集必留悬空 import**，这就是「必须整棵运行时」的判据。
+- **教训**：**门禁的依赖获取方式也是门禁的一部分**。判据不是「CI 红没红」，而是「**这个门禁在目标环境上有没有可能变绿**」——恒红的门禁与没有门禁等价，甚至更糟：它把真回归淹进噪音，还让 release 照发。三条纪律：① **clean runner 上必须能绿**；做不到就把来源写进 workflow，**不要**在测试里加 SKIP（把 peer 依赖 SKIP 掉 = 绿着什么都没测）；② **别把 N 个套件塞进一个 `set -e` step**，一次失败会吞掉其余套件的全部信号；③ **注释里的「为什么这样做」必须与实现同步**——本次三条根因里最难发现的恰恰是那条说谎的注释，它让每个人都以为这是已知且可接受的红色。

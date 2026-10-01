@@ -51,10 +51,12 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   CI 里它是独立 best-effort job。手工排查用 `node test/e2e.mjs` 单跑即可。
 - **e2e 只跑一次**。它要启动真实 Host 进程；需要看两段输出就跑一次落盘再读文件，
   不要把同一条命令串两遍。
-- **peer 套件红 ≠ 回归**。`store/routes/wiring.test.mjs` 依赖
+- **peer 套件红 ≠ 回归（只对本机成立）**。`store/routes/wiring.test.mjs` 依赖
   `@deepseek-ai/dsh-credentials`（随 DSH runtime 发行，不在插件目录）。
-  报 `cannot resolve the peer dependency` 是环境问题，先查 `test/peer-roots.mjs`
-  的查找路径，再下结论。
+  本机报 `cannot resolve the peer dependency` 是环境问题：查 `test/peer-roots.mjs`
+  候选根（`$DSH_HOME` → 插件 `node_modules` → 桌面运行时 → npm 全局 CLI 运行时树）。
+  **CI 不适用这条**：offline job 已装 CLI 供应运行时（`.github/workflows/ci.yml`），
+  那里报同一句 = 真回归（2026-10-01 的 §30 事故：硬门禁红了一整天没人管）。
 - 测试数会随并行会话变化（68/38 是某一时点快照），只看自己域的增减。
 
 ## 红线（违反任一都会炸到用户机器）
@@ -101,7 +103,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 理解 Host/Client 分流、双仓库关系 | `docs/ARCHITECTURE.md` |
 | 加配置字段 / 改路由 | `docs/API.md`、`docs/SETUP.md`；提供方开关见 `docs/PROVIDER-HOT-RELOAD.md` |
 | 改测试前 | `docs/TESTING.md` |
-| 改任何代码前扫一眼 | `docs/PITFALLS.md`（29 条现象→根因→修法） |
+| 改任何代码前扫一眼 | `docs/PITFALLS.md`（30 条现象→根因→修法） |
 | 排查「这条配置到底生效没」 / 改了源码却没变 | `docs/PITFALLS.md` §22（bundles 装载 → patch overlay → `$DSH_HOME/state/<profile>/<name>/` 三层，desktop 是安装副本、web 是 symlink） |
 | 加/改 **state 文件**、读 `profileContext`、判断某状态该不该按 profile 分段 | `docs/PITFALLS.md` §23（catalog/provider/draw 分段；throttle 与凭据 grant **故意共享**，别统一） |
 | 提交约定、`upstream/` 红线 | `docs/CONTRIBUTING.md` |

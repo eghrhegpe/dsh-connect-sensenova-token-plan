@@ -210,7 +210,7 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
   键齐全）。tsdown 缺席则醒目 SKIP 退出 0。
 - **新纪律**：改 `src/client/*.ts` 后必须 `npm run build:client`，并把根 `client.js`
   与源码放进**同一个 commit**；只提交源码不提交产物 = build-gate 红。devDeps 安装需
-  `--legacy-peer-deps`（peer 包不在 registry；本仓刻意无 lockfile）。
+  `--legacy-peer-deps`（peer 是 Host 运行时包，registry 上只发预发布版且整套互相以 peer 咬合；本仓刻意无 lockfile。**2026-10-01 补正**：见 [PITFALLS.md](./PITFALLS.md) §30——正因如此，CI 的 peer 来源必须是整棵 CLI 运行时树）。
 - **【当晚已被取代】「Host 半边不动」**：随后按 workbuddy 规范完成全仓归一——Host 源码迁
   `src/host/*.ts`（27 个模块），tsdown 多入口构建 `lib/`（ESM bundle + 切分 chunk）；`lib/` 与根
   `client.js` 一并 `.gitignore`，**产物彻底不入库**（上文「产物与源码同 commit」纪律随之作废），

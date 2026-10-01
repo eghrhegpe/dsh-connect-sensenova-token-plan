@@ -141,7 +141,7 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 
 ## 7. 测试与构建（本插件）
 
-- 本插件测试**无需 `npm install`**：网络层打桩，密码用临时密钥加密，不碰真实账号；peer 依赖由 `test/peer-roots.mjs` 在 DSH 运行时就地解析（`$DSH_HOME` → 插件 `node_modules` → 安装目录）。找不到会列全部查过的位置，而非静默跳过。这只是让**测试**拿得到 peer；插件运行期自己 `import()` 的解析链是另一回事，见 [PITFALLS.md](./PITFALLS.md) §16。
+- 本插件测试**无需 `npm install`**：网络层打桩，密码用临时密钥加密，不碰真实账号；peer 依赖由 `test/peer-roots.mjs` 在 DSH 运行时就地解析（`$DSH_HOME` → 插件 `node_modules` → 桌面运行时安装目录 → npm 全局 CLI 的运行时树，最后一项供「没装 Host 的机器」用，CI 靠它）。找不到会列全部查过的位置，而非静默跳过。这只是让**测试**拿得到 peer；插件运行期自己 `import()` 的解析链是另一回事，见 [PITFALLS.md](./PITFALLS.md) §16。
 - 跑 `npm test`（**全量离线测试套件**，清单与链的唯一事实源是 `package.json` 的 `scripts.test`，新增套件只需接进该链），末尾接 `test/build-gate.mjs`（重建 `src/` 全部源码并验证 `lib/` 与 `client.js` 产物，tsdown 缺席则醒目 SKIP）与 `test/e2e-gate.mjs`——探到 dsh CLI 就实跑端到端，探不到则醒目 SKIP 并退出 0。`test:live` 需联网验证 JWKS。`package.test.mjs` 还把「磁盘上的 *.test.mjs ↔ npm test 链 ↔ CI 离线 job」钉成同一个事实：新写套件忘接门禁会直接红。`store-baseline` 是 token-store 的全行为冻结基线（拆分 guardrail），详见 `docs/TESTING.md`。
 - 本插件 **两半边均已构建化（2026-09-30）**：全部源码在 `src/host/*.ts` 与 `src/client/*.ts`，经 `npm run build`（tsdown）构建为 `lib/`（Host ESM bundle + 切分 chunk）与根 `client.js`（Client IIFE）。**两个产物均已 `.gitignore`、不入库**——改源码后必须重建再刷新/重启；删掉 `lib/` 与 `client.js` 后一条 `npm run build` 即可从 `src/` 完整重建。`test/build-gate.mjs` 在 `npm test` 末尾拦构建失败与产物缺失。
 - 所有离线测试均已通过；各套件用例数会随并行会话变化，以 `npm test` 实际输出为准，不在此处保留快照（详见 [TESTING.md](./TESTING.md)）。
