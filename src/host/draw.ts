@@ -107,7 +107,7 @@ export function isImageGenModel(entry) {
  */
 export function imageGenModelIds(entries) {
   const position = new Map();
-  const out = [];
+  const out: string[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (!isImageGenModel(entry)) continue;
     const id = str(entry?.id, "");

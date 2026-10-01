@@ -479,26 +479,46 @@ tsconfig 严格开关分档推进的收尾评估。前四档（零成本 8 项 �
 3. **收益递减**：前四档已把"零风险"的红利吃完；SNC 是"高判断成本换高表达力"，与"按域裁剪、禁止无脑全量"
    的验证纪律相悖。
 
-**裁定（2026-10-01 更新，最低风险子集已毕业）**：整体硬开判为"下一档独立大 PR"，不动；
-但本档描述的**最低风险子集已全部落地**——**整个 client 半区**经 `tsconfig.strict-null.json`
+**裁定（2026-10-01 更新，非红线子集已按 allowlist 逐档毕业）**：整体硬开判为"下一档独立大 PR"，不动；
+但本档描述的**最低风险路径已全部走通**——**整个 client 半区 + host 非红线的
+数据/解析/开关/诊断/出图层**经 `tsconfig.strict-null.json`
 （per-file strictNullChecks allowlist，主配置排除这些文件）纳入 SNC + `noUncheckedIndexedAccess`
 强制，由 `test/typecheck-gate.mjs` 跑两份 config 守门。毕业一个文件=移进本 include +
 加进主配置 exclude（同一 commit，否则同一文件被两套规则跑两遍）。
 
-已毕业（client 半区，SNC 计数 0）：
-- **`src/client/qr.ts`（48 处）**：零 import、peer-free、纯点阵数学；`!` 断言（越界由
-  size×size 循环构造排除）+ 两张 ISO 常量表补类型，运行期语义零改动。正确性由 raccoon.test
-  的 **jsQR 解码回原 payload**（v1–v10 探针 + 真登录 URL）背书——该文件注释自陈的 ground-truth。
-- **`cards.ts` / `account-form.ts` / `panel-page.ts`（9 处）**：渲染/表单层，失败模式是"面板画错"，
-  不是"锁号"。手法是**保持旧运行期语义**的显式化，不是改写：`undefined <= 0` 本就 `=== false`，
-  故把两处 `remaining` 比较前加 `typeof === "number"` 守卫（旧的"不知道就什么都不画"一字不差）；
-  `REFUSAL_TEXT[code]` 的 `code` 先判 `typeof === "string"`（旧 `REFUSAL_TEXT[undefined]` 本就不命中、
-  落到同一 else 分支）；`limit/used` 默认 0（旧的 `undefined > 0 === false` 等价）。`panel-page.ts`
-  顺带把恒真的 `document.addEventListener` 真值判断改成 `"addEventListener" in document`
-  （TS2774 提示：函数引用恒真，本意是探测存在性）。
+已毕业（SNC + `noUncheckedIndexedAccess` 全绿，按风险递增序，均纯类型层零运行改动）：
 
-**剩余（真·backlog）**：host 半区 **85 处**（client 已清零）。按风险递增序切——
-非红线的 store/catalog/parse（`catalog-store` 9 / `doctor` 8 / `llm-models` 6 / 各 *-store 5 上）
-→ **最后**才是登录红线 ~40（`routes` 18 / `token-store` 5 / `auth` / 两个 `publish` 各 5），
-逐处需人判 null 语义，按 `store-baseline` 那样的"逐帧评审 + 显式重生成"规格做，独立大 PR。
+**client 半区（计数 0）**：
+- **`src/client/qr.ts`（48 处）**：零 import、peer-free、纯点阵数学；`!` 断言（越界由
+  size×size 循环构造排除）+ 两张 ISO 常量表补类型。正确性由 raccoon.test 的 **jsQR 解码回
+  原 payload**（v1–v10 探针 + 真登录 URL）背书——该文件注释自陈的 ground-truth。
+- **`cards.ts` / `account-form.ts` / `panel-page.ts`（9 处）**：渲染/表单层，失败模式是
+  "面板画错"非"锁号"。手法是把旧隐式语义显式化：`remaining` 加 `typeof === "number"` 守卫
+  （旧 `undefined <= 0 === false` 的"不知道就不画"一字不差）；`REFUSAL_TEXT[code]` 先判 string；
+  `limit/used` 默认 0；`panel-page` 把恒真的 `if (document.addEventListener)` 改
+  `"addEventListener" in document`（TS2774：函数引用恒真，本意是探测存在性——唯一一处真修正）。
+
+**host 数据/解析层（批次A）**：`state-store` / `catalog-store` / `parsers` / `llm-models` /
+`raccoon-models` 毕业。根因全是指针化钉死类型（`const x=[]`→`never[]`、`let x=null`→`null`、
+默认参数 `param=null`→类型锁 null——tsconfig `$comment` 警告的形状，`noImplicitAny:false` 下仍
+对带初值绑定生效），修法纯类型层：`createStateReadCache` 补 `<T>` + options 参数类型 +
+`cached: T|null|undefined`（undefined=没读过 / null=读过无记录，语义不可混）——一处修全仓四
+store 的 `inheritFrom` never 下游投影；裸数组补元素类型；memory store 的 `let held` 补 record 联合。
+闭包叶子 `raccoon.ts`（被图内 import 拖入、本身未毕业）顺手修 1 处 never[]。
+
+**host 开关/诊断存储 + 出图工具（批次B）**：`provider-store` / `draw-store` /
+`raccoon-switch-store` / `doctor` / `draw` 毕业。三个开关 store 本身零修复（其错误本就是
+state-store 原语的下游投影，批次A已解）；`doctor` 的 `scope` 字面量按 `DoctorScope` 接口标注 +
+`profiles: string[]`；`draw` 的 `out: string[]`。闭包核查：五文件传递 import 全落在已毕业/干净叶子。
+`snapshot-aggregate` 自身 SNC 干净但闭包拖进 provider-publish（红线），**未毕业**。
+
+**发现（批次A 标注的涟漪，归终审议题）**：给 `raccoonRoster` 补 `object[]` 后，全项目 SNC 探针
+里 `routes`(20) / `index`(3)——其中 routes:942/945、index:283 是**消费方形状之争**（消费侧把
+roster 声明成 `multiplier: number` 的 never-undefined 行，roster 却可推 undefined；`any[]` 时代静默
+放行）。两份门禁 config 均为 0，不影响运行——它正印证"红线消费方需逐帧评审"，故留独立大 PR。
+
+**剩余（真·backlog，全项目探针 43 处，全在登录/装配路径）**：routes 20 / token-store 5 /
+provider-publish 5 / raccoon-publish 5 / index 3 / sensenova-auth 1 / api-key-store 1 /
+raccoon-store 1 / llm-error-fix 1 / raccoon-llm-adapter 1。每处需人判 null 语义 + 消费形状契约，
+按 `store-baseline` 那样的"逐帧评审 + 显式重生成"规格做，独立大 PR。
 
