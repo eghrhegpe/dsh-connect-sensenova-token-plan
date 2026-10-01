@@ -137,6 +137,13 @@ export function findPeerRoot() {
  * @throws {Error} when no candidate root carries the package, naming every
  *   place that was looked in — a silent fallback would just move the failure.
  */
+// Which root each peer resolved from, announced once per process. A peer suite
+// that turns red on one machine but green on another is, by AGENTS.md, an
+// environment problem — but only once you can SEE that the peer resolved from
+// the npm-global CLI tree (not the runtime you actually run). This line is the
+// "judge it in ten seconds" signal the diagnosis needs.
+const announcedRoots = new Map();
+
 export async function loadPeer(name) {
   const specifier = name.startsWith("@") ? name : `@deepseek-ai/${name}`;
   const roots = candidateRoots();
@@ -153,16 +160,27 @@ export async function loadPeer(name) {
     }
     try {
       const entry = createRequire(join(root, "package.json")).resolve(specifier);
+      if (announcedRoots.get(specifier) !== root) {
+        announcedRoots.set(specifier, root);
+        // stderr so it never pollutes a suite's stdout (some capture JSON).
+        console.error(`[peer-roots] ${specifier} resolved from ${root}`);
+      }
       return await import(pathToFileURL(entry).href);
     } catch (error) {
       attempts.push(`${root}: ${String(error?.message ?? error).split("\n")[0]}`);
     }
   }
+  const hint =
+    attempts.length === 0
+      ? " No candidate node_modules root exists on this machine — no DSH runtime is installed at all. " +
+        "This is an environment problem, NOT a regression: install the desktop runtime or set $DSH_HOME " +
+        "(CI gets one from `npm install -g @deepseek-ai/dsh`)."
+      : " Candidate roots existed but none carried the peer marker — a stale or partial install. " +
+        "A clean runtime should ship the whole @deepseek-ai set; verify the install, do not 'just add one package'.";
   throw new Error(
     `cannot resolve the peer dependency ${specifier}.\n` +
       `Looked in:\n${attempts.map((a) => `  - ${a}`).join("\n")}\n` +
-      "It ships inside the DSH runtime rather than in this plugin. Set $DSH_HOME, " +
-      "or symlink a node_modules into the plugin folder."
+      hint
   );
 }
 
