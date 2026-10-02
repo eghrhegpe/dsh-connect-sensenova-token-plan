@@ -37,7 +37,7 @@ export function traceDir() {
  * @param {string} outcome - "ok" or the error code, for the filename.
  * @returns {Promise<string|null>} the file path, or null when not written.
  */
-export async function writeLoginTrace(trace, outcome) {
+export async function writeLoginTrace(trace: unknown[] | undefined, outcome: string) {
   if (!Array.isArray(trace) || trace.length === 0) return null;
   try {
     const dir = traceDir();

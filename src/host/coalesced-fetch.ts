@@ -144,7 +144,7 @@ export function createCoalescedFetch(options: {
    *   reuse; the single-flight sharing still applies).
    * @returns {Promise<unknown>} the value.
    */
-  const read = async (key, producer, ttlMs) => {
+  const read = async (key: string, producer: () => Promise<unknown>, ttlMs: number) => {
     const cached = cache.get(key);
     if (cached !== undefined && cached.gen === genOf(key) && Date.now() - cached.at < ttlMs) return cached.body;
     const pending = inflight.get(key);
@@ -179,7 +179,7 @@ export function createCoalescedFetch(options: {
    * @param {string} [key] - the key to drop; omit to drop everything.
    * @returns {void}
    */
-  const clear = (key) => clearCoalescedFetch(cache, inflight, key);
+  const clear = (key?: string) => clearCoalescedFetch(cache, inflight, key);
 
   return { read, clear };
 }

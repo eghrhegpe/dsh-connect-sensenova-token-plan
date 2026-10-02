@@ -160,8 +160,8 @@ export const AUTH_FAILURE_CODES: ReadonlySet<string> = Object.freeze(new Set([
  * @param {unknown} error - the caught error.
  * @returns {boolean} true when the token could not be obtained.
  */
-export function isAuthFailure(error) {
-  const code = error === null || typeof error !== "object" ? undefined : /** @type {{ code?: unknown }} */ (error).code;
+export function isAuthFailure(error: unknown) {
+  const code = error === null || typeof error !== "object" ? undefined : (error as { code?: unknown }).code;
   return typeof code === "string" && AUTH_FAILURE_CODES.has(code);
 }
 
@@ -170,7 +170,7 @@ export function isAuthFailure(error) {
  * @param {string} code - a {@link CODE} value.
  * @returns {boolean} true when the refusal should be parked, not timed.
  */
-export function isCredentialRefusal(code) {
+export function isCredentialRefusal(code: string) {
   return typeof code === "string" && CREDENTIAL_REFUSALS.has(code);
 }
 

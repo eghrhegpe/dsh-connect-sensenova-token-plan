@@ -61,7 +61,7 @@ export function errMsg(value: unknown): string {
  * @param {string} text - any string that might carry a credential.
  * @returns {string} the text with credential patterns replaced by `[REDACTED]`.
  */
-export function redactSecrets(text) {
+export function redactSecrets(text: unknown) {
   const raw = typeof text === "string" ? text : "";
   return (
     raw
@@ -112,7 +112,11 @@ export function obj(value?: any): any {
  * @returns {Promise<boolean>} true when an attempt stopped the loop, false
  *   when the window ran out.
  */
-export async function retryBounded({ attempts, delayMs, run }) {
+export async function retryBounded({ attempts, delayMs, run }: {
+  attempts: number;
+  delayMs: number;
+  run: (attempt: number) => boolean | Promise<boolean>;
+}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (await run(attempt)) return true;
     if (attempt < attempts - 1) {
@@ -135,7 +139,7 @@ export function verbatim(value: any, fallback?: any): string {
 }
 
 /** Read a finite number, else `null`. */
-export function numOrNull(value) {
+export function numOrNull(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }

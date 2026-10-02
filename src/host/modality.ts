@@ -41,7 +41,7 @@
  * @param {object} entry - one normalized catalog entry.
  * @returns {"declared-image"|"declared-other"|"unknown"}
  */
-export function outputModalityOf(entry) {
+export function outputModalityOf(entry: { output_modalities?: unknown }) {
   const out = entry?.output_modalities;
   if (!Array.isArray(out)) return "unknown";
   return out.includes("image") ? "declared-image" : "declared-other";
@@ -58,7 +58,7 @@ export function outputModalityOf(entry) {
  * @param {object} entry - one normalized catalog entry.
  * @returns {boolean} whether the entry is usable as a chat model.
  */
-export function isChatModel(entry) {
+export function isChatModel(entry: { output_modalities?: unknown }) {
   return outputModalityOf(entry) !== "declared-image";
 }
 
@@ -72,6 +72,6 @@ export function isChatModel(entry) {
  * @param {object} entry - one normalized catalog entry.
  * @returns {boolean}
  */
-export function isImageGenModel(entry) {
+export function isImageGenModel(entry: { output_modalities?: unknown }) {
   return outputModalityOf(entry) === "declared-image";
 }
