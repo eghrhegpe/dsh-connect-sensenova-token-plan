@@ -23,7 +23,7 @@ import { CODE, isAuthFailure } from "./codes.ts";
 import { fetchConsole, fetchModelCatalog } from "./console-client.ts";
 import { parsePools, parseTrend, checkShape, identifyVisionModel } from "./parsers.ts";
 import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
-import { catalogSignature, syncSignaturesAfterPublish } from "./provider-publish.ts";
+import { catalogSignature, syncSignaturesAfterPublish, quotaSignatureOf } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
 import { str, errMsg } from "./util.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
@@ -256,7 +256,23 @@ export async function buildSnapshotBody({
   // them via `unavailableModelIds`), and the panel greys them (via
   // `rosterWithAvailability`). The set also drives a re-registration when it
   // flips between catalogue polls.
-  const unavailableModelIds = exhaustedModelIds(pools);
+  //
+  // THREE states, not two. `exhaustedModelIds` cannot tell "the console
+  // answered and nothing is exhausted" from "the console never answered" —
+  // both arrive as an empty pool list, because `parsePools(null)` reads an
+  // absent body as `{ pools: [] }`. Collapsing them made a failed poll (signed
+  // out, JWT expired, network blip — this plugin's most common state) publish
+  // an EMPTY unavailable set, and since an empty set downstream means "no pool
+  // is exhausted", every model the user had just been protected from was
+  // handed back to the picker. Data missing was encoded as "all available".
+  //
+  // `null` = unknown, and unknown must never widen the offer. When the console
+  // did not answer, the last KNOWN set stands: the panel keeps greying what it
+  // greyed, and the registration keeps the models it dropped. The next
+  // successful poll corrects it — the cost of being wrong meanwhile is a model
+  // still hidden one poll too long, which is the direction to err in.
+  const unavailableModelIds = poolResult.error === null ? exhaustedModelIds(pools) : null;
+  const effectiveUnavailable = unavailableModelIds ?? providerState.unavailableIds;
   // Which of the callable models can take image input — step one of the
   // vision plan (ARCHITECTURE.md §5.1): the info, not the execution.
   // Absent API key → no catalog → the list is simply undeclared, not "none".
@@ -297,7 +313,10 @@ export async function buildSnapshotBody({
     if (freshSignature !== providerState.signature) {
       catalogChanged = true;
       await catalogStore.replace(catalog, enabledIds).catch(() => {});
-      await publisher.publish(catalog, enabledIds, unavailableModelIds);
+      // `effectiveUnavailable`, never the raw three-state value: a catalogue
+      // change still re-registers, and it must re-register with the LAST
+      // KNOWN unavailable set rather than an empty one.
+      await publisher.publish(catalog, enabledIds, effectiveUnavailable);
       // Keep the signatures in lock-step with what was just published — the SAME
       // formulas the route path uses, so the "did the offer change?" signal has a
       // single source and cannot drift between the two publish paths.
@@ -311,14 +330,22 @@ export async function buildSnapshotBody({
   // snapshot on Map identity, so only a fresh registration can change the
   // offered set (ROADMAP.md §3.3). Skip when the catalogue branch already
   // published this exact set a moment ago.
-  const quotaSig = [...unavailableModelIds].sort().join(",");
-  if (quotaSig !== providerState.quotaSignature) {
-    if (!catalogChanged) {
-      await publisher.publish(providerState.entries, providerState.enabledIds, unavailableModelIds);
+  //
+  // Skipped entirely when the quota is UNKNOWN. An unknown state is not a
+  // state: comparing its signature against the last known one would always
+  // differ ("" vs "glm-5.2,…"), and that difference is not a flip to react to —
+  // it is the poll failing. Publishing there is what turned a signed-out Host
+  // into one that offers every exhausted model.
+  if (unavailableModelIds !== null) {
+    const quotaSig = quotaSignatureOf(unavailableModelIds);
+    if (quotaSig !== providerState.quotaSignature) {
+      if (!catalogChanged) {
+        await publisher.publish(providerState.entries, providerState.enabledIds, unavailableModelIds);
+      }
+      // Same single-source sync as the catalogue branch above; sets both signatures
+      // from the published offer so the next poll sees a stable signal.
+      syncSignaturesAfterPublish(providerState);
     }
-    // Same single-source sync as the catalogue branch above; sets both signatures
-    // from the published offer so the next poll sees a stable signal.
-    syncSignaturesAfterPublish(providerState);
   }
   // The counts describe the OFFER, not the catalogue: the adapter is built
   // from the allow-list-filtered entries, so a panel line that quoted the raw
@@ -350,7 +377,13 @@ export async function buildSnapshotBody({
       return multiplier === undefined ? row : { ...row, multiplier };
     }),
     enabledModelIds: enabledIds,
-    quotaBlockedModelIds: unavailableModelIds,
+    // The LAST KNOWN exhausted set, not this poll's reading: when the console
+    // could not be reached the panel must keep greying the models it greyed
+    // rather than flip them all back to available. `quotaError` (above) is
+    // what tells the user why the numbers are stale. Wire type unchanged —
+    // "unknown" is a Host-side fact, and the client already renders an absent
+    // list correctly, so there is no third value to add to the contract.
+    quotaBlockedModelIds: effectiveUnavailable,
     drawEnabled: resolveSwitchEnabled(effectiveDrawPanelSwitch, settings.drawEnabled),
     drawSource: switchSource(effectiveDrawPanelSwitch),
     // Emitted ONLY when the switch is on and the tool never registered — the

@@ -117,6 +117,7 @@ jobs:
           node test/panel.test.mjs
           node test/render.test.mjs
           node test/parsers.test.mjs
+          node test/snapshot-aggregate.test.mjs
           node test/provider.test.mjs
           node test/provider-rollback-guard.test.mjs
           node test/switch-precedence.test.mjs

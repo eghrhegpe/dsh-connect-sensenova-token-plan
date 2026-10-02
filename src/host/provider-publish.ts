@@ -363,14 +363,33 @@ export function catalogSignature(entries: unknown, enabledIds: unknown): string 
 }
 
 /**
+ * The signature of a quota-unavailable set: the poll's "did the exhausted set
+ * change?" signal.
+ *
+ * Exported so the poll path and {@link syncSignaturesAfterPublish} cannot
+ * drift — they used to spell this formula out twice (`[...ids].sort().join(",")`),
+ * which is exactly the kind of pair that diverges the first time one side is
+ * touched, and the failure mode is silent: the two sides stop seeing each
+ * other's publishes, so the registration either churns every poll or never
+ * rebuilds. Order-independent by construction (sorted), so two equal sets
+ * always produce one string.
+ * @param {string[]} unavailableIds - the exhausted model ids.
+ * @returns {string}
+ */
+export function quotaSignatureOf(unavailableIds: string[]): string {
+  return [...unavailableIds].sort().join(",");
+}
+
+/**
  * Recompute the state's `signature` and `quotaSignature` from the offer the
  * publisher just published. Call it after every direct `publishProvider` that
  * bypasses the poll's change-detection in `snapshot-aggregate`: those two
  * fields are the poll's "did the offer change?" signal, so they must track what
  * was actually offered or the next poll needlessly churns (rebuilds) the
- * registration. The formulas here are the SAME ones the poll uses, so the two
- * can never drift apart. Only meaningful after a successful publish — on a
- * failed one the caller's rollback already restored the previous fields.
+ * registration. The formulas here are the SAME ones the poll uses — they are
+ * the exported functions, not copies of them — so the two can never drift
+ * apart. Only meaningful after a successful publish: on a failed one the
+ * caller's rollback already restored the previous fields.
  * @param {{entries: object[], enabledIds: string[], unavailableIds: string[],
  *          signature: string, quotaSignature: string}} state - `publisher.state`.
  */
@@ -379,5 +398,5 @@ export function syncSignaturesAfterPublish(state: { entries?: unknown; enabledId
   const enabledIds = Array.isArray(state.enabledIds) ? state.enabledIds : [];
   const unavailable = Array.isArray(state.unavailableIds) ? state.unavailableIds : [];
   state.signature = catalogSignature(entries, enabledIds);
-  state.quotaSignature = [...unavailable].sort().join(",");
+  state.quotaSignature = quotaSignatureOf(unavailable);
 }
