@@ -6,8 +6,8 @@ import { DRAW_PATH, PROVIDER_PATH } from "./const.ts";
 import { count, format } from "./format.ts";
 import { postJsonOrThrow } from "./http.ts";
 import { dictKey, h, useCallback, useState } from "./runtime.ts";
-import type { Tt } from "./runtime.ts";
-import type { LlmData } from "./wire.ts";
+import type { Tt, DictionaryKey } from "./runtime.ts";
+import type { LlmData, DrawToolAbsentReason } from "./wire.ts";
 import { S } from "./styles.ts";
 
 /**
@@ -117,6 +117,28 @@ export function ProviderSwitch({ llm, onDone, tt }: {
 }
 
 /**
+ * One i18n line per draw-tool absence reason.
+ *
+ * `Record<DrawToolAbsentReason, DictionaryKey>` is the compile-time half of the
+ * contract: adding a reason to the host's `DrawToolAbsentReason` union makes
+ * this map fail to compile until a line exists here — the client can never
+ * silently leave a new absence unworded. The runtime `?? "draw.noTools"` below
+ * covers the only real hazard left: a newer Host talking to a stale `client.js`
+ * whose dictionary has no key for a reason this build never shipped.
+ */
+const DRAW_ABSENT_KEY: Record<DrawToolAbsentReason, DictionaryKey> = {
+  "no-tools-service": "draw.noTools",
+  "peer-load-failed": "draw.noToolsPeer",
+  "registry-refused": "draw.noToolsRefused"
+};
+
+/** The i18n key for a reason, or null when there is no reason to state. */
+function drawAbsentKey(reason: DrawToolAbsentReason | undefined): DictionaryKey | null {
+  if (reason === undefined) return null;
+  return DRAW_ABSENT_KEY[reason] ?? "draw.noTools";
+}
+
+/**
  * The live draw-tool switch (docs/PROVIDER-HOT-RELOAD.md, same discipline
  * as `ProviderSwitch`). Posts `{ enabled }` to the plugin's own `/draw`
  * route; the Host persists the value in its state file. The draw tool
@@ -155,15 +177,14 @@ export function DrawSwitch({ llm, onDone, tt }: {
   const candidates = Array.isArray(llm?.drawCandidateIds) ? llm.drawCandidateIds.map((id: unknown) => String(id)) : [];
   const preferred = llm?.drawPreferredModel != null ? String(llm.drawPreferredModel) : null;
   const effective = String(llm?.drawModel ?? "");
-  // The one normal absence the panel states: the switch is on but this Host
-  // exposes no tools service, so the tool never registered. Rendered instead
-  // of "on — model list" because the latter reads as "drawing works", which
-  // is not the case. Only the no-tools-service absence is stated here; a peer
-  // that failed to load or a registry that refused is a Host bug, and its
-  // trace belongs in the log (`degrade`), not in the copy.
-  const toolAbsent = llm?.drawToolAbsent === true;
+  // The one absence the panel states: the switch is on but the tool never
+  // registered. Rendered instead of "on — model list" because the latter reads
+  // as "drawing works", which is not the case. `no-tools-service` is the normal
+  // absence; the two Host-bug reasons also log via `degrade` and are named
+  // here so the user can tell them apart without opening the log.
+  const absentKey = drawAbsentKey(llm?.drawToolNote);
   const statusText = enabled
-    ? (toolAbsent ? tt("draw.noTools") : hasKey ? tt("draw.onList") : tt("draw.needsKey"))
+    ? (absentKey ? tt(absentKey) : hasKey ? tt("draw.onList") : tt("draw.needsKey"))
     : tt("draw.off");
   // Pick a draw model from the panel: `null` returns to auto-pick. The Host
   // validates the id against the same catalog precedence the tool uses, so a

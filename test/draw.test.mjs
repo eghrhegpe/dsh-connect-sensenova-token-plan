@@ -17,7 +17,7 @@
  * Nothing here imports a Host peer or opens a socket.
  */
 import { readFileSync } from "node:fs";
-import { drawToolAbsent } from "../src/host/draw-tool-state.ts";
+import { drawToolNote } from "../src/host/draw-tool-state.ts";
 import {
   DRAW_TOOL_NAME,
   DRAW_COOLDOWN_MS,
@@ -426,7 +426,7 @@ async function rejects(fn) {
       check("the draw tool is registered exactly once despite the retry",
         registered.length === 1 && reads === 2, `registered=${registered.length} reads=${reads}`);
       check("a successful registration does NOT mark the tool absent",
-        drawToolAbsent() === false, `drawToolAbsent=${drawToolAbsent()}`);
+        drawToolNote() === null, `drawToolNote=${drawToolNote()}`);
     }
     // The one normal absence the panel states: the switch is on but the tools
     // service carries no `register` function, so the tool never registered.
@@ -445,8 +445,34 @@ async function rejects(fn) {
       };
       const side = { loadToolsModule: async () => ({}), drawFetch: async () => ({}) };
       await registerDrawTool(ctx, wiring, side);
-      check("no tools service marks the tool absent for the panel copy",
-        drawToolAbsent() === true, `drawToolAbsent=${drawToolAbsent()}`);
+      check("no tools service names that reason for the panel copy",
+        drawToolNote() === "no-tools-service", `drawToolNote=${drawToolNote()}`);
+    }
+    // The two Host-bug reasons: a peer that fails to load, and a registry that
+    // refuses the registration. Both must name THEIR reason, so the panel tells
+    // "Host can't run this peer" apart from "Host refused the tool" — and both
+    // also log via `degrade` (marker checks below).
+    {
+      const wiring = {
+        settings: { drawEnabled: true, drawModelId: "" },
+        configError: null,
+        providerState: { entries: [] },
+        catalogStore: { list: async () => [] },
+        resolveApiKey: async () => "sk-live",
+        publisher: { isDisposed: () => false },
+        drawStore: { enabled: async () => null, modelId: async () => null },
+        logger: { warn: () => {} }
+      };
+      const side = { loadToolsModule: async () => { throw new Error("ERR_MODULE_NOT_FOUND boom"); }, drawFetch: async () => ({}) };
+      await registerDrawTool({ get: () => ({ register: () => {} }) }, wiring, side);
+      check("a peer that fails to load names that reason",
+        drawToolNote() === "peer-load-failed", `drawToolNote=${drawToolNote()}`);
+
+      const sideRefuse = { loadToolsModule: async () => ({ defineTool: () => ({ name: "x" }) }), drawFetch: async () => ({}) };
+      const refusing = { register: () => { throw new Error("registry says no"); } };
+      await registerDrawTool({ get: () => refusing }, wiring, sideRefuse);
+      check("a registry that refuses names that reason",
+        drawToolNote() === "registry-refused", `drawToolNote=${drawToolNote()}`);
     }
     // startSideEffects: vision step two's writer is only filled once the
     // settings service can actually be reached. A poll after the late fill
@@ -518,16 +544,16 @@ async function rejects(fn) {
     "lifecycle.ts registry-refusal catch");
   // The absence note must reach the snapshot BY INJECTION, not by a global
   // import: `buildSnapshotBody` is the pure aggregator and its only state
-  // sources are parameters. Widening to three reasons later is a pure type
-  // change — but only if nobody sneaks the holder back in as an import.
+  // sources are parameters. The reason union widens freely — but only if
+  // nobody sneaks the holder back in as an import.
   const aggregateSrc = readFileSync(new URL("../src/host/snapshot-aggregate.ts", import.meta.url), "utf8");
   const routeSrc = readFileSync(new URL("../src/host/routes/snapshot.ts", import.meta.url), "utf8");
   check("the aggregator reads the absence note via a param, never an import",
     !aggregateSrc.includes('from "./draw-tool-state.ts"')
-      && aggregateSrc.includes("drawToolAbsent?: () => boolean"),
-    "snapshot-aggregate.ts drawToolAbsent wiring");
+      && aggregateSrc.includes("drawToolNote?: () => DrawToolAbsentReason | null"),
+    "snapshot-aggregate.ts drawToolNote wiring");
   check("the snapshot route injects the absence reader",
-    routeSrc.includes("drawToolAbsent: () => drawToolAbsent()"),
+    routeSrc.includes("drawToolNote: () => drawToolNote()"),
     "routes/snapshot.ts injection");
 }
 

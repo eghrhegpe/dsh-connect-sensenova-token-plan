@@ -20,6 +20,7 @@
  */
 export type {
   AuthData,
+  DrawToolAbsentReason,
   LlmData,
   ModelData,
   PoolData,

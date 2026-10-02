@@ -27,7 +27,7 @@ import { catalogSignature, syncSignaturesAfterPublish } from "./provider-publish
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
 import { str, errMsg } from "./util.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
-import type { SnapshotData } from "../shared/wire.ts";
+import type { SnapshotData, DrawToolAbsentReason } from "../shared/wire.ts";
 
 /**
  * The operator's pseudo multiplier that names one model id, or undefined.
@@ -149,7 +149,7 @@ export async function buildSnapshotBody({
   panelSwitch,
   drawSwitch,
   drawModelId,
-  drawToolAbsent
+  drawToolNote
 }: {
   settings: import("./host-config.ts").ResolvedSettings;
   cache: Map<string, { body: unknown; at: number; gen: number }>;
@@ -165,7 +165,7 @@ export async function buildSnapshotBody({
   panelSwitch: () => Promise<boolean | null>;
   drawSwitch?: () => Promise<boolean | null>;
   drawModelId?: () => Promise<string | null>;
-  drawToolAbsent?: () => boolean;
+  drawToolNote?: () => DrawToolAbsentReason | null;
 }): Promise<SnapshotData> {
   const providerState = publisher.state;
   const resolveApiKey = async () => (await apiKeyStore.resolve()).value;
@@ -353,15 +353,18 @@ export async function buildSnapshotBody({
     quotaBlockedModelIds: unavailableModelIds,
     drawEnabled: resolveSwitchEnabled(effectiveDrawPanelSwitch, settings.drawEnabled),
     drawSource: switchSource(effectiveDrawPanelSwitch),
-    // Emitted ONLY when the switch is on and the tool never registered because
-    // this Host exposes no tools service — the one normal absence the copy
-    // (`draw.noTools`) already names. Injected as a closure like `drawSwitch`,
-    // so this aggregator stays pure: its only state sources are parameters, and
-    // a test can hand it a `() => true` without touching global state. Present,
-    // never false, so the client treats it as "show the note" rather than
-    // "check a boolean's polarity". Widening to the full three-reason version is
-    // a pure type change (`() => boolean` → `() => string | null`).
-    ...(drawToolAbsent?.() ? { drawToolAbsent: true } : {}),
+    // Emitted ONLY when the switch is on and the tool never registered — the
+    // one normal absence the copy (`draw.noTools`) names, plus the two Host
+    // bugs (`peer-load-failed` / `registry-refused`) that also log via
+    // `degrade`. Injected as a closure like `drawSwitch`, so this aggregator
+    // stays pure: its only state sources are parameters, and a test can hand it
+    // a `() => "registry-refused"` without touching global state. Present, never
+    // an empty string, so the client treats it as "show the note" rather than
+    // "check a string's emptiness".
+    ...(() => {
+      const note = drawToolNote?.();
+      return note ? { drawToolNote: note } : {};
+    })(),
     // A draw call's actual target model, picked by the same precedence the
     // tool itself uses (`pickDrawModel`) over the same normalized catalog —
     // so the panel's line and the tool's behavior cannot disagree. Emitted

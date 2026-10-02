@@ -112,6 +112,24 @@ export interface AuthData {
   error?: string | null;
 }
 
+/**
+ * Why the draw tool is absent while the switch is on.
+ *
+ * The single union the host writes and the client words, so a new cause is a
+ * compile-time change on BOTH sides at once: the host cannot set a reason the
+ * client has no line for, because the client's `Record<Reason, DictionaryKey>`
+ * map won't compile until a key exists.
+ *
+ * `no-tools-service` is the one NORMAL absence (this Host exposes no tools
+ * service); the other two are Host bugs whose traces also go to the log via
+ * `degrade`. Adding a cause means adding it here, in the host writer, and in
+ * the i18n dictionary — nothing else.
+ */
+export type DrawToolAbsentReason =
+  | "no-tools-service"
+  | "peer-load-failed"
+  | "registry-refused";
+
 /** The `llm` block: key presence, registration state, and the roster. */
 export interface LlmData {
   hasApiKey?: boolean;
@@ -132,8 +150,13 @@ export interface LlmData {
   providerError?: string;
   drawEnabled?: boolean;
   drawSource?: string;
-  /** Present only when the switch is on but no tools service registered it. */
-  drawToolAbsent?: boolean;
+  /**
+   * Why the draw tool is absent while the switch is on. Present (never an empty
+   * string) only when the tool did not register, so the client treats it as
+   * "show the note" rather than "check a string's emptiness".
+   * @see DrawToolAbsentReason
+   */
+  drawToolNote?: DrawToolAbsentReason;
   drawModel?: string;
   drawCandidateCount?: number;
   drawCandidateIds?: string[];

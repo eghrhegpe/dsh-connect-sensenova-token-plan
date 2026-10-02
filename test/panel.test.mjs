@@ -515,9 +515,13 @@ const healthy = {
   // form's local for a `REFUSAL_TEXT[code]` lookup (it reads the key into a
   // name so it can tell an interpolated value from a plain one), so it carries
   // the same dictionary obligation — a table value is only checked when it is
-  // handed to `tt` directly, which is what this list records.
+  // handed to `tt` directly, which is what this list records. `absentKey` is
+  // `DrawSwitch`'s local for a `drawToolNote` → i18n-key lookup; adding a
+  // reason to the host's `DrawToolAbsentReason` union must therefore land here
+  // AND in `DRAW_ABSENT_KEY`, which `Record<...>` already forces at compile
+  // time.
   check("the table-driven tt sites are the ones expected",
-    [...deferred].sort().join(",") === "guidanceKey,open,quotaGuidanceKey,refusalKey",
+    [...deferred].sort().join(",") === "absentKey,guidanceKey,open,quotaGuidanceKey,refusalKey",
     `identifiers: ${[...deferred].sort().join(",")} | conditions: ${[...conditions].sort().join(", ")}`);
   const tableKeys = [...Object.values(tables.GUIDANCE_BY_CODE ?? {}), ...Object.values(tables.REFUSAL_TEXT ?? {})];
   const tableMissing = [...new Set(tableKeys)].filter((key) => !(key in zh) || !(key in en));

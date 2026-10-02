@@ -23,7 +23,7 @@
 import { defineDrawTool } from "./draw.ts";
 import { seedPublisherFromCatalog, catalogSignature } from "./provider-publish.ts";
 import { retryBounded, errMsg, degrade } from "./util.ts";
-import { resetDrawToolState, markDrawToolAbsent } from "./draw-tool-state.ts";
+import { resetDrawToolNote, setDrawToolNote } from "./draw-tool-state.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
@@ -163,7 +163,7 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
   const { loadToolsModule, drawFetch } = side;
   // Recompute the absence note on every attempt: a late tools service that
   // finally registers must CLEAR it, not leave a stale "absent" on the panel.
-  resetDrawToolState();
+  resetDrawToolNote();
   if (configError !== null) return;
   // The panel's saved switch beats the patch default — resolved by the one
   // adjudicator (`switch-precedence.ts`), not a hand-copied `?? settings.x`
@@ -188,10 +188,10 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
   });
   // The ONE normal absence the panel should state: the switch is on but this
   // Host exposes no tools service, so nothing is broken and no log line is due
-  // — the copy (`draw.noTools`) is. The other two bails below (peer failed to
-  // load, registry refused) are Host bugs and keep their traces in the log.
+  // — the copy (`draw.noTools`) is. The two bails below are Host bugs, so they
+  // log (`degrade`) AND state their own reason on the panel.
   if (tools === null || typeof tools.register !== "function") {
-    markDrawToolAbsent();
+    setDrawToolNote("no-tools-service");
     return;
   }
   let defineTool;
@@ -204,10 +204,17 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
     // untouched — but not silent. Before `degrade` this catch was empty, so a
     // Host whose bundled peer could not be imported lost the tool with the
     // switch visibly on and no log line anywhere.
+    setDrawToolNote("peer-load-failed");
     degrade("draw: tools peer module failed to load", error, wiring.logger, null);
     return;
   }
-  if (typeof defineTool !== "function") return;
+  if (typeof defineTool !== "function") {
+    // A peer that loaded but shipped no `defineTool` factory is the same Host
+    // bug as one that failed to load: the peer is not the version this plugin
+    // expects.
+    setDrawToolNote("peer-load-failed");
+    return;
+  }
   try {
     tools.register(
       defineDrawTool({
@@ -233,7 +240,9 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
     );
   } catch (error) {
     // A registry that refuses the tool degrades identically — tool absent,
-    // panel fine — and is a Host problem, not a config one: say it.
+    // panel fine — and is a Host problem, not a config one: say it, and state
+    // the reason on the panel too.
+    setDrawToolNote("registry-refused");
     degrade("draw: tools registry refused the registration", error, wiring.logger, null);
   }
 }
