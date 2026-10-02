@@ -22,6 +22,13 @@ function collectMd(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (name === "upstream" || name === ".git" || name === "node_modules") continue;
+    // `tmp/` is SCRATCH and gitignored, but this walk is on disk, so whatever a
+    // working session parks there gets checked. The release procedure
+    // (RELEASING.md §5.5) unpacks a PUBLISHED tarball into `tmp/` on purpose —
+    // and that copy's README links to `docs/*.md` which are not in the package,
+    // so its links are *supposed* to be unresolvable here. Scanning scratch is
+    // how a verification step turns into a false red.
+    if (name === "tmp") continue;
     if (statSync(p).isDirectory()) out.push(...collectMd(p));
     else if (extname(p) === ".md") out.push(p);
   }
