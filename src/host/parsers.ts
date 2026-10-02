@@ -55,11 +55,11 @@ export const EXPECTED_NESTED = Object.freeze({
  * @param {string} path - one `EXPECTED_NESTED` entry.
  * @returns {string[]} `[path]` when the requirement is unmet, else `[]`.
  */
-function nestedMissing(body, path) {
+function nestedMissing(body: unknown, path: string): string[] {
   const segments = path.split(".");
-  const walk = (node, index) => {
+  const walk = (node: unknown, index: number): string[] => {
     if (index === segments.length) return [];
-    const segment = segments[index];
+    const segment = segments[index] ?? "";
     const isList = segment.endsWith("[]");
     const key = isList ? segment.slice(0, -2) : segment;
     const value = obj(node)[key];
@@ -76,7 +76,7 @@ function nestedMissing(body, path) {
 }
 
 /** Parse one numeric field the console returns as a string. */
-export function credits(value) {
+export function credits(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -87,7 +87,7 @@ export function credits(value) {
  * when absent or not a usable number. A string here is the console's own
  * shape — `Number` accepts it, and it keeps a second-precision integer.
  */
-export function epochSeconds(value) {
+export function epochSeconds(value: unknown): number | null {
   if (value === undefined || value === null || value === "" || value === "0") return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
@@ -103,30 +103,50 @@ export function epochSeconds(value) {
  * @param {string} kind - a key of {@link EXPECTED_SHAPES}.
  * @returns {{ok: boolean, missing: string[]}} the drift report.
  */
-export function checkShape(body, kind) {
-  const expected = EXPECTED_SHAPES[kind] ?? [];
+export function checkShape(body: unknown, kind: string): { ok: boolean; missing: string[] } {
+  const expected = EXPECTED_SHAPES[kind as keyof typeof EXPECTED_SHAPES] ?? [];
   const source = obj(body);
   const missing = expected.filter((key) => source[key] === undefined);
   // Only descend where the top level held: a missing root is already reported.
-  for (const path of EXPECTED_NESTED[kind] ?? []) {
-    const root = path.split(".")[0].replace("[]", "");
-    if (source[root] === undefined) continue;
+  for (const path of EXPECTED_NESTED[kind as keyof typeof EXPECTED_NESTED] ?? []) {
+    const root = (path.split(".")[0] ?? "").replace("[]", "");
+    if (root === "" || source[root] === undefined) continue;
     missing.push(...nestedMissing(body, path));
   }
   return { ok: missing.length === 0, missing };
 }
 
+/** One normalized pool row (`parsePools` output). */
+export interface PoolRow {
+  id: string;
+  name: string;
+  poolType: string;
+  modelIds: string[];
+  window5h: { limit: number; used: number; remaining: number; resetAt: number | null };
+  window7d: { limit: number; used: number; remaining: number; resetAt: number | null };
+  grantBalance: number;
+  nearestGrantExpiry: number | null;
+  nearestGrantExpiringBalance: number;
+}
+
+/** The normalized `pool-usage` result. */
+export interface PoolUsage {
+  plan: { id: string; name: string; type: string };
+  pools: PoolRow[];
+}
+
 /** Normalize the `pool-usage` response into the panel's pool rows. */
-export function parsePools(body) {
-  const plan = obj(body?.plan);
-  const pools = Array.isArray(body?.pools) ? body.pools : [];
+export function parsePools(body: unknown): PoolUsage {
+  const source = obj(body);
+  const plan = obj(source.plan);
+  const pools = Array.isArray(source.pools) ? source.pools : [];
   return {
     plan: {
       id: str(plan.id, ""),
       name: str(plan.name, ""),
       type: str(plan.type, "")
     },
-    pools: pools.map((pool) => {
+    pools: pools.map((pool: unknown) => {
       const source = obj(pool);
       const window5 = obj(source.window_5h);
       const window7 = obj(source.window_7d);
@@ -134,7 +154,7 @@ export function parsePools(body) {
         id: str(source.id, ""),
         name: str(source.name, ""),
         poolType: str(source.pool_type, "default"),
-        modelIds: Array.isArray(source.model_ids) ? source.model_ids.filter((m) => typeof m === "string") : [],
+        modelIds: Array.isArray(source.model_ids) ? source.model_ids.filter((m: unknown) => typeof m === "string") : [],
         window5h: {
           limit: credits(window5.limit),
           used: credits(window5.used),
@@ -156,8 +176,9 @@ export function parsePools(body) {
 }
 
 /** Normalize the `credit-usage-trend` response into per-model credit rows. */
-export function parseTrend(body, trendHours) {
-  const series = Array.isArray(body?.series) ? body.series : [];
+export function parseTrend(body: unknown, trendHours: number): { hours: number; models: { model: string; credits: number }[] } {
+  const source = obj(body);
+  const series = Array.isArray(source.series) ? source.series : [];
   const rows: { model: string; credits: number }[] = [];
   for (const entry of series) {
     const source = obj(entry);
@@ -199,7 +220,7 @@ export function parseTrend(body, trendHours) {
  * @param {object} entry - one catalog entry (id + any extra fields).
  * @returns {VisionModelData} the vision verdict (`source` says how it was decided).
  */
-export function identifyVisionModel(entry): VisionModelData {
+export function identifyVisionModel(entry: unknown): VisionModelData {
   const source = obj(entry);
   const id = str(source.id, "");
   const modalities = modalitiesOf(source);
@@ -224,7 +245,7 @@ export function identifyVisionModel(entry): VisionModelData {
  * @param {object} source - one catalog entry.
  * @returns {string[]|undefined} the modality names, or undefined.
  */
-function modalitiesOf(source) {
+function modalitiesOf(source: Record<string, unknown>): string[] | undefined {
   for (const key of ["input_modalities", "inputTypes", "modality", "capabilities"]) {
     const value = source[key];
     if (Array.isArray(value)) return value.map((modality) => String(modality));

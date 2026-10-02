@@ -46,14 +46,14 @@ export const DRAW_MAX_IMAGES = 1;
 export const DRAW_OUTPUT_FORMATS = ["png", "jpg", "jpeg", "webp"];
 
 /** Normalize a caller-supplied `output_format` value to the documented set. */
-export function normalizeDrawOutputFormat(value) {
+export function normalizeDrawOutputFormat(value: unknown): string {
   const format = str(value, "").trim().toLowerCase();
   if (format === "") return "png";
   return DRAW_OUTPUT_FORMATS.includes(format) ? format : "png";
 }
 
 /** Normalize a caller-supplied `watermark` flag. Only documented boolean forms travel; everything else keeps the documented default `true`. */
-export function normalizeDrawWatermark(value) {
+export function normalizeDrawWatermark(value: unknown): boolean {
   if (typeof value === "boolean") return value;
   if (value === "true") return true;
   if (value === "false") return false;
@@ -71,7 +71,7 @@ export function normalizeDrawWatermark(value) {
  * @param {string} apiBase - the configured base (default `https://token.sensenova.cn/v1`).
  * @returns {string} the full draw endpoint.
  */
-export function buildDrawEndpoint(apiBase) {
+export function buildDrawEndpoint(apiBase: string): string {
   const trimmed = str(apiBase, "").trim().replace(/\/+$/, "");
   if (trimmed === "") return "";
   if (/\/images\/generations$/.test(trimmed)) return trimmed;
@@ -105,7 +105,7 @@ export { isImageGenModel };
  * @param {object[]} entries - the normalized catalog entries.
  * @returns {string[]}
  */
-export function imageGenModelIds(entries) {
+export function imageGenModelIds(entries: unknown): string[] {
   const position = new Map();
   const out: string[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
@@ -135,14 +135,14 @@ export function imageGenModelIds(entries) {
  * @param {string} [preferred] - the configured default (`drawModelId`).
  * @returns {string|null} the chosen id, or `null` when nothing can be picked.
  */
-export function pickDrawModel(entries, requested, preferred) {
+export function pickDrawModel(entries: unknown, requested?: string, preferred?: string): string | null {
   const want = str(requested, "").trim();
   if (want !== "") return want;
   const ids = imageGenModelIds(entries);
   if (ids.length === 0) return null;
   const config = str(preferred, "").trim();
   if (config !== "" && ids.includes(config)) return config;
-  return ids[0];
+  return ids[0] ?? null;
 }
 
 /**
@@ -173,22 +173,22 @@ export function buildDrawBody(options: Partial<DrawRequest> = {}) {
   if (dims !== "") body.size = dims;
   return body;
 }
-
 /**
  * Extract the first image out of an `images/generations` response.
  * @param {object} data - the parsed response JSON.
  * @returns {{url: string, b64Json: string, revisedPrompt: string}}
  * @throws {Error} when the response carries no `data[0]` at all.
  */
-export function parseDrawResponse(data) {
-  const item = data?.data?.[0];
+export function parseDrawResponse(data: unknown): { url: string; b64Json: string; revisedPrompt: string } {
+  const item = (data as { data?: unknown[] | null } | null)?.data?.[0];
   if (item === null || typeof item !== "object") {
     throw new Error("draw: unexpected response, missing data[0]");
   }
+  const source = item as { url?: unknown; b64_json?: unknown; revised_prompt?: unknown };
   return {
-    url: str(item.url, ""),
-    b64Json: str(item.b64_json, ""),
-    revisedPrompt: str(item.revised_prompt, "")
+    url: str(source.url, ""),
+    b64Json: str(source.b64_json, ""),
+    revisedPrompt: str(source.revised_prompt, "")
   };
 }
 
@@ -204,7 +204,7 @@ export function parseDrawResponse(data) {
  * @param {string} bodyText - the raw body (best effort, may be empty).
  * @returns {string} the panel/agent-facing message.
  */
-export function describeDrawFailure(status, bodyText) {
+export function describeDrawFailure(status: number, bodyText: string): string {
   // A 4xx body may echo the `sk-` key back (the failure `redactSecrets` in
   // util.ts exists for): the message reaches the agent tool result AND the
   // panel. Scrub BEFORE the slice so a credential cannot ride the tail.
@@ -241,7 +241,13 @@ export function describeDrawFailure(status, bodyText) {
  * @param {number} [options.timeoutMs] - the deadline.
  * @returns {Promise<{url: string, b64Json: string, revisedPrompt: string, model: string}>}
  */
-export async function drawOnce({ fetchImpl, endpoint, apiKey, body, timeoutMs = DRAW_DEFAULT_TIMEOUT_MS }) {
+export async function drawOnce({ fetchImpl, endpoint, apiKey, body, timeoutMs = DRAW_DEFAULT_TIMEOUT_MS }: {
+  fetchImpl: (url: string, options: object) => Promise<{ ok: boolean; status: number; text(): Promise<string>; json(): Promise<unknown> }>;
+  endpoint: string;
+  apiKey: string;
+  body: Record<string, unknown>;
+  timeoutMs?: number;
+}): Promise<{ url: string; b64Json: string; revisedPrompt: string; model: string }> {
   if (typeof fetchImpl !== "function") throw new Error("drawOnce: fetchImpl is required");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`draw timeout after ${timeoutMs}ms`)), Math.max(1_000, timeoutMs));
@@ -323,6 +329,14 @@ export function defineDrawTool({
   fetchImpl,
   cooldown = createDrawCooldown(),
   isDisposed = () => false
+}: {
+  defineTool: (definition: object) => unknown;
+  resolveApiKey: () => Promise<string>;
+  getEntries?: () => unknown | Promise<unknown>;
+  settings?: { apiBase?: unknown; drawModelId?: unknown; drawTimeoutMs?: unknown };
+  fetchImpl: (url: string, options: object) => Promise<{ ok: boolean; status: number; text(): Promise<string>; json(): Promise<unknown> }>;
+  cooldown?: ReturnType<typeof createDrawCooldown>;
+  isDisposed?: () => boolean;
 }) {
   const timeoutMs = Math.max(5_000, Math.floor(num(settings?.drawTimeoutMs, DRAW_DEFAULT_TIMEOUT_MS)));
   return defineTool({
@@ -354,10 +368,10 @@ export function defineDrawTool({
       // Two parameters + array return: the shape dsh-draw-router had to fix
       // (its upstream "Bug 1+2") — keep both, the renderer is called with the
       // call args first and the result second.
-      render: (_args, result) => [{ type: "text", text: result?.hint || "图片已生成" }]
+      render: (_args: unknown, result: { hint?: unknown } | null | undefined) => [{ type: "text", text: result?.hint || "图片已生成" }]
     },
     timeoutMs: timeoutMs + 10_000,
-    async execute(params) {
+    async execute(params: { prompt?: unknown; model?: unknown; n?: unknown; size?: unknown; outputFormat?: unknown; watermark?: unknown } | undefined) {
       if (isDisposed()) throw new Error("sensenova draw tool is no longer mounted");
       const prompt = str(params?.prompt, "").trim();
       if (prompt === "") throw new Error("prompt is required");
@@ -375,18 +389,25 @@ export function defineDrawTool({
         picked = [];
       }
       const entries = Array.isArray(picked) ? picked : [];
-      const model = pickDrawModel(entries, params?.model, settings?.drawModelId);
+      const model = pickDrawModel(entries, str(params?.model, ""), settings?.drawModelId === undefined ? undefined : str(settings.drawModelId, ""));
       if (model === null) {
         throw new Error(
           "catalog 中没有出图模型（output_modalities 含 image 的条目为空）：确认 Key 已配置、面板已至少轮询一次，且套餐含出图模型"
         );
       }
-      const body = buildDrawBody({ model, prompt, n: params?.n, size: params?.size, outputFormat: params?.outputFormat, watermark: params?.watermark });
+      const body = buildDrawBody({
+        model,
+        prompt,
+        n: typeof params?.n === "number" ? params.n : undefined,
+        size: str(params?.size, ""),
+        outputFormat: str(params?.outputFormat, ""),
+        watermark: typeof params?.watermark === "boolean" ? params.watermark : undefined
+      });
       let result;
       try {
         result = await drawOnce({
           fetchImpl,
-          endpoint: buildDrawEndpoint(settings?.apiBase),
+          endpoint: buildDrawEndpoint(str(settings?.apiBase, "")),
           apiKey,
           body,
           timeoutMs

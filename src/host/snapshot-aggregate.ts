@@ -41,7 +41,7 @@ import type { SnapshotData } from "../shared/wire.ts";
  * @param {Record<string, number>} multipliers - the sanitized config map.
  * @returns {number|undefined} the hit value, or undefined when nothing matched.
  */
-export function matchMultiplier(modelId, multipliers) {
+export function matchMultiplier(modelId: unknown, multipliers: Record<string, number>): number | undefined {
   const id = String(modelId ?? "").toLowerCase();
   for (const [key, value] of Object.entries(multipliers || {})) {
     if (id.includes(key.toLowerCase())) return value;
@@ -62,7 +62,7 @@ export function matchMultiplier(modelId, multipliers) {
  * @param {Record<string, number>} multipliers - the sanitized config map.
  * @returns {object} the same trend object with `multiplier` on matching rows.
  */
-export function applyTrendMultipliers(trend, multipliers) {
+export function applyTrendMultipliers(trend: { models: Array<{ model: string; credits: number; multiplier?: number }> }, multipliers: Record<string, number>): { models: Array<{ model: string; credits: number; multiplier?: number }> } {
   trend.models = trend.models.map((row) => {
     const multiplier = matchMultiplier(row.model, multipliers);
     return multiplier === undefined ? row : { ...row, multiplier };
@@ -81,7 +81,7 @@ export function applyTrendMultipliers(trend, multipliers) {
  * @param {() => Promise<unknown>} fn - the fetch.
  * @returns {Promise<{value: unknown, error: unknown}>} `value` or `error`, never both.
  */
-async function soft(fn) {
+async function soft(fn: () => Promise<unknown>): Promise<{ value: unknown; error: unknown }> {
   try {
     return { value: await fn(), error: null };
   } catch (error) {
@@ -105,8 +105,8 @@ async function soft(fn) {
  * @param {unknown} error - the error a fetch or parse threw.
  * @returns {string} the panel-facing code.
  */
-export function failureCode(error) {
-  const code = error && typeof error === "object" ? /** @type {{code?: string}} */ (error).code : undefined;
+export function failureCode(error: unknown): string {
+  const code = error && typeof error === "object" ? (error as { code?: string }).code : undefined;
   if (code === CODE.CONFIG || code === CODE.CONFIG_ERROR) return CODE.CONFIG_ERROR;
   if (code === CODE.NOT_CONFIGURED || code === CODE.JWT_EXPIRED) return code;
   return isAuthFailure(error) ? CODE.AUTH_ERROR : CODE.CONSOLE_ERROR;
@@ -148,6 +148,21 @@ export async function buildSnapshotBody({
   panelSwitch,
   drawSwitch,
   drawModelId
+}: {
+  settings: import("./host-config.ts").ResolvedSettings;
+  cache: Map<string, { body: unknown; at: number; gen: number }>;
+  inflight: Map<string, Promise<unknown>>;
+  tokenStore: { getToken(): Promise<string>; invalidate(token?: string): void; state(): Promise<unknown> };
+  apiKeyStore: { resolve(): Promise<{ value: string }>; state(): Promise<unknown> };
+  publisher: {
+    state: any;
+    entries?: unknown[];
+    publish: (entries: unknown, enabledIds: unknown, unavailableIds: unknown) => Promise<unknown>;
+  };
+  catalogStore: { listEnabledIds(): Promise<string[]>; replace(entries: unknown, enabledIds?: unknown): Promise<void> };
+  panelSwitch: () => Promise<boolean | null>;
+  drawSwitch?: () => Promise<boolean | null>;
+  drawModelId?: () => Promise<string | null>;
 }): Promise<SnapshotData> {
   const providerState = publisher.state;
   const resolveApiKey = async () => (await apiKeyStore.resolve()).value;
@@ -210,10 +225,10 @@ export async function buildSnapshotBody({
   // the shape for a network error.
   const shapeWarnings = [
     ...(poolResult.error === null
-      ? checkShape(poolResult.value, "pool-usage").missing.map((key) => ({ api: "pool-usage", missing: key }))
+      ? checkShape(poolResult.value, "pool-usage").missing.map((key: string) => ({ api: "pool-usage", missing: key }))
       : []),
     ...(trendResult.error === null
-      ? checkShape(trendResult.value, "credit-usage-trend").missing.map((key) => ({ api: "credit-usage-trend", missing: key }))
+      ? checkShape(trendResult.value, "credit-usage-trend").missing.map((key: string) => ({ api: "credit-usage-trend", missing: key }))
       : [])
   ];
   // Split each pool's advertised coverage into what this key can call and
@@ -222,8 +237,8 @@ export async function buildSnapshotBody({
   if (Array.isArray(catalog)) {
     const available = new Set(catalogIds);
     pools.pools = pools.pools.map((pool) => {
-      const callable = pool.modelIds.filter((model) => available.has(model));
-      const locked = pool.modelIds.filter((model) => !available.has(model));
+      const callable = pool.modelIds.filter((model: string) => available.has(model));
+      const locked = pool.modelIds.filter((model: string) => !available.has(model));
       return { ...pool, callableModels: callable, lockedModels: locked };
     });
   } else {
@@ -254,7 +269,7 @@ export async function buildSnapshotBody({
   // every 30 s, so a write/re-register per poll would be pure churn. The
   // reported model counts come from the fresh catalog when one arrived, else
   // from whatever the mount seed had stored.
-  const keyState = await apiKeyStore.state().catch(() => ({ hasApiKey: false, keySource: null, ephemeral: false }));
+  const keyState = (await apiKeyStore.state().catch(() => ({ hasApiKey: false, keySource: null, ephemeral: false }))) as Record<string, unknown>;
   // The draw-model preference with the same precedence the tool resolves at
   // mount: panel-saved beats the patch default; "" = auto-pick. Resolved once
   // here so the llm block's three draw fields cannot disagree.
@@ -364,7 +379,7 @@ export async function buildSnapshotBody({
     pollSeconds: settings.pollSeconds,
     // Token state, with no secret in it: the panel uses this to say whether
     // the token renews itself or is waiting on an account.
-    auth: await tokenStore.state(),
+    auth: (await tokenStore.state()) as import("../shared/wire.ts").AuthData,
     catalogAvailable: Array.isArray(catalog),
     catalogModels: catalogIds,
     // `undefined` (no API key) vs `[]` (key present, no vision models) — the

@@ -30,7 +30,7 @@
  * @param {boolean} config - the patch-declared default.
  * @returns {boolean} the effective switch.
  */
-export function resolveSwitchEnabled(panel, config) {
+export function resolveSwitchEnabled(panel: boolean | null, config: boolean): boolean {
   return (panel ?? config) === true;
 }
 
@@ -41,7 +41,7 @@ export function resolveSwitchEnabled(panel, config) {
  * @param {string|undefined} config - the patch-declared default.
  * @returns {string|undefined} the effective preference.
  */
-export function resolveSwitchValue(panel, config) {
+export function resolveSwitchValue(panel: string | null, config: string | undefined): string | undefined {
   return panel ?? config;
 }
 
@@ -52,6 +52,6 @@ export function resolveSwitchValue(panel, config) {
  * @param {boolean|string|null} panel - the panel-saved value.
  * @returns {"panel"|"config"}
  */
-export function switchSource(panel) {
+export function switchSource(panel: boolean | string | null): "panel" | "config" {
   return panel === null ? "config" : "panel";
 }
