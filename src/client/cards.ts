@@ -1,8 +1,8 @@
 /**
  * Hook-free presentational components: the panel icon, the quota pool cards,
  * the exhaustion notice, the trend chart, and the collapsible section card.
- * Verbatim logic from the pre-split `client.js` — the render suite drives
- * every one of these in Node, so behavior may not drift by a hair.
+ * The render suite drives every one of these in Node, so behavior may not
+ * drift by a hair.
  */
 import { PANEL_ID } from "./const.ts";
 import { clockLong, count, format, when } from "./format.ts";

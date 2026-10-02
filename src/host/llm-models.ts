@@ -201,31 +201,11 @@ export function isChatModel(entry) {
  * @returns {object} the thinkingLevelMap.
  */
 /**
- * Per-model 思考档位 probe table (frozen 2026-09-29, mirrored from
- * `test/baselines/sensenova-contract.json` §reasoningEffort).
- *
- * The baseline records which `reasoning_effort` values the platform
- * answered 200 for per model:
- *   - `high` — the platform default for every chat model;
- *   - `none` — 关思考, probed 200 on every model;
- *   - `xhigh` — ONLY probed 200 on deepseek-v4-flash;
- *   - `max`   — ONLY probed 200 on glm-5.2;
- *   - `low` / `medium` — 2026-09-30 live-contract replay probed 200 on
- *     sensenova-6.8-flash-lite / deepseek-v4-flash / glm-5.2 (both) and on
- *     deepseek-flash's `medium` (its `low` cell is still INDEFINITE — the
- *     probe hit a 429 rpm window, not a 400, so it is "not measured" not
- *     "unsupported"); deepseek-v4-pro's low/medium are also INDEFINITE for
- *     the same reason. INDEFINITE cells stay closed in this table until a
- *     clean re-run records a 200 (or a 400, which would close them
- *     permanently).
- *
- * The panel roster line must not quote a level the platform may 400 on,
- * so a model absent from this table gets `low`/`medium`/`xhigh`/`max` all
- * closed: only `off` (the `none` wire spelling) and `high` stay open —
- * the two values proven on every chat model by the same 2026-09-29 probe
- * round. A new model that turns out to accept an extra level is added
- * here WITH its probe evidence (see the baseline's `driftLog` discipline),
- * never assumed.
+ * Per-model 思考档位 probe table, mirrored from `test/baselines/sensenova-contract.json`
+ * §reasoningEffort (frozen 2026-09-29). INDEFINITE cells come from 429 rpm windows, not
+ * 400s, so they stay closed — see the baseline driftLog for the full probe narrative.
+ * A model absent here keeps only `off`/`high` open; a new model is added WITH its
+ * 200-probe evidence, never assumed.
  */
 const PROBED_EFFORT = Object.freeze({
   "deepseek-v4-flash": { low: true, medium: true, high: true, xhigh: true, max: false },

@@ -1,6 +1,6 @@
 /**
  * The curated model allow-list UI: the hook-free row list and the hook-based
- * picker around it. Verbatim logic from the pre-split `client.js`.
+ * picker around it.
  */
 import { MODELS_PATH } from "./const.ts";
 import { format, tokenSize } from "./format.ts";

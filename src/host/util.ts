@@ -162,6 +162,23 @@ export function optional(value, fallback = null) {
 }
 
 /**
+ * Omit the fields of `fields` that are `null` or `undefined`, keeping the
+ * rest as a fresh object. Collapses the `(x !== null ? { x } : {})` response
+ * builders: `...pickDefined({ x })` reads as omit-when-absent in one token.
+ * A guard that omits an empty string or requires a specific type is a
+ * DIFFERENT policy and keeps its own `typeof` / non-empty test — not this helper.
+ * @param fields - the candidate field map.
+ * @returns a new object holding only the defined fields.
+ */
+export function pickDefined<T extends Record<string, unknown>>(fields: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== null && value !== undefined) (out as Record<string, unknown>)[key] = value;
+  }
+  return out;
+}
+
+/**
  * An error carrying a stable code the panel can branch on.
  *
  * The single constructor for every failure this plugin produces. `extra`

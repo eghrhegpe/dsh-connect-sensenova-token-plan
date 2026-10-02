@@ -1,7 +1,6 @@
 /**
  * The secret-free provider/draw registration controls: the status lines, the
- * live provider switch, and the live draw-tool switch. Verbatim logic from
- * the pre-split `client.js`.
+ * live provider switch, and the live draw-tool switch.
  */
 import { DRAW_PATH, PROVIDER_PATH } from "./const.ts";
 import { count, format } from "./format.ts";

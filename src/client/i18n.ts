@@ -1,5 +1,5 @@
 /**
- * The two dictionaries, verbatim from the pre-split `client.js`.
+ * The two dictionaries, kept in parity across locales.
  *
  * `en` is typed as `typeof zh`, so a key added to one and not the other is a
  * compile error — the same parity `test/panel.test.mjs` asserts at runtime,

@@ -1,6 +1,5 @@
 /**
  * The model allow-list algebra, shared by the picker and the roster rows.
- * Verbatim logic from the pre-split `client.js`.
  */
 
 /**

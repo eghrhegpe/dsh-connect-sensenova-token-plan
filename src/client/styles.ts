@@ -1,6 +1,5 @@
 /**
  * Theme-token-only styles; a renamed token degrades looks, never rendering.
- * Verbatim from the pre-split `client.js`.
  */
 /** The shared button skin; `rosterBulk` reuses it one step taller so the bulk
  *  buttons sit level with the 32px roster search box. */

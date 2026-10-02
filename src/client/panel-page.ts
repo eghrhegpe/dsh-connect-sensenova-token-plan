@@ -1,6 +1,6 @@
 /**
  * The `main`-slot page: polling, the decision gate, and the whole panel
- * layout. Verbatim logic from the pre-split `client.js`.
+ * layout.
  */
 import {
   AccountForm

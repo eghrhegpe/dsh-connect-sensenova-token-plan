@@ -1,7 +1,6 @@
 /**
  * The decision layer: reading a snapshot response into a view, and the wire-
- * code tables the panel's guidance and forms are keyed by. Verbatim logic
- * from the pre-split `client.js`.
+ * code tables the panel's guidance and forms are keyed by.
  */
 import { format } from "./format.ts";
 import type { Tt } from "./runtime.ts";

@@ -19,7 +19,7 @@
  */
 import { createHash } from "node:crypto";
 import { fetchRaccoonBalance, fetchRaccoonCatalog, RACCOON_FALLBACK_MODELS } from "./raccoon.ts";
-import { str, redactSecrets, optional, errMsg } from "./util.ts";
+import { str, redactSecrets, optional, errMsg, pickDefined } from "./util.ts";
 
 /**
  * How long one Raccoon balance read stays fresh.
@@ -334,11 +334,11 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
   // them reports environment values, so the ordinary poll must stay clean;
   // `hostProxyEnv` is masked even here. See ROADMAP §6.1.4.
   const diagnostics = withDiagnostics ? {
-    ...(accessTokenPrefix !== null ? { accessTokenPrefix } : {}),
-    ...(credentialSource !== null ? { credentialSource } : {}),
+    ...pickDefined({ accessTokenPrefix }),
+    ...pickDefined({ credentialSource }),
     raccoonEnvShadow: raccoonEnvShadow === true,
-    ...(envCredentialFingerprint !== null ? { envCredentialFingerprint } : {}),
-    ...(accessTokenFingerprint !== null ? { accessTokenFingerprint } : {}),
+    ...pickDefined({ envCredentialFingerprint }),
+    ...pickDefined({ accessTokenFingerprint }),
     hostProxyEnv
   } : {};
   return {
@@ -351,23 +351,23 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
     // credential exists"; this says whether it can still serve. The tab
     // renders a distinct re-login affordance on this flag.
     credentialExpired,
-    ...(expiresAtMs !== null ? { expiresAtMs } : {}),
-    ...(refreshExpiresAtMs !== null ? { refreshExpiresAtMs } : {}),
+    ...pickDefined({ expiresAtMs }),
+    ...pickDefined({ refreshExpiresAtMs }),
     // The in-flight scan (if a login walk is waiting): the tab re-renders its
     // QR from this on every poll, so a second tab / a refresh continues the
     // SAME scan instead of voiding it.
-    ...(scan !== null ? { scanUrl: scan.url, scanCode: scan.code } : {}),
-    ...(loginStatus !== null ? { loginStatus } : {}),
+    ...pickDefined({ scanUrl: scan?.url, scanCode: scan?.code }),
+    ...pickDefined({ loginStatus }),
     ...(loginError !== null && loginError !== "" ? { loginError } : {}),
     balance,
-    ...(balanceBreakdown !== null ? { balanceBreakdown } : {}),
-    ...(balanceDetail !== null ? { balanceDetail } : {}),
+    ...pickDefined({ balanceBreakdown }),
+    ...pickDefined({ balanceDetail }),
     ...diagnostics,
     models: roster,
     modelsSource,
     enabledModelIds: savedIds,
     providerRegistered: publisherState?.registered === true,
-    ...(publisherState?.error !== null && publisherState?.error !== undefined ? { providerError: publisherState.error } : {}),
-    ...(error !== null ? { error } : {})
+    ...pickDefined({ providerError: publisherState?.error }),
+    ...pickDefined({ error })
   };
 }
