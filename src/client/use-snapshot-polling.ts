@@ -137,8 +137,13 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
         timer = null;
       }
     };
-    run();
-    start();
+    // A re-run can land while the tab is hidden (a completed in-flight load
+    // changed `cadenceMs`, re-running this effect): do not start the interval
+    // or fire the immediate load in that case — polling is for visible tabs.
+    if (typeof document === "undefined" || document.visibilityState !== "hidden") {
+      run();
+      start();
+    }
     const onVisibility = () => {
       if (!alive) return;
       if (document.visibilityState === "hidden") stop();
@@ -151,8 +156,15 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
       document.addEventListener("visibilitychange", onVisibility);
     }
     return () => {
+      // Unmount supersedes every in-flight poll: bump the generation so a
+      // completing load reads `isCurrent() === false` and skips its state
+      // writes, and abort the request so the Host connection is not held open
+      // for nothing (the `alive` flag alone only stopped the INTERVAL; an
+      // already-sent fetch still resolved and wrote to the unmounted hook).
       alive = false;
       stop();
+      generation.current += 1;
+      inFlight.current?.abort?.();
       if (typeof document !== "undefined" && "addEventListener" in document) {
         document.removeEventListener("visibilitychange", onVisibility);
       }

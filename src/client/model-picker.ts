@@ -7,7 +7,7 @@ import { format, tokenSize } from "./format.ts";
 import { postJsonOrThrow } from "./http.ts";
 import { ModelRow } from "./model-row.ts";
 import { bulkModelsIn, modelIsOn, toggleModelIn } from "./models.ts";
-import { dictKey, h, useCallback, useEffect, useMemo, useState } from "./runtime.ts";
+import { dictKey, h, useCallback, useEffect, useMemo, useRef, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
 import type { LlmData, ModelData } from "./wire.ts";
@@ -118,6 +118,13 @@ export function ModelPicker({ llm, onDone, tt }: {
   const [query, setQuery] = useState("");
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Whether the USER has edited the draft since the last Host sync. The
+  // auto-sync must not clobber an in-flight edit; an untouched picker must
+  // FOLLOW the Host. The old guard compared the CURRENT ids against the NEW
+  // hostKey — unequal the instant the Host moved — so the picker never synced,
+  // and a Host-side change showed as "unsaved" with a Save button that would
+  // POST the stale list over the Host's value.
+  const touchedRef = useRef(false);
 
   // Serialising the allow-lists is the picker's only per-render cost that
   // scales with the catalogue, so it is memoised on the arrays themselves:
@@ -129,9 +136,10 @@ export function ModelPicker({ llm, onDone, tt }: {
 
   // Follow the Host while the picker is untouched, so a catalogue refresh
   // reaches the list and a save from another client clears the draft.
-  // `dirty` in the guard keeps an edit in flight from being clobbered.
+  // `touchedRef` (not `dirty`) is the guard: an edit in flight must survive,
+  // while a Host-side change on an untouched picker must land.
   useEffect(() => {
-    if (dirty === false) setIds(hostIds);
+    if (!touchedRef.current) setIds(hostIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostKey]);
 
@@ -150,7 +158,10 @@ export function ModelPicker({ llm, onDone, tt }: {
     const posted = JSON.stringify(ids);
     try {
       await postJsonOrThrow(MODELS_PATH, { enabledModelIds: ids });
-      // Matches hostKey as soon as the poll after onDone() echoes it.
+      // The user's intent is now on the Host: the picker may follow the Host
+      // again from here on. Matches hostKey as soon as the poll after onDone()
+      // echoes it.
+      touchedRef.current = false;
       setSavedKey(posted);
       onDone?.();
     } catch (error) {
@@ -179,6 +190,7 @@ export function ModelPicker({ llm, onDone, tt }: {
     // nothing — "tick all" would have posted the hide-all sentinel.
     const roster = models.map((model) => String(model?.id ?? ""));
     const targets = visible.map((model) => String(model?.id ?? ""));
+    touchedRef.current = true;
     setIds(bulkModelsIn(ids, roster, targets, allOn));
     setNotice(null);
   }, [models, visible, ids]);
@@ -245,6 +257,7 @@ export function ModelPicker({ llm, onDone, tt }: {
                 // filtered view, so an edit survives a later change of the
                 // search box.
                 onToggle: (id) => {
+                  touchedRef.current = true;
                   setIds(toggleModelIn(ids, models.map((model) => String(model?.id ?? "")), id));
                   setNotice(null);
                 }
@@ -264,6 +277,9 @@ export function ModelPicker({ llm, onDone, tt }: {
                   style: S.button,
                   disabled: busy === true,
                   onClick: () => {
+                    // Discard is an explicit return to the Host's value; the
+                    // picker may follow the Host again from here on.
+                    touchedRef.current = false;
                     setIds(hostIds);
                     setNotice(null);
                   }
