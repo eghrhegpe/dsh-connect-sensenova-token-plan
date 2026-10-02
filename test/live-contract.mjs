@@ -158,6 +158,37 @@ for (const model of contract.models) {
   await sleep(PROBE_BACKOFF_MS);
 }
 
+// --- 2c. max_tokens ceiling probe: one declared ceiling per untested model --
+// The harness (`dsh-llm-pi-ai` resolveRouteModels) fills an UNDECLARED
+// maxTokens with `defaultMaxTokens ?? 32768` — i.e. our historical "declare
+// no maxTokens" choice actually caps output at 32768, HALF the platform's
+// declared catalogue ceiling (`max_output_length: 65536`). This probe pins
+// what the platform itself accepts, so the descriptor can declare the real
+// ceiling instead of letting the harness halve it. Same discipline as §2:
+// a 429 is a rhythm answer (INDEFINITE, not a ceiling verdict), only a 4xx
+// parameter refusal is a real "the platform caps lower" signal.
+for (const model of contract.models) {
+  if (model.status !== "ok") continue; // 403/404 plans cannot be probed
+  const catalogueCeiling = model.maxOutputLength;
+  for (const [label, maxTokens] of [
+    ["at catalogue ceiling", catalogueCeiling ?? 65536],
+    ["double the ceiling", (catalogueCeiling ?? 65536) * 2]
+  ]) {
+    const { response, text, status } = await probeOnceMaxTokens(model.id, maxTokens);
+    if (status === 429) {
+      check(`${model.id} max_tokens:${maxTokens} (${label}) probe INDEFINITE (rate-limited, not a ceiling verdict)`,
+        true, `HTTP 429 ${text.slice(0, 120)} — re-run after the window clears`);
+    } else if (status === 400) {
+      check(`${model.id} max_tokens:${maxTokens} (${label}) refused by the platform`,
+        true, `HTTP 400 ${text.slice(0, 120)} — the ceiling is lower than this`);
+    } else {
+      check(`${model.id} max_tokens:${maxTokens} (${label}) accepted`,
+        response.ok && status >= 200 && status < 300, `HTTP ${status} ${text.slice(0, 120)}`);
+    }
+    await sleep(PROBE_BACKOFF_MS);
+  }
+}
+
 /** One chat-completion probe, unwrapped into {response, text, status}. */
 async function probeOnce(modelId, effort) {
   let response;
@@ -198,6 +229,38 @@ async function fetchProbe(modelId, effort) {
     }),
     signal: AbortSignal.timeout(60_000)
   });
+}
+
+/** One chat-completion probe with a declared max_tokens ceiling. */
+async function fetchProbeMaxTokens(modelId, maxTokens) {
+  return fetch(`${BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [{ role: "user", content: "ping" }],
+      reasoning_effort: "none",
+      max_tokens: maxTokens,
+      stream: false
+    }),
+    signal: AbortSignal.timeout(60_000)
+  });
+}
+
+/** One max_tokens probe, unwrapped into {response, text, status}. */
+async function probeOnceMaxTokens(modelId, maxTokens) {
+  let response;
+  try {
+    response = await fetchProbeMaxTokens(modelId, maxTokens);
+  } catch (error) {
+    return {
+      response: { ok: false, status: 0 },
+      text: String(error?.message ?? error),
+      status: 0
+    };
+  }
+  const text = await response.text().catch(() => "");
+  return { response, text, status: response.status };
 }
 
 console.log(JSON.stringify(results, null, 2));

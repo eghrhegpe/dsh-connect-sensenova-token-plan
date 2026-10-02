@@ -32,6 +32,7 @@ import {
   HIDE_ALL_MODELS,
   summarizeCatalog
 } from "../src/host/llm-models.ts";
+import { isImageGenModel } from "../src/host/modality.ts";
 import {
   CATALOG_VERSION,
   normalizeEnabledIds,
@@ -113,9 +114,13 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     check("supportsDeveloperRole is forced false (the 403 fix)",
       descriptor.compat.supportsDeveloperRole === false);
     check("max_tokens is the wire field name", descriptor.compat.maxTokensField === "max_tokens");
-    check("no maxTokens VALUE is declared (declaring one truncates replies)",
-      !Object.prototype.hasOwnProperty.call(descriptor, "maxTokens") &&
-      !Object.prototype.hasOwnProperty.call(descriptor.compat, "maxTokens"));
+    // The 2026-10-02 ceiling decision: a catalogue-stated max_output_length is
+    // declared as maxTokens (the harness otherwise caps at 32768 via
+    // defaultMaxTokens — flash-lite's 65536 ceiling probed), and a catalogue
+    // entry without one keeps the field UNDECLARED, never a guessed number.
+    check("the catalogue ceiling is declared as maxTokens when stated",
+      descriptor.maxTokens === undefined || descriptor.maxTokens === 65536,
+      `got ${String(descriptor.maxTokens)}`);
   } catch (error) {
     fail("toPiDescriptor maps a text model", error);
   }
@@ -209,6 +214,17 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     check("a text-only model is a chat model", isChatModel(textChat) === true);
     check("a missing output_modalities stays chat (permissive)", isChatModel({ id: "x" }) === true);
     check("a non-array output_modalities stays chat", isChatModel({ id: "y", output_modalities: "text" }) === true);
+    // The modality contradiction the single judgment kills (P1-3, 2026-10-02):
+    // a missing field makes the chat direction (permissive) and the draw
+    // direction (strict) drift in OPPOSITE ways when they re-implement the
+    // probe separately. Both read the one `modality.ts` decision now, so an
+    // entry is never both chat and draw, and a missing field cannot flip either.
+    check("a missing output_modalities is chat but NOT a draw model (one judgment)",
+      isChatModel({ id: "z" }) === true && isImageGenModel({ id: "z" }) === false);
+    check("an image-output model is draw but NOT chat (complementary)",
+      isImageGenModel(gen) === true && isChatModel(gen) === false);
+    check("a text-output model is neither draw-only nor contradictory",
+      isImageGenModel(textChat) === false && isChatModel(textChat) === true);
 
     const built = buildDescriptors([gen, visionChat, textChat], { baseUrl: BASE_URL });
     check("buildDescriptors skips image-generation models",

@@ -27,6 +27,7 @@
  */
 
 import { str, num } from "./util.ts";
+import { isImageGenModel } from "./modality.ts";
 import type { DrawRequest } from "./types.ts";
 
 /** The agent tool name. Scoped so it cannot collide with `dsh-draw-router`'s `draw_image`. */
@@ -82,19 +83,18 @@ export function buildDrawEndpoint(apiBase) {
 /**
  * Whether one catalog entry is an image-GENERATION model.
  *
- * The strict direction of `isChatModel`: only a catalog entry that EXPLICITLY
- * declares `"image"` in `output_modalities` counts. A missing field means
- * "unknown", and unknown must not be offered as a draw model — unlike the
- * chat direction (permissive, so entries never vanish from the picker), a
+ * The STRICT direction of the modality judgment: only a catalog entry that
+ * EXPLICITLY declares `"image"` in `output_modalities` counts. A missing field
+ * means "unknown", and unknown must not be offered as a draw model — unlike
+ * the chat direction (permissive, so entries never vanish from the picker), a
  * wrong draw guess sends the agent's request to a model that cannot answer.
+ * The judgment lives in {@link isImageGenModel} (`modality.ts`), the ONE place
+ * both the draw list and the chat roster read from — they cannot disagree
+ * about what exists.
  * @param {object} entry - one normalized catalog entry.
  * @returns {boolean}
  */
-export function isImageGenModel(entry) {
-  const out = entry?.output_modalities;
-  if (!Array.isArray(out)) return false;
-  return out.includes("image");
-}
+export { isImageGenModel };
 
 /**
  * The draw-capable model ids of one catalog, de-duplicated in first-seen order.

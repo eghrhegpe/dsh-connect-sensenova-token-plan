@@ -6,6 +6,11 @@
     "apiKeyRef": "SENSENOVA_API_KEY",
     "driftLog": [
       {
+        "date": "2026-10-02",
+        "change": "max_tokens 上限探针首测（live-contract §2c）：flash-lite max_tokens:131072 → 400「field MaxTokens invalid, should be in [1, 65536]」（目录 max_output_length 65536 是硬上限）；v4-flash / glm-5.2 max_tokens:131072 → 200（接受翻倍）。同时坐实 harness 兜底：dsh-llm-pi-ai resolveRouteModels 对未声明 maxTokens 强制填 defaultMaxTokens ?? 32768——descriptor 自此声明目录权威值（maxOutputLength 有则声明、缺则回落不声明），不再让输出被截在 32768。",
+        "evidence": "npm run test:live:contract 2026-10-02 20:30 输出：sensenova-6.8-flash-lite max_tokens:131072 → HTTP 400 {\"error\":{\"message\":\"field MaxTokens invalid, should be in [1, 65536]\"}}；deepseek-v4-flash max_tokens:131072 → HTTP 200；glm-5.2 max_tokens:131072 → HTTP 200。"
+      },
+      {
         "date": "2026-09-30",
         "change": "平台目录 input_modalities 回退：deepseek-v4-flash / deepseek-v4-pro / deepseek-flash / glm-5.2 / kimi-k3 / deepseek-v4.1-flash 的 input_modalities 由 [\"text\",\"image\"] 退回 [\"text\"]（sensenova-6.8-flash-lite 仍为 [\"text\",\"image\"]）。推理响应方言不变（glm-5.2 仍吐 reasoning_content、flash-lite 仍吐 reasoning）。基线 visionInput 字段据 live-contract 实测刷新。",
         "evidence": "GET /v1/models 2026-09-30 返回 deepseek-v4-flash input_modalities=[\"text\"]；POST /v1/chat/completions glm-5.2 响应 message.reasoning_content 存在（'say hi in 3 words' → 'Hi'）。"

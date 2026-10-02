@@ -54,7 +54,8 @@ function entryFor(model) {
     id: model.id,
     input_modalities: model.visionInput ? ["text", "image"] : ["text"],
     output_modalities: model.imageGen ? ["image"] : ["text"],
-    ...(model.contextLength !== undefined ? { context_length: model.contextLength } : {})
+    ...(model.contextLength !== undefined ? { context_length: model.contextLength } : {}),
+    ...(model.maxOutputLength !== undefined ? { max_output_length: model.maxOutputLength } : {})
   };
 }
 
@@ -65,9 +66,22 @@ for (const model of contract.models) {
     const entry = entryFor(model);
     const descriptor = toPiDescriptor(entry, { baseUrl });
     check(`${model.id} descriptor.id is the catalog id`, descriptor.id === model.id, descriptor.id);
-    check(`${model.id} descriptor pins max_tokens field (no value)`,
+    check(`${model.id} descriptor pins max_tokens field`,
       descriptor.compat?.maxTokensField === "max_tokens" && descriptor.compat?.supportsDeveloperRole === false,
       JSON.stringify(descriptor.compat));
+    // The 2026-10-02 ceiling decision: the harness fills an UNDECLARED
+    // maxTokens with 32768, so a catalogue-stated ceiling (flash-lite: 65536,
+    // probed) must be DECLARED as maxTokens, and a catalogue entry without a
+    // ceiling keeps the field absent (never a guessed number).
+    if (model.maxOutputLength !== undefined) {
+      check(`${model.id} descriptor declares the catalogue ceiling as maxTokens`,
+        descriptor.maxTokens === model.maxOutputLength,
+        `got ${String(descriptor.maxTokens)}`);
+    } else {
+      check(`${model.id} descriptor leaves maxTokens undeclared (no catalogue ceiling)`,
+        !Object.prototype.hasOwnProperty.call(descriptor, "maxTokens"),
+        JSON.stringify(descriptor));
+    }
     check(`${model.id} descriptor declares reasoning + thinkingLevelMap`,
       descriptor.reasoning === true && typeof descriptor.thinkingLevelMap === "object",
       JSON.stringify({ reasoning: descriptor.reasoning }));

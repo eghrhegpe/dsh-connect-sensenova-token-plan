@@ -187,9 +187,10 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
 // §6 pins the slug in package.json, the patch row and the credential scope.
 // It does NOT reach the HTTP paths: `src/client/const.ts` spells seven
 // `/api/${NS}/<resource>` TEMPLATES (the browser bundle cannot import the
-// host, so it derives them from its own NS), while `src/host/routes.ts`
-// derives the same seven as `/api/${name}/<resource>` from the registered
-// name. Test files then re-spell the resolved literals: the seven route
+// host, so it derives them from its own NS), while the host derives the same
+// seven as `/api/${name}/<resource>` from the registered name, spread across
+// the `src/host/routes/` family (each route module declares its own path).
+// Test files then re-spell the resolved literals: the seven route
 // constants at the top of `routes.test.mjs`, the in-panel expectations in
 // `wiring.test.mjs` (20 mentions) and the live paths in `e2e.mjs`. Between
 // them all there was no pin — so a rename of the slug, or adding a route on
@@ -199,7 +200,16 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
 // the two slugs agree, and every test file quotes only paths both declare.
 {
   const clientSrc = readFileSync(join(here, "..", "src", "client", "const.ts"), "utf8");
-  const hostSrc = readFileSync(join(here, "..", "src", "host", "routes.ts"), "utf8");
+  // The host's route constants now live in the `routes/` family: the facade
+  // (`routes.ts`) registers them but declares no path itself, so the scan
+  // reads every module under `src/host/routes/` (this is the split's own
+  // discipline — each route owns its path, and the set is derived from the
+  // family, not from the facade).
+  const routesDir = join(here, "..", "src", "host", "routes");
+  const hostSrc = readdirSync(routesDir)
+    .filter((file) => file.endsWith(".ts"))
+    .map((file) => readFileSync(join(routesDir, file), "utf8"))
+    .join("\n");
   const suiteSrc = readFileSync(join(here, "..", "test", "routes.test.mjs"), "utf8");
   // Every .mjs under test/ re-spells some resolved `/api/<slug>/<resource>`
   // literal. Scan them all, so a path quoted in wiring.test.mjs or e2e.mjs is
@@ -240,7 +250,7 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
   check("client/const.ts NS literal equals the host slug",
     clientNs !== "" && clientNs === name, `client NS: ${clientNs} | host name: ${name}`);
   check("client/const.ts actually declares route templates", clientPaths.length >= 7, clientPaths.join(", "));
-  check("host/routes.ts derives the same number of routes", hostPaths.length === clientPaths.length, hostPaths.join(", "));
+  check("the host routes family derives the same number of routes", hostPaths.length === clientPaths.length, hostPaths.join(", "));
   check("test/routes.test.mjs re-declares the same paths", suitePaths.length === clientPaths.length, suitePaths.join(", "));
   check("the client, the host and the suite agree path for path",
     JSON.stringify(clientPaths) === JSON.stringify(hostPaths) && JSON.stringify(hostPaths) === JSON.stringify(suitePaths),

@@ -9,7 +9,7 @@
 //                    前两组验的是「文档格式对不对」，它们验的是「文档有没有说实话」——
 //                    形式全绿而语义已漂，是本仓库踩过两次的坑（见 PITFALLS §25）。
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, dirname, extname, resolve } from "node:path";
+import { join, dirname, extname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -501,6 +501,48 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
         if (missing === 0) note(`screenshots.json 的 ${checked} 张图全部存在于磁盘且为图片`);
       }
     }
+  }
+}
+
+// 12) 考古纪律：现行文档不许盖「修订（日期）」式内联补丁——决策沿革只进账本
+// ADR.md 的用法规则见该文件；IMPROVEMENTS.md 等研究档案天生带历史，豁免。
+{
+  // 账本与档案类天生带历史，豁免扫描；要豁免一篇现行文档，必须在这里有意识地
+  // 加名字——新文档默认受检。为什么这样设计：ARCHITECTURE §5 曾叠出「修订
+  // （日期）」沉积，新读者把历史读成现行规则；2026-10 起裁定沿革一律进
+  // docs/ADR.md，正文只写现状。
+  const LEDGERS = new Set([
+    "ADR.md",
+    "CHANGELOG.md",
+    "PITFALLS.md",
+    "IMPROVEMENTS.md"
+  ]);
+  const archeo = /(?:\d{4}-\d{2}-\d{2}\s*修订|修订（[一二三四五六七八九]|本节裁定已失效)/;
+  let scanned = 0;
+  for (const f of mdFiles) {
+    if (LEDGERS.has(basename(f))) continue;
+    scanned++;
+    const lines = readFileSync(f, "utf8").split(/\r?\n/);
+    lines.forEach((line, i) => {
+      const hit = line.match(archeo);
+      if (hit) bad(`${f}:${i + 1} 内联考古层「${hit[0]}」——现行正文只写现状，裁定沿革进 docs/ADR.md`);
+    });
+  }
+  // 账本自身的最小形状：存在、有条目、每条目带日期与状态——账本缺行等于没记账。
+  const adrPath = join(ROOT, "docs", "ADR.md");
+  if (!existsSync(adrPath)) {
+    bad("docs/ADR.md（决策账本）不存在——历次裁定无处登记");
+  } else {
+    const adr = readFileSync(adrPath, "utf8");
+    const heads = [...adr.matchAll(/^## (ADR-\d{3}[^\n]*)/gm)];
+    if (heads.length === 0) bad("docs/ADR.md 没有任何「## ADR-NNN」条目");
+    for (const [head, title] of heads) {
+      const at = adr.indexOf(head);
+      const next = adr.indexOf("\n## ADR-", at + 1);
+      const block = adr.slice(at, next === -1 ? adr.length : next);
+      if (!/日期/.test(block) || !/状态/.test(block)) bad(`ADR 条目缺日期/状态行：${title.trim()}`);
+    }
+    note(`考古纪律：受检 ${scanned} 篇现行文档零内联补丁；账本 ${heads.length} 条目形状合格（日期/状态齐）`);
   }
 }
 

@@ -755,7 +755,7 @@ function section(title) {
 }
 
 // --- the wire constants have exactly one home --------------------------------
-// ROADMAP §6.1.4: `routes.ts` used to re-declare the QR walk's deadline and
+// ROADMAP §6.1.4: the route side used to re-declare the QR walk's deadline and
 // poll cadence, so the same number lived in two files and NOTHING could see
 // them drift — no runtime assertion can, because both copies were simply read.
 // These two checks pin the invariants that a behavioural test cannot reach:
@@ -766,14 +766,17 @@ function section(title) {
   const { fileURLToPath } = await import("node:url");
   const { dirname, join, basename } = await import("node:path");
   const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
-  const routesSrc = readFileSync(join(srcRoot, "host", "routes.ts"), "utf8");
+  // The route side of the protocol constants lives in `routes/raccoon.ts`
+  // since the 2026-10 routes split (the facade registers, the family owns the
+  // paths); the single-source check scans that module, not the facade.
+  const routesSrc = readFileSync(join(srcRoot, "host", "routes", "raccoon.ts"), "utf8");
   // The declaration is what must be gone; a comment may still name them.
   const redeclared = ["RACCOON_LOGIN_DEADLINE_MS", "RACCOON_POLL_MS"]
     .filter((name) => new RegExp(`(?:const|let|var)\\s+${name}\\b`).test(routesSrc));
   check("the QR walk's deadline/cadence are imported, not re-declared",
     redeclared.length === 0 &&
       /RACCOON_LOGIN_TIMEOUT_MS/.test(routesSrc) && /RACCOON_QR_POLL_INTERVAL_MS/.test(routesSrc),
-    redeclared.join(", ") || "routes.ts does not import the protocol constants");
+    redeclared.join(", ") || "routes/raccoon.ts does not import the protocol constants");
 
   const walk = (dir) => readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);

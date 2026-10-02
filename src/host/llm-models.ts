@@ -15,9 +15,18 @@
  *    not look like a known non-standard provider. SenseNova's direct endpoint
  *    does not speak the developer role, so an unset flag makes every request
  *    403 forever. Setting it false is the fix the qoder route proved necessary.
- * 2. No `maxTokens` VALUE is declared. A declared value becomes the output
- *    ceiling and pi-ai sends it as `max_tokens`, truncating long replies with
- *    `finish: max-tokens`. Only the field NAME (`max_tokens`) is pinned.
+ * 2. `maxTokens` declares the platform's OWN catalogue ceiling when the
+ *    catalogue states one. The harness fills an UNDECLARED maxTokens with
+ *    `defaultMaxTokens ?? 32768` (`dsh-llm-pi-ai` resolveRouteModels), so
+ *    "declaring nothing" does NOT mean "no ceiling" — it silently caps output
+ *    at 32768, HALF the ceiling flash-lite's catalogue states (65536; probed
+ *    2026-10-02: flash-lite accepts `max_tokens: 65536` and refuses 131072
+ *    with "MaxTokens invalid, should be in [1, 65536]", while v4-flash and
+ *    glm-5.2 accept 131072 — the ceiling is per-model). Declaring the
+ *    catalogue figure raises the cap to what the platform allows; a model
+ *    whose catalogue states no ceiling keeps the field UNDECLARED (the
+ *    harness 32768 fallback), never a guessed number. Only the field NAME
+ *    (`max_tokens`) is pinned unconditionally.
  * 3. `reasoning: true` + a `thinkingLevelMap`. Every SenseNova chat model
  *    advertises `supported_features: ["reasoning"]` and thinks by default
  *    (verified 2026-09-29: default reasoning_effort high, thinking text
@@ -34,6 +43,7 @@
 
 import { str, num } from "./util.ts";
 import { identifyVisionModel } from "./parsers.ts";
+import { isChatModel } from "./modality.ts";
 import type { AdapterConfig } from "./types.ts";
 
 /**
@@ -158,21 +168,17 @@ export function maxOutputLengthOf(entry) {
  * Whether a catalog entry can be addressed as a CHAT model on this provider's
  * OpenAI-compatible endpoint.
  *
- * The catalog also lists image GENERATION models (`sensenova-u1-fast`,
- * `sensenova-u1.5-lite`): their `output_modalities` is `["image"]` and they
- * answer 404 "model is not found" on `/v1/chat/completions` (verified
- * 2026-09-29), so offering them as chat models only produces errors in DSH.
- * A missing/unknown `output_modalities` is treated as chat (permissive): the
- * field is new enough that an entry without it should not vanish from the
- * picker.
+ * The PERMISSIVE direction of the modality judgment — a missing/unknown
+ * `output_modalities` reads as chat, so an entry the platform did not annotate
+ * does not vanish from the picker. Only an explicit image-GENERATION
+ * declaration keeps it out (such models answer 404 on `/v1/chat/completions`,
+ * verified 2026-09-29). The judgment itself lives in {@link isChatModel}
+ * (`modality.ts`), the ONE place both the chat roster and the draw list read
+ * from — a missing field cannot make them drift in opposite directions.
  * @param {object} entry - one normalized catalog entry.
  * @returns {boolean} whether the entry is usable as a chat model.
  */
-export function isChatModel(entry) {
-  const out = entry?.output_modalities;
-  if (!Array.isArray(out)) return true;
-  return !out.includes("image");
-}
+export { isChatModel };
 
 /**
  * The picker's 思考强度 levels, pinned to platform-valid wire spellings.
@@ -305,8 +311,11 @@ export function toPiDescriptor(entry: any, options: AdapterConfig = {}) {
     cost: { ...NO_COST },
     contextWindow: contextWindowOf(entry),
     // `supportsDeveloperRole: false` is load-bearing — see the module header.
-    // There is deliberately no `maxTokens` VALUE here: declaring one truncates
-    // replies; only the wire field name is pinned.
+    // `maxTokens` carries the catalogue's OWN ceiling when it states one (the
+    // harness would otherwise cap output at 32768 via defaultMaxTokens — see
+    // the module header, decision 2); a catalogue entry without a ceiling
+    // keeps the field UNDECLARED rather than guessing a number.
+    ...(maxOutputLengthOf(entry) > 0 ? { maxTokens: maxOutputLengthOf(entry) } : {}),
     compat: { maxTokensField: "max_tokens", supportsDeveloperRole: false }
   };
 }
