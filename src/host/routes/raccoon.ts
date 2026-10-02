@@ -93,7 +93,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Wiring) {
 
   const raccoonWalkManager = createRaccoonWalk({
     fetcher: (code: string) => pollRaccoonQrLogin(code),
-    saveCredential: (credential) => raccoonStore.save(credential),
+    saveCredential: (credential) => (raccoonStore ? raccoonStore.save(credential) : Promise.reject(new Error("no raccoon credential store"))),
     invalidateCache: () => raccoonRead.clear(),
     onSettled: () => { /* no-op — status flows through the view */ },
     // Login-settled side effect: when the switch is on, drive the publisher

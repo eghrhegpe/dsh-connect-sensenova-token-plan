@@ -157,7 +157,7 @@ export async function buildSnapshotBody({
   publisher: {
     state: any;
     entries?: unknown[];
-    publish: (entries: unknown, enabledIds: unknown, unavailableIds: unknown) => Promise<unknown>;
+    publish: (entries: unknown, enabledIds: unknown, unavailableModelIds?: string[]) => Promise<unknown>;
   };
   catalogStore: { listEnabledIds(): Promise<string[]>; replace(entries: unknown, enabledIds?: unknown): Promise<void> };
   panelSwitch: () => Promise<boolean | null>;

@@ -590,6 +590,27 @@ TS7005/7034/7023/7024 杂类 12），跨 43 文件，host 侧 446 / client 3。�
 零漂移、e2e 91）。
 
 
+
+**批次E（2026-10-03）——exactOptionalPropertyTypes 翻转（strict 家族收官）**。
+
+strict 翻转后最后一个可议强旗标。干查 9 条错误，全仓**同一根因**：给可选属性
+显式赋 `undefined`（`{ opt: v ?? undefined }` 或对象字面量直接展开可能为
+undefined 的值）——exactOptionalPropertyTypes 要求可选属性**缺席**而非
+`undefined`。修法统一为**条件展开**（`...(v !== undefined ? { v } : {})`），
+零行为变更，命中 9 文件：draw（buildDrawBody 的 n/watermark）、llm-models
+（toPiDescriptor 的 baseUrl）、llm-adapter/raccoon-llm-adapter（get）、
+token-store/state（wiring 的 onTrace）、snapshot-aggregate（drawModel）、
+sensenova-crypto（fetchJwks 的 timeoutMs）、use-snapshot-polling（signal）、
+raccoon-tab（providerError）。翻转后 `npm test` 全链绿（typecheck-gate 两
+配置 0 错、e2e 91、build-gate client.js 重建字节一致）。
+
+**至此类型工程终态**：`strict: true`（8 子旗标）+ `noUncheckedIndexedAccess`
++ `exactOptionalPropertyTypes` + `noUnusedLocals/Parameters` +
+`erasableSyntaxOnly`——全仓最高严格度下 0 错误，四轮强化（SNC →
+noImplicitAny 449→0 → strict → exactOptionalPropertyTypes）均走
+"干查爆炸半径 → 清 → 翻转 → 全量门禁裁决"同一纪律。
+
+
 ## 9. 姊妹插件对照：`dsh-connect-agnes-token-plan` 的设计差异与借鉴清单（2026-10-02 快照）
 
 > **档案性质**：本文是**研究档案**（同 §1–§8 定位），不是待执行清单。对照对象是

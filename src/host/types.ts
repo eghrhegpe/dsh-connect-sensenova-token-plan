@@ -180,43 +180,43 @@ export interface PluginError extends Error {
  */
 export interface Wiring {
   /** The resolved settings row (panel values + config defaults). */
-  settings: any;
+  settings: import("./host-config.ts").ResolvedSettings;
   /** A settings/auth misconfiguration surfaced through the snapshot; `null` when clean. */
   configError: string | null;
   /** The console-response cache shared across polls. */
-  cache: Map<string, any>;
+  cache: Map<string, { body: unknown; at: number; gen: number }>;
   /** The single-flight map shared across polls. */
-  inflight: Map<string, any>;
+  inflight: Map<string, Promise<unknown>>;
   /** The token store (`createTokenStore`). */
-  tokenStore: any;
+  tokenStore: ReturnType<typeof import("./token-store.ts").createTokenStore>;
   /** The inference API-key store (`createApiKeyStore`). */
-  apiKeyStore: any;
+  apiKeyStore: ReturnType<typeof import("./api-key-store.ts").createApiKeyStore>;
   /** The model-catalog store (`createFileCatalogStore`). */
-  catalogStore: any;
+  catalogStore: ReturnType<typeof import("./catalog-store.ts").createFileCatalogStore>;
   /** The provider switch store (`createFileProviderStore`). */
-  providerStore: any;
+  providerStore: ReturnType<typeof import("./provider-store.ts").createFileProviderStore>;
   /** The draw-tool store (`createFileDrawStore`); may be absent on some Hosts. */
-  drawStore: any | null;
+  drawStore: ReturnType<typeof import("./draw-store.ts").createFileDrawStore> | null;
   /** The directly-registered provider publisher (`createProviderPublisher`). */
-  publisher: any;
+  publisher: ReturnType<typeof import("./provider-publish.ts").createProviderPublisher>;
   /** The publisher's live registration state (shared reference). */
-  providerState: any;
+  providerState: import("./provider-publish.ts").ProviderPublisherState;
   /** `(entries, enabledIds, unavailableIds) => publisher.publish` with rollback. */
-  publishProvider: (entries: any[], enabledIds: string[], unavailableModelIds?: string[]) => Promise<any>;
+  publishProvider: (entries: unknown[], enabledIds: string[], unavailableModelIds?: string[]) => Promise<unknown>;
   /** Release the registered provider pair (adapter + directory). */
   releaseProvider: () => void;
   /** Resolve the live `sk-` key per request. */
   resolveApiKey: () => Promise<string>;
   /** The settings-row vision writer filled by `startSideEffects` (no-op until then). */
-  visionPublish: { current: ((models: any[], ids: string[]) => Promise<any>) | null };
+  visionPublish: { current: ((models: unknown[], ids: string[]) => Promise<unknown>) | null };
   /** `ctx.logger` (Host logging); optional so tests may omit it. */
-  logger?: any;
+  logger?: { warn?: (message: string, ...args: unknown[]) => void };
   /** The Raccoon credential store (`createRaccoonStore`); the second upstream. */
-  raccoonStore: any | null;
+  raccoonStore: ReturnType<typeof import("./raccoon-store.ts").createRaccoonStore> | null;
   /** The Raccoon switch store (`createFileRaccoonStore`); may be absent. */
-  raccoonSwitch: any | null;
+  raccoonSwitch: ReturnType<typeof import("./raccoon-switch-store.ts").createFileRaccoonStore> | null;
   /** The Raccoon publisher (`createRaccoonPublisher`); may be absent. */
-  raccoonPublisher: any | null;
+  raccoonPublisher: ReturnType<typeof import("./raccoon-publish.ts").createRaccoonPublisher> | null;
   /** The Raccoon gateway read cache (balance + catalogue); may be absent. */
-  raccoonCache: any | null;
+  raccoonCache: ReturnType<typeof import("./coalesced-fetch.ts").createCoalescedFetch> | null;
 }
