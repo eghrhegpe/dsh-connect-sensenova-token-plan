@@ -14,6 +14,7 @@
 
 import { readJwtExpiry } from "../sensenova-auth.ts";
 import { str, obj, num, numOrNull } from "../util.ts";
+import { LEGACY_SCOPE, RECORD_ID } from "./constants.ts";
 import type { StoredGrant, StoreContextWiring, TokenStoreState } from "./state.ts";
 
 /** Bumped if the stored payload shape ever changes incompatibly. */
@@ -71,8 +72,6 @@ export async function readStored(wiring: StoreContextWiring, state: TokenStoreSt
  */
 export async function adoptLegacyGrant(wiring: StoreContextWiring, _state: TokenStoreState): Promise<StoredGrant | undefined> {
   const { backend, key, credentialKey } = wiring;
-  const LEGACY_SCOPE = "dsh-llm-rate-panel";
-  const RECORD_ID = "sensenova-console";
   try {
     const legacyKey = credentialKey(LEGACY_SCOPE, RECORD_ID);
     const grant = parseGrant(await backend().readRecord(legacyKey));

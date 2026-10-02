@@ -17,6 +17,7 @@
 
 import { isCredentialRefusal, CODE } from "../codes.ts";
 import { str, obj, num, numOrNull } from "../util.ts";
+import { LEGACY_SCOPE, THROTTLE_ID } from "./constants.ts";
 import type { StoreContextWiring, TokenStoreState, HeldThrottle } from "./state.ts";
 
 /**
@@ -42,8 +43,18 @@ export const MAX_LOGIN_BACKOFF_MS = 30 * 60_000;
  */
 export const THROTTLE_MARKER = "signin-throttle";
 
-/** Store version, bumped when the throttle's persisted shape changes. */
-const THROTTLE_VERSION = 1;
+/**
+ * Payload version of the throttle record that used to live in the credentials
+ * service, read for MIGRATION ONLY.
+ *
+ * A DIFFERENT constant from `THROTTLE_FILE_VERSION` (`throttle-store.ts`),
+ * which versions the state file the throttle moved into. This one is frozen:
+ * the plugin no longer writes that record, so there is nothing to bump it for —
+ * it only has to keep recognising what previous versions parked. Sharing the
+ * name and the value with the file's version is exactly what made the two worth
+ * separating.
+ */
+const LEGACY_THROTTLE_PAYLOAD_VERSION = 1;
 
 /**
  * The refusal an in-force throttle stands for.
@@ -113,8 +124,6 @@ export async function readThrottle(wiring: StoreContextWiring, state: TokenStore
  */
 export async function adoptLegacyThrottle(wiring: StoreContextWiring, _state: TokenStoreState): Promise<HeldThrottle | null> {
   const { backend, THROTTLE_KEY, credentialKey, throttleStore, now } = wiring;
-  const LEGACY_SCOPE = "dsh-llm-rate-panel";
-  const THROTTLE_ID = "sensenova-console-throttle";
   const candidates = [THROTTLE_KEY, credentialKey(LEGACY_SCOPE, THROTTLE_ID)];
   for (const legacyKey of candidates) {
     try {
@@ -126,7 +135,7 @@ export async function adoptLegacyThrottle(wiring: StoreContextWiring, _state: To
       if (record.kind !== "grant") continue;
       const payload = obj(record.payload);
       if (payload.marker !== THROTTLE_MARKER) continue;
-      if (num(payload.version) !== THROTTLE_VERSION) continue;
+      if (num(payload.version) !== LEGACY_THROTTLE_PAYLOAD_VERSION) continue;
       const code = str(payload.code, "");
       if (code === "") continue;
       const attempt = num(payload.attempt, 1);
@@ -184,8 +193,6 @@ export async function writeThrottle(wiring: StoreContextWiring, state: TokenStor
  */
 export async function clearThrottle(wiring: StoreContextWiring, state: TokenStoreState): Promise<void> {
   const { throttleStore, backend, THROTTLE_KEY, credentialKey } = wiring;
-  const LEGACY_SCOPE = "dsh-llm-rate-panel";
-  const THROTTLE_ID = "sensenova-console-throttle";
   state.throttle = null;
   await throttleStore.clear().catch(() => {
     // Nothing to do: the in-memory clear above already took effect.

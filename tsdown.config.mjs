@@ -1,9 +1,11 @@
 // @ts-check
 /**
- * Build configuration. `src/` holds ALL sources (host + client); `lib/` is a
- * pure build artifact, git-ignored, and fully rebuildable from `src/` — the
- * workbuddy layout: source in `src/`, runtime in `lib/`, nothing hand-edited
- * in `lib/`.
+ * Build configuration. `src/` holds ALL sources (host + client); `lib/` and the
+ * root `client.js` are build artifacts that are **versioned on purpose** — the
+ * DSH marketplace installs from `github:`, and that install path does not run
+ * `prepack`, so an untracked `lib/` ships a package whose `main` does not
+ * exist. Rationale and the freshness gate that protects it: `test/build-gate.mjs`
+ * and `.gitignore`'s own comment; decided in ADR-005.
  *
  * Two entries:
  *

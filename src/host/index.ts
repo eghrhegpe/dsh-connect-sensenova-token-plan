@@ -316,7 +316,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     raccoonCache
   };
 
-  // The six route handlers (trust fence, method allowances, body ceilings,
+  // The seven route handlers (trust fence, method allowances, body ceilings,
   // trace writes, publish-after-save) — see routes.ts.
   const offs = registerRoutes(ctx, wiring);
   // Mount-time side effects (persisted-catalog seed, draw tool, vision

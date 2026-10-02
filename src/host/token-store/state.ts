@@ -28,6 +28,7 @@
 import { createAuth } from "../sensenova-auth.ts";
 import { createMemoryThrottleStore } from "../throttle-store.ts";
 import { name as RECORD_SCOPE } from "../host-config.ts";
+import { RECORD_ID, THROTTLE_ID } from "./constants.ts";
 
 /**
  * The credential backend the blocks read and write through.
@@ -92,8 +93,6 @@ export interface StoreContextWiring {
 }
 
 /** Record address: this plugin's own namespace, so a stranger cannot collide. */
-const RECORD_ID = "sensenova-console";
-const THROTTLE_ID = "sensenova-console-throttle";
 const DEFAULT_SKEW_MS = 120_000;
 
 /** The stored grant shape `grant.ts` parses and `acquire` carries. */

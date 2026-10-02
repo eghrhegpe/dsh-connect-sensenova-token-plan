@@ -24,8 +24,19 @@ import { name } from "./host-config.ts";
 import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, stateDir as pluginStateDir } from "./state-store.ts";
 import type { HeldThrottle } from "./token-store/state.ts";
 
-/** Shape version, bumped when the persisted form changes. */
-const THROTTLE_VERSION = 1;
+/**
+ * Shape version of the throttle STATE FILE, bumped when the persisted form
+ * changes.
+ *
+ * Deliberately NOT the same constant as the legacy record's payload version
+ * (`LEGACY_THROTTLE_PAYLOAD_VERSION` in `token-store/throttle.ts`): this one
+ * versions a file this module still writes and will bump, that one versions a
+ * credentials record the plugin no longer writes at all. They were two
+ * unrelated constants that happened to share a name and a value, which is the
+ * worst kind of duplicate — bumping one "in lockstep" with the other would
+ * silently orphan every parked refusal already on disk.
+ */
+const THROTTLE_FILE_VERSION = 1;
 
 /**
  * Where the throttle lives: the SHARED directory, `$DSH_HOME/state/<plugin>`.
@@ -71,7 +82,7 @@ function legacyThrottleFile() {
 function parse(raw: unknown, now: () => number): HeldThrottle | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const body = raw as { version?: unknown; code?: unknown; parked?: unknown; until?: unknown; attempt?: unknown };
-  if (num(body.version, 0) !== THROTTLE_VERSION) return null;
+  if (num(body.version, 0) !== THROTTLE_FILE_VERSION) return null;
   const code = str(body.code, "");
   if (code === "") return null;
   const attempt = Math.max(1, Math.floor(num(body.attempt, 1)));
@@ -138,7 +149,7 @@ export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } 
       try {
         await ensureStateDir(dir);
         const body = JSON.stringify({
-          version: THROTTLE_VERSION,
+          version: THROTTLE_FILE_VERSION,
           code: state.code,
           parked: state.parked === true,
           until: state.parked === true ? null : state.until,
@@ -186,7 +197,7 @@ export function createMemoryThrottleStore(now = Date.now) {
       return parse(held, now);
     },
     async write(state: HeldThrottle) {
-      held = { version: THROTTLE_VERSION, ...state };
+      held = { version: THROTTLE_FILE_VERSION, ...state };
     },
     async clear() {
       held = null;

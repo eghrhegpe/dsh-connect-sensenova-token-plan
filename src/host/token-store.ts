@@ -53,6 +53,7 @@ import { CODE } from "./codes.ts";
 import { str, obj, verbatim, pluginError } from "./util.ts";
 import { name as RECORD_SCOPE } from "./host-config.ts";
 import { createStoreContext } from "./token-store/state.ts";
+import { RECORD_ID, THROTTLE_ID, LEGACY_SCOPE } from "./token-store/constants.ts";
 import type { AuthLike, ThrottleStore, StoredGrant } from "./token-store/state.ts";
 import {
   readStored as readStoredImpl,
@@ -80,19 +81,6 @@ import {
 import { renewWithRefresh as renewWithRefreshImpl } from "./token-store/renewal.ts";
 import { acquire as acquireImpl } from "./token-store/acquire.ts";
 
-/** Record address: this plugin's own namespace, so a stranger cannot collide. */
-const RECORD_ID = "sensenova-console";
-
-/**
- * The namespace this plugin used before the rename.
- *
- * Read for MIGRATION ONLY: an account and grant saved under the old name must
- * survive the rename, or the panel would demand a fresh login and abandon a
- * refresh token that is still good. Nothing is ever written here again; each
- * legacy record is adopted once and deleted.
- */
-const LEGACY_SCOPE = "dsh-llm-rate-panel";
-
 /**
  * The reference form of a credential name.
  *
@@ -105,15 +93,6 @@ const LEGACY_SCOPE = "dsh-llm-rate-panel";
  * @returns {string} the reference.
  */
 const credentialRef = (name: string) => name;
-
-/**
- * Where the throttle used to live, as a record in the credentials service.
- *
- * Read for MIGRATION ONLY and never written again. The marker-based adoption
- * lives in `token-store/throttle.ts`; this constant stays here as the public
- * export surface (`THROTTLE_ID`).
- */
-const THROTTLE_ID = "sensenova-console-throttle";
 
 /**
  * Build the token store.
