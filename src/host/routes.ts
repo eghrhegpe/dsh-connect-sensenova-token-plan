@@ -46,7 +46,11 @@ import type { Wiring } from "./types.ts";
  * registration order — `teardown` runs them last.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
  * @param {Wiring} wiring - assembled by `apply()` in `index.ts`.
- * @returns {Function[]} the seven `off()` unregister callbacks, in registration order.
+ * @returns {Array<() => void>} the seven `off()` unregister callbacks, in
+ *   registration order. Spelled out rather than `Function[]` so it matches
+ *   what `teardown` now accepts — and note that a JSDoc type is a COMMENT
+ *   here, not a type source, so `tsc` never checked this line either way.
+ *   The real guarantee for each route is its own `Pick<Wiring, …>` parameter.
  */
 export function registerRoutes(ctx: any, wiring: Wiring) {
   return [
