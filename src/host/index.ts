@@ -71,7 +71,7 @@ import type { HostDeps } from "./types.ts";
  * @param {string} id - the record's name.
  * @returns {string} the record key.
  */
-export const credentialKey = (scope, id) => `${scope}/${id}`;
+export const credentialKey = (scope: string, id: string) => `${scope}/${id}`;
 
 /**
  * A cheap signature of the model set a provider registration would offer.
@@ -164,7 +164,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const drawStore = createFileDrawStore({ profile });
 
   /** Read an optional service without throwing on a Host that lacks it. */
-  const getService = (service) => {
+  const getService = (service: string) => {
     try {
       return ctx.get?.(service) ?? null;
     } catch {
@@ -181,7 +181,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
    * @param {string} event - the event name.
    * @returns {void}
    */
-  const emitEvent = (event) => {
+  const emitEvent = (event: string) => {
     try {
       ctx.emit?.(event);
     } catch {
@@ -212,7 +212,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     settings,
     panelSwitch: () => providerStore.enabled().catch(() => null),
     loadAdapterModule,
-    getLlm: (service) => getService(service),
+    getLlm: (service: string) => getService(service),
     resolveApiKey,
     emit: emitEvent,
     logger: ctx.logger
@@ -223,7 +223,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // the annotation it read as `never[]` and `publisher.publish` (which takes a
   // `string[]`) was unreachable — and the wrapper's OWN type in `Wiring`
   // declared the parameter as `string[]` (docs/IMPROVEMENTS.md §8).
-  const publishProvider = (entries, enabledIds, unavailableModelIds: string[] = []) =>
+  const publishProvider = (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []) =>
     publisher.publish(entries, enabledIds, unavailableModelIds);
   const releaseProvider = () => publisher.release();
 
@@ -251,7 +251,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
       const { credential: live } = await raccoonStore.resolve();
       return live?.accessToken ?? "";
     },
-    getLlm: (service) => getService(service),
+    getLlm: (service: string) => getService(service),
     loadAdapterModule: deps.loadRaccoonAdapterModule ?? (() => import("./raccoon-llm-adapter.ts")),
     emit: emitEvent,
     logger: ctx.logger
@@ -333,7 +333,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // step two) — see lifecycle.ts. Fire-and-forget inside; never awaited.
   startSideEffects(ctx, wiring, {
     loadToolsModule: deps.loadToolsModule ?? (() => import("@deepseek-ai/dsh-tools")),
-    drawFetch: deps.drawFetch ?? ((url, options) => fetch(url, options))
+    drawFetch: deps.drawFetch ?? ((url: string, options: object) => fetch(url, options))
   });
 
   ctx.effect(() => {

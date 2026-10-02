@@ -171,7 +171,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
    * @param {object} target - where the release functions are recorded (`state`).
    * @returns {void}
    */
-  const registerPair = (llm, built, target) => registerProviderPair(llm, built, target, {
+  const registerPair = (llm: { registerAdapter: (providerIds: string[], adapter: unknown) => () => void; registerConfigurableProviders?: (rows: object[]) => () => void }, built: { providerIds: string[]; adapter: unknown }, target: import("./publish-core.ts").PublisherStateBase) => registerProviderPair(llm, built, target, {
     providerId: LLM_PROVIDER_ID,
     displayName: LLM_DISPLAY_NAME
   });
@@ -190,7 +190,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
    *   drop from the picker's offer.
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publishProviderOnce = async (entries, enabledIds, unavailableModelIds: string[] = []) => {
+  const publishProviderOnce = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []) => {
     // A publish that arrives after the plugin was disposed registers a
     // provider into a Host that has already withdrawn this plugin: no owner,
     // no release, and nothing on screen saying where it came from.
@@ -219,6 +219,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
       // would otherwise hand a Promise to `registerAdapter`, and the Host
       // would be offered a provider whose adapter is `undefined` — a failure
       // that surfaces as broken model routing, nowhere near its cause.
+      if (createSensenovaAdapter === undefined) throw new Error(BAD_FACTORY_SHAPE_ERROR);
       built = await createSensenovaAdapter({
         entries: state.entries,
         enabledIds: state.enabledIds,
@@ -272,7 +273,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
    * @param {string[]} [unavailableModelIds] - quota-exhausted model ids.
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publish = (entries, enabledIds, unavailableModelIds: string[] = []) =>
+  const publish = (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []) =>
     queue.enqueue(() => publishProviderOnce(entries, enabledIds, unavailableModelIds));
 
   /**
@@ -303,7 +304,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
  * @param {(entries: object[], enabledIds: string[]) => string} signatureOf -
  *   the cheap offered-set signature.
  */
-export function seedPublisherFromCatalog(publisher, listCatalog, listEnabled, signatureOf) {
+export function seedPublisherFromCatalog(publisher: { state: any; publish: (entries: unknown, enabledIds: unknown, unavailableIds: unknown) => Promise<unknown> }, listCatalog: () => Promise<object[]>, listEnabled: () => Promise<string[]>, signatureOf: (entries: object[], enabledIds: string[]) => string) {
   return (async () => {
     try {
       const [stored, storedEnabled] = await Promise.all([
@@ -330,9 +331,9 @@ export function seedPublisherFromCatalog(publisher, listCatalog, listEnabled, si
  * @param {string[]} enabledIds - the allow-list (empty = all).
  * @returns {string}
  */
-export function catalogSignature(entries, enabledIds) {
+export function catalogSignature(entries: unknown, enabledIds: unknown): string {
   const models = (Array.isArray(entries) ? entries : [])
-    .map((entry) => `${str(entry?.id, "")}:${identifyVisionModel(entry).vision === true ? 1 : 0}`)
+    .map((entry) => `${str((entry as { id?: unknown })?.id, "")}:${identifyVisionModel(entry).vision === true ? 1 : 0}`)
     .join(",");
   return `${models}|${(Array.isArray(enabledIds) ? enabledIds : []).join(",")}`;
 }
@@ -349,7 +350,7 @@ export function catalogSignature(entries, enabledIds) {
  * @param {{entries: object[], enabledIds: string[], unavailableIds: string[],
  *          signature: string, quotaSignature: string}} state - `publisher.state`.
  */
-export function syncSignaturesAfterPublish(state) {
+export function syncSignaturesAfterPublish(state: { entries?: unknown; enabledIds?: unknown; unavailableIds?: unknown; signature: string; quotaSignature: string }) {
   const entries = Array.isArray(state.entries) ? state.entries : [];
   const enabledIds = Array.isArray(state.enabledIds) ? state.enabledIds : [];
   const unavailable = Array.isArray(state.unavailableIds) ? state.unavailableIds : [];

@@ -89,7 +89,7 @@ export function createPublishQueue() {
      * @param {() => Promise<unknown>} task - the publish to run, in turn.
      * @returns {Promise<unknown>} the task's own settled value.
      */
-    enqueue(task) {
+    enqueue(task: () => Promise<unknown>): Promise<unknown> {
       const queued = publishChain.then(task, task);
       publishChain = queued.then(() => undefined, () => undefined);
       return queued;
@@ -119,7 +119,7 @@ export function createPublishQueue() {
  */
 export function createPairReleaser(state: PublisherStateBase) {
   return () => {
-    const releaseFn = (fn) => {
+    const releaseFn = (fn: (() => void) | null) => {
       try {
         fn?.();
       } catch {
@@ -156,7 +156,7 @@ export function createPairReleaser(state: PublisherStateBase) {
  * @param {string} identity.displayName
  * @returns {void}
  */
-export function registerProviderPair(llm, built, target: PublisherStateBase, { providerId, displayName }) {
+export function registerProviderPair(llm: { registerAdapter: (providerIds: string[], adapter: unknown) => () => void; registerConfigurableProviders?: (rows: object[]) => () => void }, built: { providerIds: string[]; adapter: unknown }, target: PublisherStateBase, { providerId, displayName }: { providerId: string; displayName: string }): void {
   target.releaseAdapter = llm.registerAdapter(built.providerIds, built.adapter);
   // `registerConfigurableProviders` is how a provider gains its row on the
   // models settings page; an older runtime without it still gets models
@@ -183,11 +183,11 @@ export function registerProviderPair(llm, built, target: PublisherStateBase, { p
  * @param {string} exportName - the factory export to read off the module.
  * @returns {() => Promise<Function>} the memoized factory resolver.
  */
-export function createAdapterFactoryResolver(loadModule, exportName) {
-  let adapterFactoryPromise;
+export function createAdapterFactoryResolver(loadModule: () => Promise<object>, exportName: string): () => Promise<((options: unknown) => unknown) | undefined> {
+  let adapterFactoryPromise: Promise<((options: unknown) => unknown) | undefined> | undefined;
   return async () => {
     if (adapterFactoryPromise === undefined) {
-      adapterFactoryPromise = Promise.resolve(loadModule()).then((mod) => mod?.[exportName]);
+      adapterFactoryPromise = Promise.resolve(loadModule()).then((mod) => (mod as Record<string, unknown>)?.[exportName] as ((options: unknown) => unknown) | undefined);
     }
     return adapterFactoryPromise;
   };
@@ -201,9 +201,9 @@ export function createAdapterFactoryResolver(loadModule, exportName) {
  * @param {unknown} built - what the factory returned.
  * @returns {boolean} whether it is `{ adapter, providerIds }`.
  */
-export function isBuiltAdapter(built) {
+export function isBuiltAdapter(built: unknown): boolean {
   return built !== null && typeof built === "object"
-    && Array.isArray(built.providerIds) && built.adapter !== undefined;
+    && Array.isArray((built as { providerIds?: unknown }).providerIds) && (built as { adapter?: unknown }).adapter !== undefined;
 }
 
 /**
@@ -218,8 +218,8 @@ export function isBuiltAdapter(built) {
  * @returns {{note: string, hint: string, error: unknown}} the redacted message,
  *   the optional remedy suffix, and the original value for re-raising.
  */
-export function describeBuildFailure(error) {
-  const annotated = /** @type {Error & {code?: unknown}} */ (error);
+export function describeBuildFailure(error: unknown): { note: string; hint: string; error: unknown } {
+  const annotated = error as Error & { code?: unknown };
   const why = errMsg(error);
   return {
     note: redactSecrets(why),
@@ -238,7 +238,7 @@ export function describeBuildFailure(error) {
  * @param {{note: string, hint: string}} described - from `describeBuildFailure`.
  * @returns {void}
  */
-export function warnBuildFailure(logger, label, described) {
+export function warnBuildFailure(logger: { warn?: (message: string) => void } | undefined, label: string, described: { note: string; hint: string }): void {
   logger?.warn?.(`${pluginName}: cannot build the ${label} adapter: ${described.note}${described.hint}`);
 }
 
@@ -373,7 +373,7 @@ export function swapRegistration({
  * @param {(event: string) => void} emit - `ctx.emit`.
  * @returns {void}
  */
-export function emitAdaptersUpdated(emit) {
+export function emitAdaptersUpdated(emit: (event: string) => void): void {
   try {
     emit(ADAPTERS_UPDATED_EVENT);
   } catch {

@@ -135,7 +135,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
    * functions onto `target` — the shared single-point registrar (PITFALLS
    * §19), used by both the publish and the rollback path.
    */
-  const registerPair = (llm, built, target) => registerProviderPair(llm, built, target, {
+  const registerPair = (llm: { registerAdapter: (providerIds: string[], adapter: unknown) => () => void; registerConfigurableProviders?: (rows: object[]) => () => void }, built: { providerIds: string[]; adapter: unknown }, target: import("./publish-core.ts").PublisherStateBase) => registerProviderPair(llm, built, target, {
     providerId: RACCOON_PROVIDER_ID,
     displayName: RACCOON_DISPLAY_NAME
   });
@@ -153,7 +153,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
    * @param {string} [officeIdentity] - the credential's office identity.
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publishProviderOnce = async (rows, officeIdentity = "") => {
+  const publishProviderOnce = async (rows: unknown, officeIdentity = "") => {
     if (queue.isDisposed()) return { ok: false, skipped: true };
     const previousBuilt = state.built;
     const previousRows = state.rows;
@@ -183,6 +183,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
       // Awaited, not assumed synchronous: an async factory that returns a
       // Promise to `registerAdapter` would hand the Host an `undefined`
       // adapter — a failure that surfaces as broken model routing.
+      if (createRaccoonAdapter === undefined) throw new Error(BAD_FACTORY_SHAPE_ERROR);
       built = await createRaccoonAdapter({
         rows: state.rows,
         officeIdentity,
@@ -217,7 +218,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
   };
 
   /** Publish, queued behind every other in-flight publish. */
-  const publish = (rows, officeIdentity) => queue.enqueue(() => publishProviderOnce(rows, officeIdentity));
+  const publish = (rows: unknown, officeIdentity: string | undefined) => queue.enqueue(() => publishProviderOnce(rows, officeIdentity ?? ""));
 
   /** Mark the publisher disposed: any later publish is a no-op. */
   const dispose = () => queue.dispose();
@@ -238,9 +239,9 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
  * @param {object[]} rows - the `raccoonRoster` result.
  * @returns {string}
  */
-export function raccoonSignature(rows) {
+export function raccoonSignature(rows: unknown): string {
   const models = (Array.isArray(rows) ? rows : [])
-    .map((row) => `${str(row?.id, "")}:${row?.vision === true ? 1 : 0}`)
+    .map((row) => `${str((row as { id?: unknown })?.id, "")}:${(row as { vision?: unknown })?.vision === true ? 1 : 0}`)
     .join(",");
   return models;
 }

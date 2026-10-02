@@ -63,8 +63,8 @@ const SERVICE_RETRY_DELAY_MS = 300;
  *   appeared inside the window.
  */
 export async function resolveServiceWithRetry(
-  ctx,
-  service,
+  ctx: { get?: (n: string) => unknown; [key: string]: unknown },
+  service: string,
   // Typed explicitly rather than left to inference, and NOT via JSDoc: a
   // parameter with a default initializer is typed from that initializer (`{}`),
   // and in a `.ts` file `@param` / `@type` are comments, not type sources — so
@@ -100,6 +100,14 @@ export async function resolveServiceWithRetry(
   return found;
 }
 
+/** The minimal fetch response `defineDrawTool`'s `fetchImpl` needs. */
+type DrawFetchResponse = {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+};
+
 /**
  * Register the `sensenova_draw_image` agent tool (ARCHITECTURE.md §5.4,
  * route B). Opt-in (`drawEnabled`, default off) and doubly degraded — a Host
@@ -113,7 +121,7 @@ export async function resolveServiceWithRetry(
  * @param {Function} side.drawFetch - draw request fetch (stubbed in tests).
  * @returns {Promise<void>}
  */
-export async function registerDrawTool(ctx, wiring, side) {
+export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: any, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
   const { settings, configError, providerState, catalogStore, resolveApiKey, publisher, drawStore } = wiring;
   const { loadToolsModule, drawFetch } = side;
   if (configError !== null) return;
@@ -134,7 +142,8 @@ export async function registerDrawTool(ctx, wiring, side) {
   let defineTool;
   try {
     const mod = await Promise.resolve(loadToolsModule());
-    defineTool = mod?.defineTool ?? mod?.default?.defineTool ?? null;
+    defineTool = (mod as { defineTool?: (definition: object) => unknown; default?: { defineTool?: (definition: object) => unknown } })?.defineTool
+      ?? (mod as { default?: { defineTool?: (definition: object) => unknown } })?.default?.defineTool ?? null;
   } catch {
     // No tools peer on this Host: the draw tool stays absent, nothing logs.
     return;
@@ -192,7 +201,19 @@ export async function registerDrawTool(ctx, wiring, side) {
  * @param {object} wiring.raccoonPublisher - the Raccoon publisher.
  * @returns {Promise<void>} the fire-and-forget seed.
  */
-export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublisher }) {
+export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublisher }: {
+  raccoonStore: {
+    resolve(): Promise<{ credential: { accessToken?: unknown; officeIdentity?: unknown } | null }>;
+    isExpired(): Promise<boolean>;
+    refresh(): Promise<unknown>;
+  };
+  raccoonSwitch: { enabled(): Promise<boolean | null>; enabledIds(): Promise<string[] | null> };
+  raccoonPublisher: {
+    isDisposed(): boolean;
+    publish(rows: unknown, officeIdentity: unknown): Promise<unknown>;
+    state: { registered: boolean };
+  };
+}) {
   // The bounded retry window, via the shared `retryBounded` loop. The two
   // "late to mount" failures this guards against are the credentials service
   // registering AFTER this plugin, and the `llm` registration service
@@ -238,8 +259,7 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
           if (live?.accessToken) {
             const catalog = await fetchRaccoonCatalog(live).catch(() => null);
             if (catalog !== null && catalog.length > 0) rows = catalog;
-          }
-          // The seed honours the panel's pushed-model curation too: a restart
+          }          // The seed honours the panel's pushed-model curation too: a restart
           // must not widen the offer back to the whole roster behind the tab's
           // back (the switch/login/models handlers all publish filtered).
           const curated = await raccoonSwitch.enabledIds().catch(() => null);
@@ -277,7 +297,7 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
  *   (`loadToolsModule`, `drawFetch`).
  * @returns {void} — seed and draw are fire-and-forget.
  */
-export function startSideEffects(ctx, wiring, side) {
+export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: any, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
   const { publisher, catalogStore, settings, visionPublish } = wiring;
 
   // Seed the registration from the persisted catalog so a restarted Host
@@ -330,14 +350,14 @@ export function startSideEffects(ctx, wiring, side) {
         try {
           const view = settingsService.describe?.({ redactSecrets: true });
           const rows = Array.isArray(view) ? view : view?.entries ?? [];
-          return rows.find((candidate) => candidate?.ns === name) ?? null;
+          return rows.find((candidate: { ns?: unknown } | null | undefined) => candidate?.ns === name) ?? null;
         } catch {
           return null;
         }
       };
       let publishing = false;
       let lastPublishedIds = settings.imageModelIds.slice();
-      visionPublish.current = async (visionEntries, ids) => {
+      visionPublish.current = async (visionEntries: unknown, ids: string[]) => {
         if (settings.writeImageModelIds !== true) return;
         if (publishing) return;
         if (JSON.stringify(lastPublishedIds) === JSON.stringify(ids)) return;
@@ -381,7 +401,7 @@ export function startSideEffects(ctx, wiring, side) {
  * @param {Function[]} offs - the unregister callbacks from {@link registerRoutes}.
  * @returns {void}
  */
-export function teardown(wiring, offs) {
+export function teardown(wiring: any, offs: Function[]) {
   const { publisher, releaseProvider, raccoonPublisher } = wiring;
   // Before anything else: a publish still in flight (the mount seed's, or a
   // poll's) must not register into a Host that is letting this plugin go.
