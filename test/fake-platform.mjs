@@ -108,14 +108,34 @@ export async function openSealed(jwe) {
 export const seen = { password: null, username: null, codeChallenge: null, codeChallengeMethod: null, state: null };
 
 /**
- * The PKCE floor from RFC 7636, enforced by every real OIDC server.
+ * The PKCE bounds from RFC 7636 §4.1, enforced by every real OIDC server.
  *
  * The fake used to hand out a token without looking at `code_verifier` at all,
  * so a verifier that was too short — or absent — still produced a green
  * end-to-end run while the real platform refused the exchange. That is exactly
  * how an 11-character verifier reached a user's console.
+ *
+ * The UPPER bound matters for the same reason as the lower one, and was the
+ * half still missing: `sensenova-crypto.ts` asserts 43–128 locally, but a fake
+ * that only checks the floor cannot tell a correct 64-char verifier from a
+ * 200-char one, so a future regression that overshoots (say, a byte-count
+ * change feeding the encoder) would pass e2e and be refused by the platform.
+ * RFC 7636 §4.1 caps the verifier at 128 characters.
  */
 const PKCE_MIN_LENGTH = 43;
+const PKCE_MAX_LENGTH = 128;
+
+/**
+ * Refresh tokens the fake has issued, so `/oauth2/token` can reject an unknown
+ * one.
+ *
+ * The fake used to answer `grant_type=refresh_token` with a fresh token pair
+ * for ANY value — including a missing one. Every refresh test therefore passed
+ * against a server that would have accepted `refresh_token=garbage`, which is
+ * the one thing a refresh path exists to detect: a dead token must fail, not
+ * silently renew. Real Hydra answers `invalid_grant` for an unknown token.
+ */
+const issuedRefreshTokens = new Set();
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -207,14 +227,18 @@ const server = createServer(async (req, res) => {
       // Redeem PKCE the way Hydra does. The error payloads are the platform's
       // own words, so a failure looks like the failure a user would report.
       const verifier = params.get("code_verifier") ?? "";
-      if (verifier.length < PKCE_MIN_LENGTH) {
+      // Both RFC 7636 bounds, not just the floor: an over-long verifier is
+      // refused by the real platform too, and only checking the floor let that
+      // half of the contract go unexercised.
+      if (verifier.length < PKCE_MIN_LENGTH || verifier.length > PKCE_MAX_LENGTH) {
         return json(res, 400, {
           error: "invalid_grant",
           error_description:
             "The provided authorization grant (e.g., authorization code, resource owner " +
             "credentials) or refresh token is invalid, expired, revoked, does not match the " +
             "redirection URI used in the authorization request, or was issued to another " +
-            `client. The PKCE code verifier must be at least ${PKCE_MIN_LENGTH} characters.`
+            `client. The PKCE code verifier must be between ${PKCE_MIN_LENGTH} and ` +
+            `${PKCE_MAX_LENGTH} characters.`
         });
       }
       const digest = Buffer.from(
@@ -227,10 +251,28 @@ const server = createServer(async (req, res) => {
         });
       }
     }
+    if (grant === "refresh_token") {
+      // An unknown/absent refresh token is refused the way Hydra refuses it.
+      // Answering 200 for anything made every refresh test vacuous: the path
+      // could not distinguish a live token from a dead one.
+      const presented = params.get("refresh_token") ?? "";
+      if (presented === "" || !issuedRefreshTokens.has(presented)) {
+        return json(res, 400, {
+          error: "invalid_grant",
+          error_description: "The refresh token is invalid, expired or revoked."
+        });
+      }
+      // Rotation: the old token dies, the new one is registered. A fake that
+      // kept the old token alive would hide a store that failed to persist the
+      // rotated value — the failure the next poll would hit for real.
+      issuedRefreshTokens.delete(presented);
+    }
     if (grant === "authorization_code" || grant === "refresh_token") {
+      const refreshToken = `e2e-refresh-${log.token}`;
+      issuedRefreshTokens.add(refreshToken);
       return json(res, 200, {
         access_token: freshJwt(),
-        refresh_token: `e2e-refresh-${log.token}`,
+        refresh_token: refreshToken,
         expires_in: 10800,
         scope: "openid offline offline_access"
       });

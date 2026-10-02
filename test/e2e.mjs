@@ -457,6 +457,59 @@ try {
       JSON.stringify(res.body?.hasRefreshToken));
   }
 
+  // === the fake platform's own refusals are real =========================
+  // The harness is only as good as what it validates: every check the fake
+  // skips is a class of bug that reaches a user while e2e stays green. These
+  // drive the token endpoint DIRECTLY and require the refusals, so a future
+  // loosening of the fake fails here rather than silently weakening the suite.
+  {
+    const tokenPost = (params) => fetch(`http://127.0.0.1:${fake.PORT}/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params).toString()
+    }).then(async (response) => ({ status: response.status, body: await response.json() }));
+
+    // RFC 7636 §4.1: below 43 is refused (this is how the 11-char verifier
+    // bug reached a user, back when the fake checked nothing).
+    const tooShort = await tokenPost({
+      grant_type: "authorization_code", code: "the-code", code_verifier: "x".repeat(42)
+    });
+    check("the fake refuses a PKCE verifier below 43 chars",
+      tooShort.status === 400 && tooShort.body?.error === "invalid_grant",
+      JSON.stringify(tooShort).slice(0, 160));
+    // …and ABOVE 128, which was the half still unchecked.
+    const tooLong = await tokenPost({
+      grant_type: "authorization_code", code: "the-code", code_verifier: "x".repeat(129)
+    });
+    check("the fake refuses a PKCE verifier above 128 chars",
+      tooLong.status === 400 && tooLong.body?.error === "invalid_grant",
+      JSON.stringify(tooLong).slice(0, 160));
+    // The boundary itself must not be refused FOR LENGTH. This probe carries no
+    // matching code_challenge (the fake's `seen.codeChallenge` is from the real
+    // sign-in above), so it is expected to fail the CHALLENGE check — what
+    // matters is that the refusal is not the length one. Asserting a 200 here
+    // would be asserting the wrong gate.
+    const atMax = await tokenPost({
+      grant_type: "authorization_code", code: "the-code", code_verifier: "x".repeat(128)
+    });
+    const atMaxDescription = String(atMax.body?.error_description ?? "");
+    check("the fake does not refuse a verifier at the 128 boundary for length",
+      !atMaxDescription.includes("between 43 and 128"),
+      JSON.stringify(atMax).slice(0, 160));
+
+    // A refresh token the fake never issued must be refused. The old fake
+    // answered 200 for ANY value, so a refresh path that could not tell a live
+    // token from a dead one still looked green.
+    const bogus = await tokenPost({ grant_type: "refresh_token", refresh_token: "never-issued" });
+    check("the fake refuses an unknown refresh token",
+      bogus.status === 400 && bogus.body?.error === "invalid_grant",
+      JSON.stringify(bogus).slice(0, 160));
+    const absent = await tokenPost({ grant_type: "refresh_token" });
+    check("the fake refuses an absent refresh token",
+      absent.status === 400 && absent.body?.error === "invalid_grant",
+      JSON.stringify(absent).slice(0, 160));
+  }
+
   // === the panel reads real numbers out of a real response ===============
   {
     const res = await call("/api/dsh-connect-sensenova-token-plan/snapshot");
