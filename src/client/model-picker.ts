@@ -140,7 +140,12 @@ export function ModelPicker({ llm, onDone, tt }: {
   // while a Host-side change on an untouched picker must land.
   useEffect(() => {
     if (!touchedRef.current) setIds(hostIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deliberately keyed on `hostKey` alone. `hostIds` is a fresh array on
+    // every poll, so listing it would re-run this effect constantly and
+    // overwrite an edit in flight; `hostKey` is the stable signal that the
+    // Host's value actually moved. (An `eslint-disable` sat here until it was
+    // removed: this repo has no eslint config and no eslint dependency, so the
+    // comment suppressed a rule nothing ran while implying a lint gate exists.)
   }, [hostKey]);
 
   // The "已保存" notice ends when the picker is edited again (or the

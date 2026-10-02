@@ -846,7 +846,6 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     const junk = createFileDrawStore({ dir });
     check("a non-boolean draw enabled reads as unset", (await junk.enabled()) === null);
 
-    let threw = false;
     try {
       await store.save("yes");
       check("draw save refuses non-boolean input", false);
