@@ -457,13 +457,13 @@ function section(title) {
 
     // The credit multiplier rides in the DISPLAY NAME: pi-ai has no channel
     // for billing metadata (its `cost` is per-token USD), and the model
-    // picker renders only the name — so a priced model shows "（×0.75）",
-    // a free one "（free）", and multiplier 1 stays bare.
+    // picker renders only the name — so a priced model shows "· x0.75", and
+    // a free one "· x0.00" (the `· x` form matches WorkBuddy's selector).
     check("a priced model's name carries its multiplier suffix",
-      raccoonToDescriptor({ id: "p1", name: "P1", multiplier: 0.75 }).name === "P1（×0.75）");
-    check("a free model's name says free",
-      raccoonToDescriptor({ id: "p2", name: "P2", multiplier: 0 }).name === "P2（free）");
-    check("multiplier 1 adds no suffix", raccoonToDescriptor({ id: "p3", name: "P3", multiplier: 1 }).name === "P3");
+      raccoonToDescriptor({ id: "p1", name: "P1", multiplier: 0.75 }).name === "P1 · x0.75");
+    check("a free model's name says x0.00",
+      raccoonToDescriptor({ id: "p2", name: "P2", multiplier: 0 }).name === "P2 · x0.00");
+    check("multiplier 1 renders its own factor", raccoonToDescriptor({ id: "p3", name: "P3", multiplier: 1 }).name === "P3 · x1.00");
     check("a missing multiplier adds no suffix", raccoonToDescriptor({ id: "p4", name: "P4" }).name === "P4");
 
     // buildRaccoonDescriptors dedupes by id (first occurrence wins): a live

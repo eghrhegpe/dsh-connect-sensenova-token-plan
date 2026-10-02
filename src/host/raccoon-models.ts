@@ -111,14 +111,18 @@ export function raccoonToDescriptor(row: any, options: { officeIdentity?: string
   // does not have), so it rides in the display name — the only surface the
   // model picker renders. The panel's roster shows the same figure, so the
   // two views cannot disagree.
+  //
+  // Spelled the way WorkBuddy's own selector is (`· x0.79`): the `·` + `x`
+  // form is what users already see from the sibling plugin, so a second
+  // convention (full-width parentheses, `（free）`) would read as noise. A
+  // zero multiplier renders `· x0.00`, matching WorkBuddy's rendering of
+  // free models; an absent multiplier keeps the bare name.
   const multiplier = typeof row?.multiplier === "number" ? row.multiplier : undefined;
-  const suffix = multiplier === undefined ? ""
-    : multiplier === 0 ? "（free）"
-    : multiplier === 1 ? ""
-    : `（×${multiplier}）`;
+  const name = str(row?.name, id);
+  const displayName = multiplier === undefined ? name : `${name} · x${multiplier.toFixed(2)}`;
   return {
     id,
-    name: `${str(row?.name, id)}${suffix}`,
+    name: displayName,
     api: "openai-completions",
     provider: RACCOON_PROVIDER_ID,
     baseUrl: RACCOON_BASE_URL,
