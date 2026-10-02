@@ -97,7 +97,7 @@ export function isProfileSegment(value) {
  * reads it to choose a profile"。手设或陈旧的值会把状态写进一个"这台 Host
  * 根本不读"的 profile。
  *
- * 取到 = 调用方据此分段；取不到 = **退回今天的全局路径**，行为零漂移。
+ * 取到 = 调用方据此分段；取不到 = **退回当前的全局路径**，行为零漂移。
  *
  * @param {object} [ctx] - the Cordis context the Host handed `apply()`.
  * @returns {string|null} the profile name, or `null` when unavailable/unsafe.

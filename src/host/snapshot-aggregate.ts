@@ -94,16 +94,19 @@ async function soft(fn) {
  * A raw error message carries no intent, so the panel keys its guidance off
  * this taxonomy instead: `not_configured` (the user can fix it) and
  * `jwt_expired` (renewal already failed) pass through verbatim because the
- * panel words them differently from every other case; an auth-shaped failure
- * becomes `auth_error`; anything else is a console failure, which usually
- * self-heals on the next poll. The same mapping answers both the snapshot's
- * in-body `quotaError` and the route's `ok:false` catch — one copy, one
- * taxonomy.
+ * panel words them differently from every other case; a misconfigured row
+ * (`config`, thrown by the auth walk for a bad override or a missing key id)
+ * is reported as `config_error` so the panel says "fix the row" and never
+ * invites a sign-in; an auth-shaped failure becomes `auth_error`; anything
+ * else is a console failure, which usually self-heals on the next poll. The
+ * same mapping answers both the snapshot's in-body `quotaError` and the
+ * route's `ok:false` catch — one copy, one taxonomy.
  * @param {unknown} error - the error a fetch or parse threw.
  * @returns {string} the panel-facing code.
  */
 export function failureCode(error) {
   const code = error && typeof error === "object" ? /** @type {{code?: string}} */ (error).code : undefined;
+  if (code === CODE.CONFIG || code === CODE.CONFIG_ERROR) return CODE.CONFIG_ERROR;
   if (code === CODE.NOT_CONFIGURED || code === CODE.JWT_EXPIRED) return code;
   return isAuthFailure(error) ? CODE.AUTH_ERROR : CODE.CONSOLE_ERROR;
 }

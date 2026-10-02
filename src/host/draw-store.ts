@@ -5,9 +5,11 @@
  * Mirrors `provider-store.ts`: `drawEnabled` in `cordis.patch.yml` is a
  * DEPLOYMENT default the operator edits with a reload, but the panel needs a
  * live switch that takes effect on the next request. The switch state lives in
- * `$DSH_HOME/state/<plugin>/draw.json`, exactly like the catalog and the
- * throttle: operational state, not an operator decision baked into the patch
- * layer.
+ * `$DSH_HOME/state/<plugin>/draw.json` when no profile is named, and
+ * `$DSH_HOME/state/<profile>/<plugin>/draw.json` when the Host runs under one
+ * (`profileStateDir`) — exactly like the catalog; the throttle shares the same
+ * directory by design. Operational state, not an operator decision baked into
+ * the patch layer.
  *
  * Precedence at read time:
  *

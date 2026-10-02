@@ -67,7 +67,11 @@ export interface RaccoonWalkView {
  * @param options.fetcher - the gateway fetcher (for tests to inject a fake).
  * @param options.saveCredential - called with `{ accessToken, refreshToken, expiresAtMs?, nickname? }`; MUST persist to the credentials service. Errors become a `failed` event.
  * @param options.invalidateCache - called on successful login to drop reads taken under the previous credential.
- * @param options.onSettled - called AFTER save + invalidate, BEFORE publishing, when the scan succeeds. Intended for the route to record the outcome locally (the read model's `login` view pulls from here).
+ * @param options.onSettled - called once at the START of each scan cycle (after
+ *   the QR code is generated, before the poll loop begins), regardless of the
+ *   outcome. Kept for callers that want to reset per-scan UI state; the read
+ *   model's `login` view reads the walk's own state (`takeEvent` / `liveScan`),
+ *   not this hook, so the route registers it as a no-op.
  * @returns {{ view: RaccoonWalkView, issueScan: () => Promise<void> }}
  */
 export function createRaccoonWalk(options: {

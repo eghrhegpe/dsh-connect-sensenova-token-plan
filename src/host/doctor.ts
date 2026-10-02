@@ -5,8 +5,11 @@
  *
  * A plain reader over the plugin's own state files — it imports no Host peer,
  * so it runs on a clean checkout and answers from disk even when no Host is
- * running. It reports EFFECTIVE values ("panel-saved value beats the
- * deployment default"), never secrets.
+ * running. It reports what is ON DISK, nothing more: where a row has no state
+ * file it prints "unset (deployment default rules)" instead of guessing, and
+ * it never reads `cordis.patch.yml` — so "effective" here means "the
+ * panel-saved override, when one exists", not the merged configuration.
+ * Never secrets.
  *
  * @module dsh-connect-sensenova-token-plan/doctor
  */
@@ -44,7 +47,10 @@ export interface DoctorReport {
   dshHome: string;
   /** The plugin state directory name. */
   plugin: string;
-  /** One entry per profile found (plus a "" shared entry when the shared layout was used). */
+  /**
+   * One entry per profile found, in read order. The shared (pre-profile) layout
+   * is its own field ({@link DoctorReport.shared}), not an entry here.
+   */
   scopes: DoctorScope[];
   /** The shared (pre-profile-segment) state directory, present when in use. */
   shared: DoctorScope | null;

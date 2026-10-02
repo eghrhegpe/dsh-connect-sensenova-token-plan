@@ -5,7 +5,8 @@
  * Why a file at all: the directly-registered LLM provider needs a model list
  * before the first snapshot poll completes (and after a restart with no console
  * login), so the last catalog the API key fetched is cached under
- * `$DSH_HOME/state/<plugin>/catalog.json`. It is deliberately NOT written into
+ * `$DSH_HOME/state/<plugin>/catalog.json` (or `state/<profile>/<plugin>/` when
+ * the Host names one — see `profileStateDir`). It is deliberately NOT written into
  * the settings row (`cordis.patch.yml`): a catalog is operational state, not an
  * operator decision, and writing volatile arrays into the patch layer is the
  * shape the WorkBuddy catalog drift warned about.
@@ -82,7 +83,14 @@ export function normalizeEntries(raw) {
 }
 
 /**
- * Parse a persisted catalog, or `null` when it is absent, stale, or foreign.
+ * Parse a persisted catalog, or `null` when it is absent, unusable, or foreign.
+ *
+ * Only two things are refused here: a foreign shape (`version` mismatch) and a
+ * record that never carried a fetch time. There is deliberately NO staleness
+ * test — the catalog is cache-shaped, and "how old is too old" is the caller's
+ * call (the snapshot route refreshes it on its own cadence and replaces the
+ * file on write), so refusing a merely old catalog would only force a re-fetch
+ * that the next poll does anyway.
  *
  * The safe direction for a cache is "absent": the next snapshot re-fetches.
  * @param {unknown} raw - the parsed file contents.

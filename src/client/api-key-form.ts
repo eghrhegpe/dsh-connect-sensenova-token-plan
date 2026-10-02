@@ -80,10 +80,11 @@ export function ApiKeyForm({ llm, onDone, tt }: {
   // Only a REFERENCE the panel stored can be forgotten: an environment
   // value has no panel-saved copy to clear, so the button would mislead.
   const canForget = llm?.hasApiKey === true && llm?.keySource === "credentials";
-  // A configured key's editor folds into one `<details>` row: the status
-  // block is what a working setup needs daily, while the paste-a-key form
-  // is a maintenance action — one click away, not on screen. Without a
-  // key the editor is the entry point and shows open.
+  // A configured key's editor sits inside the SectionCard's single fold: the
+  // status block is what a working setup needs daily, while the paste-a-key
+  // form is a maintenance action — one click away, not on screen. The card IS
+  // the collapse; there is no inner `<details>` (see the note below). Without
+  // a key the editor is the entry point and shows open.
   const keyEditor = h(
     "div",
     null,

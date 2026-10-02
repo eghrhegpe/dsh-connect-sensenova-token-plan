@@ -9,13 +9,14 @@
  * readable orchestrator:
  *
  *   - `host-config.ts`    config contract + the `isAdmitted` trust fence
- *   - `routes.ts`         the six HTTP route handlers (peer-free, wiring-injected)
+ *   - `routes.ts`         the seven HTTP route handlers (peer-free, wiring-injected)
+ *                         — six Token Plan routes plus the Raccoon route
  *   - `lifecycle.ts`      mount seed / draw tool / vision step two / teardown
  *   - `console-client.ts` console/catalog fetch with cache + single-flight
  *   - `parsers.ts`        response normalization + shape-drift detection
  *   - `snapshot-aggregate.ts` the snapshot body's data aggregation
  *   - `provider-publish.ts`  the provider registration state machine
- *   - `state-store.ts`    atomic state-file primitives for the three stores
+ *   - `state-store.ts`    atomic state-file primitives for the four stores
  *   - `trace.ts`          login-trace persistence (already sanitized upstream)
  *   - `util.ts`           the small `str`/`num`/`obj` readers
  *
@@ -82,7 +83,8 @@ export const credentialKey = (scope, id) => `${scope}/${id}`;
 export { catalogSignature } from "./provider-publish.ts";
 
 /**
- * Host body: assemble the wiring, register the six routes, run the mount
+ * Host body: assemble the wiring, register the seven routes (six Token Plan
+ * plus the Raccoon route), run the mount
  * side effects, and hang the unmount effect. The route handlers live in
  * `routes.ts`, the side effects in `lifecycle.ts` — this function only
  * decides what they may touch.

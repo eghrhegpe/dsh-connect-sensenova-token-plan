@@ -10,8 +10,10 @@
  *   - the draw tool registration (opt-in `drawEnabled`, doubly degraded);
  *   - vision step two: the settings-row writer filled for the snapshot route.
  *
- * and {@link teardown} for the unmount order that PITFALLS §18 pins
- * (`dispose → release → off×5` — it must NOT be simplified).
+ * and {@link teardown} for the unmount order that PITFALLS §18 pins: dispose
+ * both publishers, release both pairs, then run the route `off` callbacks —
+ * the Raccoon publisher is disposed in the order it registered, so a late
+ * publish cannot register into a withdrawing Host. It must NOT be simplified.
  *
  * Peer-free discipline: no Host peer is imported here. The only lazy peer
  * loads (the adapter / tools modules) are injected from `apply` via `deps`.
@@ -166,7 +168,7 @@ export async function registerDrawTool(ctx, wiring, side) {
 
 /**
  * The Raccoon mount seed (ROADMAP §6.1 second upstream) — the fire-and-forget
- * boot IIFE that `apply()` used to inline. Offered as its own export so the
+ * boot of the Raccoon half, exported on its own so the
  * orchestrator in `index.ts` stays a thin assembly: the seed is a side effect
  * (it touches the credential store, the switch, the gateway, and the
  * publisher), not part of "what a route may touch", so it belongs with the
@@ -282,9 +284,13 @@ export function startSideEffects(ctx, wiring, side) {
   );
 
   // Draw absorption: opt-in, doubly degraded (no tools service / no peer).
-  // The effective value is panel-saved > config default (draw-storets),
-  // read at mount time — the actual tool mount/unmount only happens on the
-  // next Host start, since the tools registry has no unregister call.
+  // The effective value is panel-saved > config default (`draw-store.ts`),
+  // read at mount time — and when it is already on, the tool is registered
+  // RIGHT HERE during this mount (see `registerDrawTool`, which awaits the
+  // panel value and calls `tools.register`). The tools registry has no
+  // unregister call, so an off→on flip needs the next Host start; an on→off
+  // flip just means this mount did not register it (the already-registered
+  // tool lives until the Host restarts).
   void registerDrawTool(ctx, wiring, side);
 
   // ------------------------------------------------------------------

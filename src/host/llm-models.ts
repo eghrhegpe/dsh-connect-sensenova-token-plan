@@ -180,19 +180,19 @@ export function isChatModel(entry) {
  * DSH's picker offers levels from `getSupportedThinkingLevels(model)`
  * (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`), and pi-ai's
  * openai-completions dispatch sends `reasoning_effort = map[level] ?? level`.
- * SenseNova's OpenAI-compat gateway accepts `none`/`low`/`medium`/`high`/
- * `xhigh` on every chat model, rejects `off` (the OpenAI spelling) and
- * `minimal`, and rejects `max` everywhere except glm-5.2 (all probed
- * 2026-09-29; the platform's own error lists `low, medium, high, xhigh,
- * none`). So:
+ * SenseNova's OpenAI-compat gateway accepts `none`/`low`/`medium`/`high` on
+ * every chat model, rejects `off` (the OpenAI spelling) and `minimal`, and
+ * rejects `max` everywhere except glm-5.2; `xhigh` is NOT universal — only
+ * deepseek-v4-flash took it in the probe (all probed 2026-09-29; the platform's
+ * own error lists `low, medium, high, xhigh, none`). So:
  *
  * - `off: "none"` — the picker's "关闭" must send `none`, not `off`;
- *   - `low`/`medium` — per-model, gated on the PROBED_EFFORT table. The
- *     2026-09-29 probe round exercised `none`/`high`/`max`/`xhigh` only;
- *     these two levels have not yet been probed, so they default closed
- *     (the roster line must not quote a level the platform may reject).
- *     The live-contract replay (`test/live-contract.mjs`) probes them and
- *     flips the table cells once a model's 200 is recorded.
+ * - `low`/`medium`/`xhigh` — per-model, gated on the PROBED_EFFORT table below.
+ *   The 2026-09-29 probe round exercised `none`/`high`/`max`/`xhigh` AND
+ *   `low`/`medium`; every `true` cell is a recorded 200, and a `false` cell
+ *   means either a 400 or an inconclusive 429 — the roster line must not quote
+ *   a level the platform may reject, and the live-contract replay
+ *   (`test/live-contract.mjs`) flips a cell once a 200 is recorded.
  * - `max` — `"max"` on glm-5.2 only, `null` elsewhere.
  *
  * A value of `null` means "the picker must not offer this level"; a string is
@@ -202,20 +202,24 @@ export function isChatModel(entry) {
  */
 /**
  * Per-model 思考档位 probe table, mirrored from `test/baselines/sensenova-contract.json`
- * §reasoningEffort (frozen 2026-09-29). INDEFINITE cells come from 429 rpm windows, not
- * 400s, so they stay closed — see the baseline driftLog for the full probe narrative.
- * A model absent here keeps only `off`/`high` open; a new model is added WITH its
- * 200-probe evidence, never assumed.
+ * §reasoningEffort (frozen 2026-09-29).
+ *
+ * Each cell is a boolean: `true` = a 200 was recorded for this model/level,
+ * `false` = closed. A cell left closed because the probe ran into a 429 rpm
+ * window (not a 400) is "not measured", which is NOT "unsupported" — the
+ * live-contract replay re-runs it; a model absent from the table keeps only
+ * `off`/`high` open, and a new model is added WITH its 200-probe evidence,
+ * never assumed.
  */
 const PROBED_EFFORT = Object.freeze({
   "deepseek-v4-flash": { low: true, medium: true, high: true, xhigh: true, max: false },
   "glm-5.2":           { low: true, medium: true, high: true, xhigh: false, max: true },
   "sensenova-6.8-flash-lite": { low: true, medium: true, high: true, xhigh: false, max: false },
   "deepseek-v4-pro":   { low: false, medium: false, high: true, xhigh: false, max: false },
-  // deepseek-flash: medium probed 200; low is INDEFINITE (429, re-run
+  // deepseek-flash: medium probed 200; low was inconclusive (429, re-run
   // pending) so it stays closed — "not measured" is not "supported".
   "deepseek-flash":    { low: false, medium: true, high: true, xhigh: false, max: false },
-  // kimi-k3: medium probed 200; low is INDEFINITE (429, re-run pending).
+  // kimi-k3: medium probed 200; low was inconclusive (429, re-run pending).
   "kimi-k3":           { low: false, medium: true, high: true, xhigh: false, max: false }
 });
 

@@ -36,8 +36,9 @@ export function parseGrant(record) {
   return {
     accessToken,
     refreshToken: str(payload.refreshToken, ""),
-    // Prefer the claim we can read off the token itself; fall back to what the
-    // token endpoint reported when the claim is unreadable.
+    // Prefer the value the token ENDPOINT reported (`issuedAt + expiresIn` —
+    // the authority for when this grant dies) and fall back to the `exp` claim
+    // read off the token itself only when the stored value is unreadable.
     expiresAt: numOrNull(payload.expiresAt) ?? readJwtExpiry(accessToken)
   };
 }

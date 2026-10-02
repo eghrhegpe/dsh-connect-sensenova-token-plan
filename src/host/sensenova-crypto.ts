@@ -18,15 +18,16 @@ import type { JwksOptions } from "./types.ts";
 /**
  * Base64url-encode bytes, unpadded, as JOSE requires.
  *
- * The `ArrayBuffer.isView` branch is load-bearing and exists because of a bug
- * that cost a working login: `Buffer.from(new Uint32Array(8))` returns EIGHT
- * bytes, not thirty-two. Node encodes a non-Uint8 TypedArray as if each ELEMENT
- * were one byte, silently — no throw, no warning, just a quarter of the entropy
- * expected. A PKCE verifier built that way came out 11 characters long, and the
- * token endpoint's only complaint was an opaque `invalid_grant` carrying the
- * hint "The PKCE code verifier must be at least 43 characters", with the real
- * cause nowhere in it. Encoding from the view's own buffer keeps every element
- * width honest.
+ * Only `Uint8Array` and `ArrayBuffer` are accepted; anything else is REJECTED
+ * with a `config` error. That guard exists because of a bug that cost a working
+ * login: `Buffer.from(new Uint32Array(8))` returns EIGHT bytes, not thirty-two.
+ * Node encodes a non-Uint8 TypedArray as if each ELEMENT were one byte,
+ * silently — no throw, no warning, just a quarter of the entropy expected. A
+ * PKCE verifier built that way came out 11 characters long, and the token
+ * endpoint's only complaint was an opaque `invalid_grant` carrying the hint
+ * "The PKCE code verifier must be at least 43 characters", with the real cause
+ * nowhere in it. Rather than compensate for Node's per-element encoding, this
+ * module refuses the shape outright so the mistake cannot reach the wire.
  * @param {Uint8Array|ArrayBuffer} bytes - the bytes to encode.
  * @returns {string} the unpadded base64url text.
  */

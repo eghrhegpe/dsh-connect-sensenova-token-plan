@@ -476,6 +476,12 @@ export const RACCOON_FALLBACK_MODELS = Object.freeze([
  * The ONLY wire channel that works is `extra_body.thinking = { type }`;
  * `reasoning_effort` is schema-accepted but has no observable effect, and a
  * top-level `thinking` is silently ignored by the gateway.
+ *
+ * v1 does not wire this into the adapter: it registers `reasoning: false`
+ * (see `raccoon-models.ts`), so the encoder has no production caller and is
+ * exercised by the test suite only. It stays here as a pinned wire fact so the
+ * day the adapter learns to carry `extra_body`, the spelling does not have to
+ * be re-probed.
  * @param {string|undefined} effort - `undefined` = send nothing (server default
  *   = thinking on); `"off"` = disabled; anything else = enabled.
  * @returns {object|undefined} the `extra_body` value, or `undefined`.

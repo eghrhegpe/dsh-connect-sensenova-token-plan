@@ -10,7 +10,7 @@
  * independent.
  *
  * What this module owns is the LIFECYCLE, which is the part that needs hooks:
- * the poll loop and its two cadences, the five callbacks that post to the
+ * the poll loop and its two cadences, the four callbacks that post to the
  * route, the unmount cleanup, and the state lift into the page header. What
  * the reader SEES lives in `raccoon-card.ts` / `raccoon-roster.ts` /
  * `model-row.ts` — all hook-free, so the render suite mounts the very trees

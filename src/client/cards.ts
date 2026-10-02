@@ -21,7 +21,12 @@ import type { PoolData, PoolsData, QuotaWindowData, TrendData } from "./wire.ts"
  */
 type QuotaWindow = QuotaWindowData;
 
-/** The sidebar row glyph: the shell owns the button, this draws the coin. */
+/**
+ * The "积分币" coin glyph the plugin card's `icon.svg` derives from, drawn here
+ * so the shape lives in one place. The card itself is rendered by the Plugins
+ * page (`plugins.bundle.config` slot); there is no sidebar row this could be a
+ * glyph for.
+ */
 export function PanelIcon({ size }: { size?: number }): unknown {
   return h(
     "svg",

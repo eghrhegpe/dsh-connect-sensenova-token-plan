@@ -142,9 +142,10 @@ export interface QuotaErrorData {
 /**
  * The whole snapshot body `buildSnapshotBody` returns, as the panel reads it.
  *
- * `pollSeconds`/`cacheSeconds` are quoted into the header and footnote;
- * `auth` drives the self-renew chip; `pools`/`trend` are the two content
- * sections; `llm` is the setup tab; the rest are banner lines.
+ * `pollSeconds` drives the panel's own poll cadence (it is consumed, not
+ * rendered); `cacheSeconds` is quoted into the footnote; `auth` drives the
+ * self-renew chip; `pools`/`trend` are the two content sections; `llm` is the
+ * setup tab; the rest are banner lines.
  */
 export interface SnapshotData {
   ok?: boolean;

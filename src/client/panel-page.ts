@@ -1,6 +1,7 @@
 /**
- * The `main`-slot page: polling, the decision gate, and the whole panel
- * layout.
+ * The `plugins.bundle.config` card: polling, the decision gate, and the whole
+ * panel layout — rendered inside the Plugins page, always expanded (there is
+ * no sidebar entry and no standalone `main` page).
  */
 import {
   AccountForm
@@ -449,7 +450,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
  * reports its OWN freshness + refresher through `raccoonStatus`, so the header
  * "刷新" finally refreshes it too (before, `load()` only re-fetched the quota
  * snapshot and the raccoon poll was separate — the button silently skipped the
- * third tab). Until the raccoon tab mounts, `raccoonStatus.current` is null and
+ * third tab). Until the raccoon tab mounts, `raccoonStatus` is null and
  * nothing raccoon-specific renders.
  *
  * Hook-free on purpose: the render suite mounts it directly to pin the

@@ -69,7 +69,8 @@ export function createStoreContext({
   // durable, so a default that writes it makes every store in the process
   // share one throttle — in a test suite that means one case's lockout
   // refuses the next case's login, which reads as a bug in the code under
-  // test. The Host passes the file store explicitly; see indexts.
+  // test. The Host passes the file store explicitly (see `index.ts`, where the
+  // wiring is assembled), so a production store shares one throttle record.
   const throttleStore = injectedThrottleStore ?? createMemoryThrottleStore(now);
   /**
    * The in-memory fallback used while no credentials service is reachable. A
@@ -102,7 +103,8 @@ export function createStoreContext({
    * service may register after this plugin loads, and a flag frozen at mount
    * would then claim "no credentials service" forever while the store quietly
    * exists on disk. Accepts the service itself (tests) or a resolver function
-   * (indexts) and normalises anything absent to `null`.
+   * (production, where the service is looked up per use) and normalises
+   * anything absent to `null`.
    */
   const resolveService = () => {
     const value = typeof credentials === "function" ? credentials() : credentials;

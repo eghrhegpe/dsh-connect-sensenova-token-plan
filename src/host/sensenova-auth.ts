@@ -36,7 +36,7 @@ import { CODE, IAM_REASON_CODES } from "./codes.ts";
 import { b64url, pkce, sealPassword, createJwksCache } from "./sensenova-crypto.ts";
 import { str, obj, verbatim, pluginError } from "./util.ts";
 
-// The JWE/PKCE/JWKS primitives now live in sensenova-crypto.js, so this module
+// The JWE/PKCE/JWKS primitives now live in sensenova-crypto.ts, so this module
 // carries no module-level crypto state (no shared JWKS cache, no global key id).
 // Re-export the JWT read helpers the store still imports from here.
 export { readJwtClaims, readJwtExpiry } from "./sensenova-crypto.ts";
@@ -200,8 +200,9 @@ const TRACE_MAX_HOPS = 12;
 
 /**
  * Strip every secret from a URL for the record: query parameters that carry
- * one-time credentials are removed entirely — their presence is logged, their
- * value is not.
+ * one-time credentials have their VALUE replaced with `[REDACTED]` (the
+ * parameter name stays, so the record still shows which one the platform
+ * redirected with) — their presence is logged, their value is not.
  * @param {string} url - any URL.
  * @returns {string} the redacted URL, or the input when it does not parse.
  */
@@ -359,13 +360,10 @@ async function httpGet(url: string, init: RequestInit & { timeoutMs?: number } =
 }
 
 /**
- * Encrypt the password into a compact JWE the IAM endpoint accepts.
- *
- * The plaintext never leaves this function: it is sealed to the platform's
- * RSA public key with RSA-OAEP, then the content is wrapped with A256GCM. The
- * result is the 5-segment compact serialization.
- *
  * Dig a query parameter out of a URL, decoded.
+ *
+ * (The password-sealing JWE lives in `sensenova-crypto.ts` — `sealPassword` —
+ * with the PKCE and JWKS primitives this module no longer carries.)
  * @param {string} url - any URL.
  * @param {string} name - the parameter to read.
  * @returns {string} the value, or `""` when absent.

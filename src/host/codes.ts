@@ -1,10 +1,14 @@
 /**
  * One taxonomy for every failure this plugin reports.
  *
- * A code is declared ONCE here; the three consumers read it, not their own
- * copy: `sensenova-auth.ts` PRODUCES them (its `IAM_REASON_CODES` table),
- * `token-store.ts` names the credential-shaped ones (`CREDENTIAL_REFUSALS`),
- * and `index.ts` names the "we never got a token" ones (`isAuthFailure`).
+ * A code is declared ONCE here; every consumer reads THIS table rather than
+ * carrying its own copy:
+ *   - `sensenova-auth.ts` throws them — it folds the platform's own machine
+ *     reasons onto this table via {@link IAM_REASON_CODES}, declared here;
+ *   - `token-store.ts` decides which ones are credential-shaped (parked rather
+ *     than timed) by reading {@link CREDENTIAL_REFUSALS}, declared here;
+ *   - `snapshot-aggregate.ts` decides which ones mean "we never got a token"
+ *     by reading {@link isAuthFailure}, declared here.
  * Adding a code means one new entry — credential-refusal and auth-failure are
  * both decided in this one place, so a new platform reason can no longer be
  * produced but not recognised (the three-list split used to do exactly that,
@@ -20,14 +24,20 @@
  * what tests and the client branch on, so they are not free to rename.
  */
 export const CODE = Object.freeze({
-  /** A malformed endpoint override. Surfaced as `config_error`, never retried. */
+  /**
+   * A malformed endpoint override (a bad override URL, a missing JWKS key id,
+   * a non-`Uint8Array` handed to `b64url`). Its wire value is `"config"`; the
+   * snapshot route reports it to the panel as {@link CODE.CONFIG_ERROR}
+   * (`"config_error"`) so the panel says "fix the row" rather than inviting a
+   * sign-in. Never retried.
+   */
   CONFIG: "config",
   /** The password-sealing key set could not be read. */
   JWKS: "jwks",
   /** The OIDC walk ended without a challenge or a code. */
   LOGIN_FLOW: "login_flow",
 
-  /** The submitted account is empty. The user's to fix, not the clock's. */
+  /** The submitted account is empty. The user has to fix it; waiting will not. */
   MISSING_CREDENTIALS: "missing_credentials",
   /** No account has ever been entered. Not a refusal: nothing was attempted. */
   NOT_CONFIGURED: "not_configured",
@@ -52,13 +62,13 @@ export const CODE = Object.freeze({
   /** A stored grant carries no refresh token to renew with. */
   NO_REFRESH_TOKEN: "no_refresh_token",
 
-  /** The console refused the token twice in a row (indexts). */
+  /** The console refused the token twice in a row (a renewal already failed). */
   JWT_EXPIRED: "jwt_expired",
-  /** No token could be obtained (indexts). */
+  /** No token could be obtained: an auth-shaped failure folded into one code. */
   AUTH_ERROR: "auth_error",
-  /** The console call itself failed (indexts). */
+  /** The console call itself failed (usually transient; the next poll clears it). */
   CONSOLE_ERROR: "console_error",
-  /** The plugin row is misconfigured (indexts). */
+  /** The plugin row is misconfigured (the panel-facing spelling of {@link CODE.CONFIG}). */
   CONFIG_ERROR: "config_error"
 });
 
@@ -117,9 +127,15 @@ export const CREDENTIAL_REFUSALS: ReadonlySet<string> = Object.freeze(new Set([
  *
  * The panel says something different for these than for a console failure:
  * one is fixed by signing in, the other usually clears on the next poll. This
- * set is what keeps that distinction honest — a code the auth half can produce
- * MUST be in here, or it will be reported as `console_error` and the user will
- * be told the wrong thing.
+ * set is what keeps that distinction honest — every platform reason this table
+ * folds ({@link IAM_REASON_CODES}) and every parked refusal
+ * ({@link CREDENTIAL_REFUSALS}) MUST be in here, or one of them would be
+ * reported as `console_error` and the user would be told the wrong thing.
+ *
+ * {@link CODE.CONFIG} is deliberately absent. It is thrown from inside the auth
+ * walk, but it names a MISCONFIGURED row (an operator fix), not a failed token
+ * acquisition — so `failureCode` maps it to {@link CODE.CONFIG_ERROR} and the
+ * panel says "fix the row" instead of inviting a sign-in.
  * @type {ReadonlySet<string>}
  */
 export const AUTH_FAILURE_CODES: ReadonlySet<string> = Object.freeze(new Set([

@@ -35,6 +35,12 @@ export const inject = ["webServer"];
  * pins both against this object. The `auth` sub-object lists the operator-facing
  * login-flow overrides (their patch.yml entries are commented by default, which is
  * why they default to empty/zero and mean "use the platform default").
+ *
+ * ⚠️ That `auth` block is only the DEFAULTS SHAPE — do NOT copy it into
+ * `cordis.patch.yml` as a nested block. The patch row must spell these keys at
+ * the TOP LEVEL, and {@link resolveAuthOverrides} throws on a nested `auth`
+ * block: the loader accepts one, this resolver drops it, and the panel would
+ * keep talking to the real platform (redline 3).
  */
 export const CONFIG_DEFAULTS = Object.freeze({
   consoleBase: "https://platform.sensenova.cn",

@@ -3,7 +3,11 @@
 /** Dictionary namespace this plugin owns. */
 export const NS = "dsh-connect-sensenova-token-plan";
 
-/** Shared id: the sidebar row id and the `main` slot key are the same string. */
+/**
+ * The plugin slug. Carried by the coin glyph's `data-dsh-panel-entry` marker
+ * (see `cards.ts`) so the card's icon stays tied to this plugin. It is NOT a
+ * sidebar row id or a slot key — the card registers under `key: NS`.
+ */
 export const PANEL_ID = "dsh-connect-sensenova-token-plan";
 
 /** The Host snapshot route. Relative, same-origin. */

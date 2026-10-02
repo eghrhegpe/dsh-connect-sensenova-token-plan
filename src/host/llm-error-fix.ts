@@ -24,9 +24,9 @@
  *   - 只重写 `finish` chunk 的 `failure.code`，保留原始 `message` 以便排查，
  *     不触碰任何正常数据流，幂等（已是 RATE_LIMIT / 非 QUOTA 原样放行）。
  *
- * 阅读顺序：本文件自下而上是「判据词表 → 两个纯判据 → 决策组合 → 流出口
- * 改写」。先看底部的 `reclassifyStream` / `reclassifyFinish`（对外契约），
- * 再顺着往下看它们各自依赖的判据。
+ * 阅读顺序：本文件自上而下是「判据词表 → 两个纯判据 → 决策组合 → 流出口
+ * 改写」。对外契约在底部（`reclassifyStream` / `reclassifyFinish`），想找它
+ * 依赖了哪些判据，就从底部逆着依赖链往上读。
  *
  * @module dsh-connect-sensenova-token-plan/llm-error-fix
  */
