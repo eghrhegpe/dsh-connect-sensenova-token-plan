@@ -177,11 +177,18 @@ export function isCredentialRefusal(code) {
 /**
  * Union of the wire values of {@link CODE} (e.g. `"config"`, `"login_rejected"`).
  *
- * Any `@ts-check` module that annotates a field against this gets a compile
- * error when it misspells a code — the exact class of silent failure the three
- * hand-copied lists used to allow.
- * @typedef {typeof CODE[keyof typeof CODE]} CodeValue
+ * Any module that annotates a field against this gets a compile error when it
+ * misspells a code — the exact class of silent failure the three hand-copied
+ * lists used to allow. This is a real `type` export, not the JSDoc `@typedef`
+ * that used to sit here: in a `.ts` file JSDoc is a comment, not a type source
+ * (the same trap `tsconfig.json` warns about), so the old spelling produced no
+ * narrowing at all and a typo compiled clean.
+ *
+ * `types.ts` re-exports this rather than redeclaring it, so there is exactly
+ * one definition of "a valid code" and `pluginError`'s parameter is checked
+ * against it.
  */
+export type CodeValue = typeof CODE[keyof typeof CODE];
 
 /**
  * Failures that no sign-in can fix — the ones the panel must not answer with

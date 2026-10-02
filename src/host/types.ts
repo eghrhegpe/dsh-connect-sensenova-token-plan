@@ -10,8 +10,16 @@
  * @module dsh-connect-sensenova-token-plan/types
  */
 
-/** A failure code this plugin can produce or carry (a `CODE` wire value). */
-export type CodeValue = string;
+/**
+ * A failure code this plugin can produce or carry (a `CODE` wire value).
+ *
+ * Imported from `codes.ts`, which owns the taxonomy, and re-exported here for
+ * the consumers that already reach for it through this module — rather than
+ * restated as `string`: the loose alias meant a misspelled code compiled clean,
+ * so the "one taxonomy" claim held for the values but not for the type.
+ */
+export type { CodeValue } from "./codes.ts";
+import type { CodeValue } from "./codes.ts";
 
 /**
  * The dependency bag injected into the Host modules. Every field is optional:

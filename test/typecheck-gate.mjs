@@ -24,7 +24,7 @@
  * exclude to an include line here). A green gate means BOTH are clean.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -71,6 +71,55 @@ for (const config of CONFIGS) {
   } else if (tsc.status !== 0) {
     console.error(`FAIL typecheck (${config}) — tsc exited ${tsc.status} (see the errors above)`);
     failed = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// NEGATIVE CONTROL: the taxonomy's headline promise is that a MISSPELLED code
+// is a compile error, not a silent string. `CodeValue` used to be redeclared as
+// `string` in types.ts and `pluginError` took `string`, so the union existed
+// but nothing consumed it and `pluginError("not_a_code", …)` compiled clean —
+// the exact silent failure `codes.ts` says it exists to prevent. A green tsc
+// over src/ cannot prove a NEGATIVE, so prove it here: compile a scratch file
+// that misspells a code and require tsc to REJECT it. If someone loosens the
+// type back to `string`, this goes red.
+//
+// Deliberately runs even when a config above already failed: it reports its own
+// verdict independently, so one run tells you whether the type AND the gate are
+// both still doing their jobs.
+{
+  const probe = join(root, "src", "host", "__codevalue-negative-control.ts");
+  const probeSource =
+    `import { pluginError } from "./util.ts";\n` +
+    `// The typo MUST be rejected; see the negative control in test/typecheck-gate.mjs.\n` +
+    `export const typo = pluginError("not_a_real_code_typo", "must not compile");\n`;
+  try {
+    writeFileSync(probe, probeSource, "utf8");
+    const tsc = spawnSync(process.execPath, [TSC, "--noEmit", "--strictNullChecks", "--module", "nodenext",
+      "--moduleResolution", "nodenext", "--allowImportingTsExtensions", "--target", "es2023", probe], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 120_000,
+    });
+    const out = `${tsc.stdout ?? ""}${tsc.stderr ?? ""}`;
+    // Expect a REJECTION that names the PROBE FILE. Matching the typo string or
+    // "CodeValue" alone is not enough: an unrelated error elsewhere (say,
+    // `error.code = code` rejecting a loosened parameter) would satisfy that
+    // while the probe itself compiled clean — passing for the wrong reason.
+    const probeName = "__codevalue-negative-control.ts";
+    const rejected = tsc.status !== 0 && out.includes(probeName) && /not_a_real_code_typo|CodeValue/.test(out);
+    if (rejected) {
+      process.stdout.write(`[typecheck-gate] negative control ok — a misspelled code is rejected (${out.trim().split("\n")[0]})\n`);
+    } else {
+      console.error(
+        `[typecheck-gate] FAIL negative control — a misspelled code compiled CLEAN.\n` +
+        `[typecheck-gate]   \`pluginError\` no longer takes CodeValue (the CODE union), so the\n` +
+        `[typecheck-gate]   taxonomy's compile-time guarantee is gone. tsc said: ${out.trim() || "(nothing)"}\n`
+      );
+      failed = true;
+    }
+  } finally {
+    rmSync(probe, { force: true });
   }
 }
 

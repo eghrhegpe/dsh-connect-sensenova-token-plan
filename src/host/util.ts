@@ -8,6 +8,7 @@
  */
 
 import type { PluginError } from "./types.ts";
+import type { CodeValue } from "./codes.ts";
 
 /**
  * The error `pluginError` actually produces at runtime: an `Error` with a
@@ -201,7 +202,7 @@ export function pickDefined<T extends Record<string, unknown>>(fields: T): Parti
  * @param {{ retryAfterMs?: number, detail?: string }} [extra] - optional structured fields.
  * @returns {PluginError}
  */
-export function pluginError(code: string, message: string, extra: { retryAfterMs?: number; detail?: string } = {}): PluginError {
+export function pluginError(code: CodeValue, message: string, extra: { retryAfterMs?: number; detail?: string } = {}): PluginError {
   const error = new Error(message) as PluginError;
   error.code = code;
   if (extra.retryAfterMs !== undefined) error.retryAfterMs = extra.retryAfterMs;
