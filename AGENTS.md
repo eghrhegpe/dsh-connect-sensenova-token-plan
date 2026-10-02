@@ -48,7 +48,8 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 ```
 
 - **e2e 已在 `npm test` 门禁里**（经 `test/e2e-gate.mjs`），但只在这台机器装了 dsh CLI 时才真跑；
-  CI 里它是独立 best-effort job。手工排查用 `node test/e2e.mjs` 单跑即可。
+  CI 里它是独立硬门禁（2026-10-02 起：`ci.yml` 的 e2e job 也跑 `e2e-gate.mjs` 并去掉了
+  `continue-on-error`——缺 dsh CLI 时它 SKIP 退出 0，有则真跑且红即拦）。手工排查用 `node test/e2e.mjs` 单跑即可。
 - **e2e 只跑一次**。它要启动真实 Host 进程；需要看两段输出就跑一次落盘再读文件，
   不要把同一条命令串两遍。
 - **peer 套件红 ≠ 回归（只对本机成立）**。`store/routes/wiring.test.mjs` 依赖
