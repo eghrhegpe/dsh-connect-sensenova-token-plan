@@ -27,7 +27,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { obj, num, str } from "./util.ts";
+import { obj, num, str, errMsg } from "./util.ts";
 
 /** The gateway this provider talks to. */
 export const RACCOON_API_BASE = "https://xiaohuanxiong.com";
@@ -315,7 +315,7 @@ export async function refreshRaccoonCredential(
     );
     envelope = parseRaccoonEnvelope(await response.json().catch(() => ({})), response.status);
   } catch (error) {
-    return { ok: false, code: "refresh_failed", message: error instanceof Error ? error.message : String(error) };
+    return { ok: false, code: "refresh_failed", message: errMsg(error) };
   }
   if (envelope.code !== 0 || envelope.data === null) {
     return { ok: false, code: envelope.code === 401 || envelope.code === 200003 ? "session_dead" : "refresh_rejected", message: envelope.message || `refresh refused (code ${envelope.code})` };

@@ -25,7 +25,7 @@ import { parsePools, parseTrend, checkShape, identifyVisionModel } from "./parse
 import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
 import { catalogSignature } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
-import { str } from "./util.ts";
+import { str, errMsg } from "./util.ts";
 
 /**
  * The operator's pseudo multiplier that names one model id, or undefined.
@@ -197,7 +197,7 @@ export async function buildSnapshotBody({
     ? null
     : {
         code: failureCode(consoleFailure),
-        message: consoleFailure instanceof Error ? consoleFailure.message : String(consoleFailure)
+        message: errMsg(consoleFailure)
       };
   // A shape drift does not fail the poll — the parsers still return what they
   // understood — but it must reach the panel, or a renamed field would read

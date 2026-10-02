@@ -15,7 +15,7 @@ import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { buildSnapshotBody, failureCode } from "./snapshot-aggregate.ts";
 import { CODE } from "./codes.ts";
 import { writeLoginTrace } from "./trace.ts";
-import { str, optional } from "./util.ts";
+import { str, optional, errMsg } from "./util.ts";
 import type { PluginError, Wiring } from "./types.ts";
 import { normalizeEnabledIds } from "./catalog-store.ts";
 import { syncSignaturesAfterPublish } from "./provider-publish.ts";
@@ -283,7 +283,7 @@ function snapshotRoute(ctx: any, wiring: Wiring) {
         // the first is fixed by logging in, the second is usually transient.
         writeJson(response, 200, {
           ok: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: errMsg(error),
           code: failureCode(error),
           auth: await optional(tokenStore.state())
         }, { "cache-control": "no-store" });
@@ -327,7 +327,7 @@ function accountRoute(ctx: any, wiring: Wiring) {
           writeJson(response, 200, {
             ...(await optional(tokenStore.state())),
             ok: false,
-            error: error instanceof Error ? error.message : String(error)
+            error: errMsg(error)
           }, { "cache-control": "no-store" });
           return;
         }
@@ -354,7 +354,7 @@ function accountRoute(ctx: any, wiring: Wiring) {
           ...(await optional(tokenStore.state())),
           ok: false,
           code: str(error?.code, CODE.AUTH_ERROR),
-          error: error instanceof Error ? error.message : String(error),
+          error: errMsg(error),
           // The platform's own words ride along so the panel can show them
           // beneath the classified line.
           ...(error?.detail === undefined ? {} : { detail: String(error.detail) }),
@@ -425,14 +425,14 @@ function apiKeyRoute(ctx: any, wiring: Wiring) {
           syncSignaturesAfterPublish(providerState);
           await answer();
         } catch (error) {
-          await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          await answer({ ok: false, error: errMsg(error) });
         }
         return;
       }
       try {
         await apiKeyStore.save(body.value.apiKey);
       } catch (error) {
-        await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        await answer({ ok: false, error: errMsg(error) });
         return;
       }
       // The next poll fetches the catalog with the new key; a stale catalog
@@ -495,7 +495,7 @@ function providerRoute(ctx: any, wiring: Wiring) {
         // surfaces its reason in providerState.error.
         await publishProvider(providerState.entries, providerState.enabledIds, providerState.unavailableIds ?? []);
       } catch (error) {
-        await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        await answer({ ok: false, error: errMsg(error) });
         return;
       }
       await answer();
@@ -555,7 +555,7 @@ function modelsRoute(ctx: any, wiring: Wiring) {
         // see a "change" and re-publish the same set.
         syncSignaturesAfterPublish(providerState);
       } catch (error) {
-        await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        await answer({ ok: false, error: errMsg(error) });
         return;
       }
       await answer();
@@ -617,7 +617,7 @@ function drawRoute(ctx: any, wiring: Wiring) {
         try {
           await drawStore.forget();
         } catch (error) {
-          await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          await answer({ ok: false, error: errMsg(error) });
           return;
         }
         await answer();
@@ -636,7 +636,7 @@ function drawRoute(ctx: any, wiring: Wiring) {
         try {
           await drawStore.saveModel(raw);
         } catch (error) {
-          await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          await answer({ ok: false, error: errMsg(error) });
           return;
         }
         await answer();
@@ -653,7 +653,7 @@ function drawRoute(ctx: any, wiring: Wiring) {
       try {
         await drawStore.save(body.value.enabled);
       } catch (error) {
-        await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+        await answer({ ok: false, error: errMsg(error) });
         return;
       }
       await answer();
@@ -785,7 +785,7 @@ function raccoonRoute(ctx: any, wiring: Wiring) {
             await raccoonPublisher.publish(rows, officeIdentity);
           }
         } catch (error) {
-          await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          await answer({ ok: false, error: errMsg(error) });
           return;
         }
         await answer();
@@ -814,7 +814,7 @@ function raccoonRoute(ctx: any, wiring: Wiring) {
             await raccoonPublisher.publish(rows, officeIdentity);
           }
         } catch (error) {
-          await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          await answer({ ok: false, error: errMsg(error) });
           return;
         }
         await answer({ ok: true, saved: true });
@@ -878,7 +878,7 @@ function raccoonRoute(ctx: any, wiring: Wiring) {
             await raccoonPublisher.publish(RACCOON_FALLBACK_MODELS, "");
           }
         } catch (error) {
-          await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
+          await answer({ ok: false, error: errMsg(error) });
           return;
         }
         await answer({ ok: true, status: "logged_out" });

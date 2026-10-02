@@ -9,7 +9,7 @@
  * @module dsh-connect-sensenova-token-plan/host-config
  */
 
-import { str, obj, num } from "./util.ts";
+import { str, obj, num, errMsg } from "./util.ts";
 
 /**
  * The one slug every addressable surface of this plugin derives from.
@@ -240,7 +240,7 @@ export function resolveSettings(config) {
         tokenSkewSeconds: CONFIG_DEFAULTS.tokenSkewSeconds,
         auth: { consoleOrigin: consoleBase }
       },
-      configError: error instanceof Error ? error.message : String(error)
+      configError: errMsg(error)
     };
   }
 }

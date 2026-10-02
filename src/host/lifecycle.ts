@@ -20,7 +20,7 @@
  */
 import { defineDrawTool } from "./draw.ts";
 import { seedPublisherFromCatalog, catalogSignature } from "./provider-publish.ts";
-import { retryBounded } from "./util.ts";
+import { retryBounded, errMsg } from "./util.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
@@ -338,7 +338,7 @@ export function startSideEffects(ctx, wiring, side) {
           }, descriptor.revision);
           lastPublishedIds = ids.slice();
         } catch (error) {
-          wiring.logger?.warn?.(`${name}: vision publish refused: ${error instanceof Error ? error.message : String(error)}`);
+          wiring.logger?.warn?.(`${name}: vision publish refused: ${errMsg(error)}`);
         } finally {
           publishing = false;
         }

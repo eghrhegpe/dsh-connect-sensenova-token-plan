@@ -25,7 +25,7 @@
  * @module dsh-connect-sensenova-token-plan/publish-core
  */
 
-import { redactSecrets } from "./util.ts";
+import { redactSecrets, errMsg } from "./util.ts";
 import { name as pluginName } from "./host-config.ts";
 
 /** The event a successful (re)registration emits so readers refresh. */
@@ -195,7 +195,7 @@ export function isBuiltAdapter(built) {
  */
 export function describeBuildFailure(error) {
   const annotated = /** @type {Error & {code?: unknown}} */ (error);
-  const why = error instanceof Error ? error.message : String(error);
+  const why = errMsg(error);
   return {
     note: redactSecrets(why),
     hint: annotated?.code === "ERR_MODULE_NOT_FOUND"
@@ -308,7 +308,7 @@ export function swapRegistration({
     // The snapshot's `offered` set must describe what is really serving, so a
     // failed re-registration restores the previous pair's identity too.
     onRollback?.();
-    state.error = redactSecrets(error instanceof Error ? error.message : String(error));
+    state.error = redactSecrets(errMsg(error));
     // Restore the pair that was serving, if any.
     if (previousBuilt !== null) {
       try {

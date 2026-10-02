@@ -31,6 +31,20 @@ export function num(value: any, fallback?: any): any {
 export function str(value: any, fallback?: any): string {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
 }
+/**
+ * The one-line error message every catch site used to hand-write: the
+ * Error's message when it is an Error, else its string form. Collapses
+ * the repeated `X instanceof Error ? X.message : String(X)` boilerplate.
+ * (The two Raccoon `onFail` sites that also quote `${why.name}` keep
+ * their own richer message and do NOT use this.)
+ * @param {unknown} value - a caught value.
+ * @returns {string}
+ */
+export function errMsg(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
+}
+
+
 
 /**
  * Redact credential-shaped strings from any text that may reach a log, an

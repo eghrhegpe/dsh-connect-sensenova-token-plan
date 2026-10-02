@@ -19,7 +19,7 @@
  */
 import { createHash } from "node:crypto";
 import { fetchRaccoonBalance, fetchRaccoonCatalog, RACCOON_FALLBACK_MODELS } from "./raccoon.ts";
-import { str, redactSecrets, optional } from "./util.ts";
+import { str, redactSecrets, optional, errMsg } from "./util.ts";
 
 /**
  * How long one Raccoon balance read stays fresh.
@@ -238,7 +238,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
               RACCOON_BALANCE_TTL_MS
             )
             .catch((why) => {
-              balanceDetail = `call rejected: ${why instanceof Error ? why.message : String(why)}`;
+              balanceDetail = `call rejected: ${errMsg(why)}`;
               return null;
             });
           balance = balanceRead?.total ?? null;
@@ -257,7 +257,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
       }
     }
   } catch (why) {
-    error = redactSecrets(why instanceof Error ? why.message : String(why));
+    error = redactSecrets(errMsg(why));
   }
   // The retirable scaffold below is computed only for `?debug=1` — the values
   // are the host process's own environment, and there is no reason for a poll

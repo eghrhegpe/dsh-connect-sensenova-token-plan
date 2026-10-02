@@ -52,7 +52,7 @@ import {
   inject,
   name
 } from "./host-config.ts";
-import { str } from "./util.ts";
+import { str, errMsg } from "./util.ts";
 import type { HostDeps } from "./types.ts";
 
 /**
@@ -108,7 +108,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     try {
       auth = createAuth(settings.auth);
     } catch (error) {
-      configError = error instanceof Error ? error.message : String(error);
+      configError = errMsg(error);
     }
   }
   // The inference API key (`sk-…`) is shared by the catalog poll and the
