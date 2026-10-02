@@ -2,6 +2,17 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
+## [0.4.7] — 2026-10-02
+
+扫码登录不再把面板与网关绑在一起：此前一次扫码能让一个 HTTP 请求阻塞最长 5 分钟，客户端再用 150 次补偿轮询去够那个迟迟不返回的状态，而第二上游的每次读都实打实打网关——等待的是人，不是连接。本版把等待挪出请求路径，并给第二上游的读接上缓存与单飞。
+
+- **扫码登录改为「发码即回、walk 转后台」**（`src/host/routes.ts`、`src/host/raccoon-walk.ts`）：POST 立刻返回二维码；超时 / 取消 / 凭据保存失败三种终态作为**一次性事件**由 GET 的 `loginStatus` 下发，读到即清——「已登录」仍由凭据回答，事件不承担状态。客户端删掉补偿轮询死循环，改由服务端状态驱动的双档轮询，不再持有比 walk 活得更久的定时器。
+- **三种失败终态有了名字**（`src/client/i18n.ts`）：`raccoon.loginTimeout` / `raccoon.loginCanceled` / `raccoon.loginFailed`，中英成对。此前它们只表现为「面板没反应」。
+- **第二上游读接入缓存与单飞**（`src/host/coalesced-fetch.ts`）：前台读与后台轮询合并，一次扫码打网关的读次数从几百次降到合并后的少数几次；Token Plan 侧 `console-client` 里两份手写的 cache/inflight 一并换成同一个原语。
+- **门禁补强**（发布质量，用户不可见）：名册新增 4 个套件（provider 回滚护栏、小浣熊状态读、state 分段形状）并把 `typecheck-gate` 接进链（`tsc` 缺席则 SKIP）；新增 `commit:lint` 与 jscpd 重复代码**报告档**（`npm run duplicate-check`，不挡发布）；新增 `npm run test:live:raccoon`（小浣熊 live 契约探针 + 基线，L1 档无需凭据）。
+- **CI 的两处静默红修掉**：offline 硬门禁在干净 runner 上拿不到 peer 依赖，连续一整天红在第二个套件（`set -e` 让后面 17 个套件从未跑过）；e2e job 少了构建步骤，一直在拿 gitignored 的缺席产物做端到端。两项修完 CI 在 `main` 上转绿。
+- **内部重构**（行为由冻结基线与套件背书）：`routes.ts` 拆成 7 条命名路由并给 `Wiring` 上类型；两个上游的发布状态机与 adapter 装配各收敛为一份（`publish-core.ts` / `llm-adapter-core.ts`）；小浣熊的状态读与 walk 各自成模块。`peerDependencies` 补齐原先漏声明的 5 个 Host 包。
+
 ## [0.4.6] — 2026-10-01
 
 小浣熊面板把「凭据已过期」当成了「已登录」：access token 早已失效时，登录卡仍显示「已登录：退出登录」，注册也照样成立，于是模型能选、请求却一个个 401——用户只能靠猜。
