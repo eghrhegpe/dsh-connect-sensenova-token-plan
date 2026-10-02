@@ -153,6 +153,10 @@ try {
     (await optional(Promise.resolve(7))) === 7);
   check("A2 a non-promise value passes through too",
     (await optional("raw")) === "raw");
+  check("A2 a rejected call yields the provided fallback, not null",
+    (await optional(Promise.reject(new Error("x")), "fallback")) === "fallback");
+  check("A2 a fulfilled call ignores the fallback",
+    (await optional(Promise.resolve(7), -1)) === 7);
   // The exact shape it replaces: the guard must sit where the crash was.
   const absent = null;
   let threw = false;

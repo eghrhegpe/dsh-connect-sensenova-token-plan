@@ -177,8 +177,8 @@ function wantsDiagnostics(request) {
  * @param response - the outgoing HTTP response (written on failure).
  * @returns {Promise<object|null>} the read result, or null if a 400 was sent.
  */
-async function readJsonBodyOr400(request, response) {
-  const body = await readJsonBody(request);
+async function readJsonBodyOr400(request, response, limit = MAX_ACCOUNT_BODY_BYTES) {
+  const body = await readJsonBody(request, limit);
   if (!body.ok) {
     writeJson(response, 400, { ok: false, error: /** @type {{ok: false, error: string}} */ (body).error }, { "cache-control": "no-store" });
     return null;
@@ -224,14 +224,31 @@ export function registerRoutes(ctx, wiring) {
   // place; a Host that wired none still gets a private one rather than a crash.
   const raccoonRead = raccoonCache ?? createCoalescedFetch();
 
-  const offRoute = ctx.webServer.register({
-    kind: "exact",
-    path: SNAPSHOT_PATH,
-    handler: async (request, response) => {
+  /**
+   * Wrap a route handler with the trust fence every route opens with.
+   *
+   * The seven handlers each used to repeat the identical
+   * `if (!isAdmitted(...))` block; this folds it into one seam so a forgotten
+   * fence is impossible and the 403 wording stays in {@link refuseOrigin}. A
+   * handler wrapped here must NOT repeat the fence — doing so is only a second,
+   * dead guard.
+   * @param {(request: object, response: object) => unknown} handler - the route logic.
+   * @returns {(request: object, response: object) => Promise<void>} the fenced handler.
+   */
+  function withOrigin(handler) {
+    return async (request, response) => {
       if (!isAdmitted(request, settings.allowedHosts)) {
         refuseOrigin(response);
         return;
       }
+      return handler(request, response);
+    };
+  }
+
+  const offRoute = ctx.webServer.register({
+    kind: "exact",
+    path: SNAPSHOT_PATH,
+    handler: withOrigin(async (request, response) => {
       if (request.method !== undefined && request.method !== "GET" && request.method !== "HEAD") {
         refuseMethod(response);
         return;
@@ -243,7 +260,7 @@ export function registerRoutes(ctx, wiring) {
           ok: false,
           code: CODE.CONFIG_ERROR,
           error: configError,
-          auth: await tokenStore.state().catch(() => null)
+          auth: await optional(tokenStore.state())
         }, { "cache-control": "no-store" });
         return;
       }
@@ -261,9 +278,9 @@ export function registerRoutes(ctx, wiring) {
           apiKeyStore,
           publisher,
           catalogStore,
-          panelSwitch: () => providerStore.enabled().catch(() => null),
-          drawSwitch: () => (drawStore ? drawStore.enabled().catch(() => null) : null),
-          drawModelId: () => (drawStore ? drawStore.modelId().catch(() => null) : null)
+          panelSwitch: () => optional(providerStore.enabled()),
+          drawSwitch: () => optional(drawStore ? drawStore.enabled() : null),
+          drawModelId: () => optional(drawStore ? drawStore.modelId() : null)
         });
         if (body.visionModels !== undefined) {
           // A write failure here is silent otherwise: the vision list fails to
@@ -281,22 +298,18 @@ export function registerRoutes(ctx, wiring) {
           ok: false,
           error: error instanceof Error ? error.message : String(error),
           code: failureCode(error),
-          auth: await tokenStore.state().catch(() => null)
+          auth: await optional(tokenStore.state())
         }, { "cache-control": "no-store" });
       }
-    }
+    })
   });
 
   const offAccount = ctx.webServer.register({
     kind: "exact",
     path: ACCOUNT_PATH,
-    handler: async (request, response) => {
+    handler: withOrigin(async (request, response) => {
       // The same fence as the snapshot route: without it, any page the
       // browser visits could post an account into this panel.
-      if (!isAdmitted(request, settings.allowedHosts)) {
-        refuseOrigin(response);
-        return;
-      }
       const method = request.method === undefined ? "POST" : request.method;
       if (method === "GET") {
         // The form needs to know whether an account is already stored, and
@@ -320,7 +333,7 @@ export function registerRoutes(ctx, wiring) {
           // spreading it after this one would overwrite the real reason with
           // whatever the store last saw.
           writeJson(response, 200, {
-            ...(await tokenStore.state().catch(() => null)),
+            ...(await optional(tokenStore.state())),
             ok: false,
             error: error instanceof Error ? error.message : String(error)
           }, { "cache-control": "no-store" });
@@ -346,7 +359,7 @@ export function registerRoutes(ctx, wiring) {
         const error = e as Partial<PluginError>;
         const traceFile = await writeLoginTrace(error?.trace, str(error?.code, CODE.AUTH_ERROR));
         writeJson(response, 200, {
-          ...(await tokenStore.state().catch(() => null)),
+          ...(await optional(tokenStore.state())),
           ok: false,
           code: str(error?.code, CODE.AUTH_ERROR),
           error: error instanceof Error ? error.message : String(error),
@@ -366,19 +379,15 @@ export function registerRoutes(ctx, wiring) {
       // console responses from the previous account must not survive it.
       cache.clear();
       writeJson(response, 200, { ...(await tokenStore.state()), ok: true }, { "cache-control": "no-store" });
-    }
+    })
   });
 
   const offApiKey = ctx.webServer.register({
     kind: "exact",
     path: API_KEY_PATH,
-    handler: async (request, response) => {
+    handler: withOrigin(async (request, response) => {
       // Same trust fence as the other two routes: a foreign page must not be
       // able to plant or wipe an inference key.
-      if (!isAdmitted(request, settings.allowedHosts)) {
-        refuseOrigin(response);
-        return;
-      }
       const method = request.method === undefined ? "GET" : request.method;
       // The secret-free state is all the form ever gets: present or not, and
       // whether it came from the credentials service or the environment.
@@ -386,11 +395,7 @@ export function registerRoutes(ctx, wiring) {
         writeJson(
           response,
           200,
-          { ok: true, ...(await apiKeyStore.state().catch(() => ({
-            hasApiKey: false,
-            keySource: null,
-            ephemeral: false
-          }))), ...extra },
+          { ok: true, ...(await optional(apiKeyStore.state(), { hasApiKey: false, keySource: null, ephemeral: false })), ...extra },
           { "cache-control": "no-store" }
         );
       if (method === "GET") {
@@ -436,24 +441,20 @@ export function registerRoutes(ctx, wiring) {
       // resolved per REQUEST by the adapter, so no provider rebuild is needed.
       cache.clear();
       await answer();
-    }
+    })
   });
 
   const offProvider = ctx.webServer.register({
     kind: "exact",
     path: PROVIDER_PATH,
-    handler: async (request, response) => {
+    handler: withOrigin(async (request, response) => {
       // Same trust fence as the other three routes: a foreign page must not be
       // able to flip model routing for the whole Host.
-      if (!isAdmitted(request, settings.allowedHosts)) {
-        refuseOrigin(response);
-        return;
-      }
       const method = request.method === undefined ? "GET" : request.method;
       // Secret-free by construction: the effective switch, where it came from,
       // and whether a provider is registered right now.
       const answer = async (extra = {}) => {
-        const panelSwitch = await providerStore.enabled().catch(() => null);
+        const panelSwitch = await optional(providerStore.enabled());
         writeJson(
           response,
           200,
@@ -494,19 +495,15 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
       await answer();
-    }
+    })
   });
 
   const offModels = ctx.webServer.register({
     kind: "exact",
     path: MODELS_PATH,
-    handler: async (request, response) => {
+    handler: withOrigin(async (request, response) => {
       // Same fence as the other routes: a foreign page must not be able to
       // decide which models this Host offers.
-      if (!isAdmitted(request, settings.allowedHosts)) {
-        refuseOrigin(response);
-        return;
-      }
       const method = request.method === undefined ? "POST" : request.method;
       if (method !== "POST") {
         refuseMethod(response);
@@ -531,9 +528,9 @@ export function registerRoutes(ctx, wiring) {
       const answer = async (extra = {}) => {
         writeJson(response, 200, {
           ok: true,
-          enabledModelIds: await catalogStore.listEnabledIds().catch(() => providerState.enabledIds),
+          enabledModelIds: await optional(catalogStore.listEnabledIds(), providerState.enabledIds),
           registerProvider:
-            ((await providerStore.enabled().catch(() => null)) ?? settings.registerProvider) === true,
+            ((await optional(providerStore.enabled())) ?? settings.registerProvider) === true,
           providerRegistered: providerState.registered,
           ...(providerState.error !== null ? { providerError: providerState.error } : {}),
           ...extra
@@ -553,19 +550,15 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
       await answer();
-    }
+    })
   });
 
   const offDraw = ctx.webServer.register({
     kind: "exact",
     path: DRAW_PATH,
-    handler: async (request, response) => {
+    handler: withOrigin(async (request, response) => {
       // Same trust fence as the other routes: a foreign page must not be able
       // to turn an agent image tool on or off.
-      if (!isAdmitted(request, settings.allowedHosts)) {
-        refuseOrigin(response);
-        return;
-      }
       const method = request.method === undefined ? "GET" : request.method;
       const answer = async (extra = {}) => {
         const panelDraw = await optional(drawStore ? drawStore.enabled() : null);
@@ -650,7 +643,7 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
       await answer();
-    }
+    })
   });
 
   // The Raccoon route (ROADMAP §6.1 "second upstream provider"). One route,
@@ -718,11 +711,7 @@ export function registerRoutes(ctx, wiring) {
   const offRaccoon = ctx.webServer.register({
     kind: "exact",
     path: RACCOON_PATH,
-    handler: async (request, response) => {
-      if (!isAdmitted(request, settings.allowedHosts)) {
-        refuseOrigin(response);
-        return;
-      }
+    handler: withOrigin(async (request, response) => {
       // The GET's secret-free state, reused by every POST branch so a mutation
       // always re-reports the same facts a GET would (the `scanUrl`/`code` it
       // carries are the scan the pending login walk last issued). The read model
@@ -755,11 +744,8 @@ export function registerRoutes(ctx, wiring) {
         refuseMethod(response);
         return;
       }
-      const body = await readJsonBody(request, MAX_RACCOON_BODY_BYTES);
-      if (!body.ok) {
-        writeJson(response, 400, { ok: false, error: body.error }, { "cache-control": "no-store" });
-        return;
-      }
+      const body = await readJsonBodyOr400(request, response, MAX_RACCOON_BODY_BYTES);
+      if (body === null) return;
       const { action } = body.value;
       const answer = async (extra = {}) => {
         const state = await raccoonState();
@@ -773,19 +759,15 @@ export function registerRoutes(ctx, wiring) {
         let rows = RACCOON_FALLBACK_MODELS;
         let officeIdentity = "";
         try {
-          const { credential } = raccoonStore ? await raccoonStore.resolve().catch(() => ({ credential: null })) : { credential: null };
+          const { credential } = await optional(raccoonStore ? raccoonStore.resolve() : null, { credential: null });
           if (catalogToken !== undefined && catalogToken !== null && catalogToken !== "") {
             // A freshly-scanned token: the read lands in the same cache under
             // its own fingerprint, so the first GET after login reuses it
             // instead of re-fetching what this very call just fetched.
-            const live = await raccoonRead
-              .read(`catalog:${tokenFingerprint(catalogToken)}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS)
-              .catch(() => null);
+            const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(catalogToken)}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS));
             if (live !== null && live.length > 0) rows = live;
           } else if (credential?.accessToken) {
-            const live = await raccoonRead
-              .read(`catalog:${tokenFingerprint(credential.accessToken)}`, () => fetchRaccoonCatalog(credential), RACCOON_CATALOG_TTL_MS)
-              .catch(() => null);
+            const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(credential.accessToken)}`, () => fetchRaccoonCatalog(credential), RACCOON_CATALOG_TTL_MS));
             if (live !== null && live.length > 0) rows = live;
             officeIdentity = credential.officeIdentity ?? "";
           }
@@ -892,7 +874,7 @@ export function registerRoutes(ctx, wiring) {
           let settled: any = null;
           let canceled = false;
           while (Date.now() < deadline) {
-            const poll = await pollRaccoonQrLogin(code).catch(() => ({ status: RACCOON_QR_STATUS.PENDING }));
+            const poll = await optional(pollRaccoonQrLogin(code), { status: RACCOON_QR_STATUS.PENDING });
             if (poll.status === RACCOON_QR_STATUS.SUCCESS) {
               settled = poll;
               break;
@@ -942,7 +924,7 @@ export function registerRoutes(ctx, wiring) {
           // it is unaffected.)
           raccoonRead.clear();
           if (raccoonPublisher !== null && raccoonPublisher !== undefined && raccoonPublisher.isDisposed() === false) {
-            const switchState = raccoonSwitch ? await raccoonSwitch.enabled().catch(() => null) : null;
+            const switchState = await optional(raccoonSwitch ? raccoonSwitch.enabled() : null);
             if (switchState === true) {
               const { rows, officeIdentity } = await collectRaccoonRows(settled.accessToken);
               await raccoonPublisher.publish(rows, officeIdentity);
@@ -984,7 +966,7 @@ export function registerRoutes(ctx, wiring) {
       }
 
       writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
-    }
+    })
   });
 
   return [offRoute, offAccount, offApiKey, offProvider, offModels, offDraw, offRaccoon];

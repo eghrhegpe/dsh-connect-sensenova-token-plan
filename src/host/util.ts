@@ -139,10 +139,12 @@ export function numOrNull(value) {
  * sits on the value, where "not a promise" and "a rejected promise" both read
  * as `null`.
  * @param {unknown} value - the call's result (usually a promise), or `null`.
- * @returns {Promise<unknown>} the value, or `null` on absence or rejection.
+ * @param {unknown} [fallback] - what to read on absence or rejection; `null`
+ *   by default, so callers that only need "no answer" pass nothing.
+ * @returns {Promise<unknown>} the value, or `fallback` on absence or rejection.
  */
-export function optional(value) {
-  return Promise.resolve(value).catch(() => null);
+export function optional(value, fallback = null) {
+  return Promise.resolve(value).catch(() => fallback);
 }
 
 /**

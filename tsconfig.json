@@ -26,5 +26,5 @@
     "resolveJsonModule": true
   },
   "include": ["src/host", "src/client", "types/*.d.ts"],
-  "exclude": ["node_modules", "upstream", "lib", "test", "assets", "docs", ".github", ".box-agent", ".box-agent-scratch", "src/client/qr.ts", "src/client/cards.ts", "src/client/account-form.ts", "src/client/panel-page.ts", "src/host/state-store.ts", "src/host/catalog-store.ts", "src/host/parsers.ts", "src/host/llm-models.ts", "src/host/raccoon-models.ts", "src/host/provider-store.ts", "src/host/draw-store.ts", "src/host/raccoon-switch-store.ts", "src/host/doctor.ts", "src/host/draw.ts"]
+  "exclude": ["node_modules", "upstream", "lib", "test", "assets", "docs", ".github", ".box-agent", ".box-agent-scratch", "src/host/doctor.ts"]
 }
