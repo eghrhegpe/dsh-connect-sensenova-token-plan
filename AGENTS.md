@@ -123,6 +123,37 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 提交约定、`upstream/` 红线 | `docs/CONTRIBUTING.md` |
 | 发版 / 补发（tag・`main`・npm・Release 四条独立通道） | `RELEASING.md`（状态表 S0–S4 **含 S2′ 顺序颠倒**、§4.5 推荐顺序、§5.5 发布内容一致性核验） |
 
+## 进入代码库的读取顺序（AI 会话）
+
+1.6 万行 src + 1.4 万行测试，乱序读会把时间花在「重新验证文档已写明的事实」上。
+这条顺序是 2026-10-02 全库审查后的复盘：先建坐标系，再读代码。
+
+1. **先文档，后代码**：本文件 → `docs/README.md` 索引 → `docs/ARCHITECTURE.md` §5
+   （三条不变量 + §5.5 双上游裁定）→ `docs/PITFALLS.md` 36 条扫一遍。这些是判断
+   「代码对不对」的坐标系；跳过它们 = 把 `index.ts` 里已写清的接线重新验证一遍。
+2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，
+   「刚提交的文件」（尤其 `client/` 与 `sensenova-auth.ts`）最可能有新鲜改动或未
+   提交半成品，优先读，并先确认 HEAD 再下结论（本次审查就撞上 `useSnapshotPolling`
+   在审查中途被另一会话提交）。
+3. **装配点优先**：先读 `src/host/index.ts`（apply 是唯一装配点，建立依赖图），
+   再读 `src/host/routes.ts`（8 资源门面）拿路由家族图；顺着依赖走，别按文件名猜。
+4. **错误语义先行**：先读 `src/host/codes.ts`（单一 taxonomy + 派生集合）。全仓
+   错误分类以它为真源，「按状态码分类 vs 按 body 字段分类」这类不一致只有对照它
+   才显形——2026-10 的 refresh 400 误删凭据就是对照登录路径的 `rejectionCode`
+   才看出来的。
+5. **凭据域必读，不按行数挑**：`sensenova-crypto.ts`、`token-store/*`、
+   `throttle-store.ts`、`sensenova-auth.ts` 是红线 1/2/4/6 的落点，无论大小照单
+   全读；行数排序只用来排其余代码的优先级。
+6. **两条上游分开读**：Token Plan（index → token-store → sensenova-auth →
+   routes/*）与小浣熊（raccoon-walk/publish/status/llm-adapter）凭据、store、
+   publisher 全隔离，混读会把「哪条线属于谁」搞混（ARCHITECTURE §5.5）。
+7. **改行为前先读测试与基线**：`docs/TESTING.md` 说明每个套件测什么；动
+   token-store 前先判断行为冻结面（`store-baseline`）要不要 `UPDATE_BASELINE=1`
+   ——要的话是更大的事，先停下来说。测试里 `check(name, condition, detail)` 的
+   `name` 本身就是契约，1.4 万行测试是规格，不是附件。
+8. **验证闭环**：改完跑对应域单测（`node test/<域>.test.mjs`）→ 全量 `npm test`
+   （26 套件 && 链，失败按链序向前定位，别信「末尾绿」）。
+
 ## 已知的真实坑（改前先看这里有没有）
 
 - **e2e 曾跑完不退出**：成功路径没 `process.exit`，Host 子进程 stdio 管道吊住
