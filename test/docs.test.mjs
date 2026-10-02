@@ -188,11 +188,13 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
 // 上面的 5 只钉「文档示例的键 == 契约」和「契约键出现在 host 源码里」——都
 // 是弱检查：字段名作为子串出现就过，且它从不看 client 那一半。client 不能
 // import host（bundle 只解析包名），所以 `wire.ts` 的 `SnapshotData` 是
-// 手写的镜像，而这个镜像此前只有注释在担保。这里把两端源码各提一次字段名
-// 做集合相等：任一边加/删/改名而不同步，就红。host 侧锚定构造快照的那一个
-// `return {`（它设 `ok: true`），避免抓到别的内层返回块。
+// 手写的镜像，而这个镜像此前只有注释在担保。现在该声明落在
+// `src/shared/wire.ts`（两端共同声明的那一份），`src/client/wire.ts` 只是它的
+// 再导出面。这里把两端源码各提一次字段名做集合相等：任一边加/删/改名而不同步，
+// 就红。host 侧锚定构造快照的那一个 `return {`（它设 `ok: true`），避免抓到别的
+// 内层返回块。
 {
-  const clientSrc = readFileSync(join(ROOT, "src", "client", "wire.ts"), "utf8");
+  const sharedSrc = readFileSync(join(ROOT, "src", "shared", "wire.ts"), "utf8");
   const aggregateSrc = existsSync(join(ROOT, "src", "host", "snapshot-aggregate.ts"))
     ? readFileSync(join(ROOT, "src", "host", "snapshot-aggregate.ts"), "utf8")
     : "";
@@ -206,20 +208,20 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
     for (const m of hostBlock.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)) hostFields.add(m[1]);       // `key:`
     for (const m of hostBlock.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*,?\s*$/gm)) hostFields.add(m[1]);  // `key,` 简写
     for (const m of hostBlock.matchAll(/\{\s*([A-Za-z_$][\w$]*)\s*\}/g)) hostFields.add(m[1]);      // 条件展开 `{ key }`
-    const iface = clientSrc.match(/interface SnapshotData \{([\s\S]*?)\n\}/);
-    if (!iface) bad("找不到 client 的 SnapshotData 接口，检查 5b 本身可能已失效");
+    const iface = sharedSrc.match(/interface SnapshotData \{([\s\S]*?)\n\}/);
+    if (!iface) bad("找不到 shared/wire.ts 的 SnapshotData 接口，检查 5b 本身可能已失效");
     else {
       const clientFields = new Set();
       for (const m of iface[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\??\s*:/gm)) clientFields.add(m[1]);
       const hostOnly = [...hostFields].filter((f) => !clientFields.has(f));
       const clientOnly = [...clientFields].filter((f) => !hostFields.has(f));
       if (hostOnly.length || clientOnly.length || clientFields.size !== hostFields.size) {
-        bad(`client 快照字段与 host 构造的字段不一致（client ${clientFields.size} / host ${hostFields.size}）：` +
+        bad(`共享声明的快照字段与 host 构造的字段不一致（声明 ${clientFields.size} / host ${hostFields.size}）：` +
           `${hostOnly.length ? `host-only ${hostOnly.join(", ")}` : ""}` +
           `${hostOnly.length && clientOnly.length ? " | " : ""}` +
           `${clientOnly.length ? `client-only ${clientOnly.join(", ")}` : ""}`);
       } else {
-        note(`client 快照字段与 host 构造的字段一致（${clientFields.size} 项）`);
+        note(`共享声明的快照字段与 host 构造的字段一致（${clientFields.size} 项）`);
       }
     }
   }

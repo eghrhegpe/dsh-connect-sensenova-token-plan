@@ -1,5 +1,5 @@
 {
-  "$comment": "Source is TypeScript now (src/host/*.ts, src/client/*.ts), and every .ts file is type-checked unconditionally — `checkJs` only governs plain .js files, of which src/ has none (a .js under src/ would need a top-level '// @ts-check' pragma to be checked at all). strict/noImplicitAny stay false, so untyped parameters are implicit-any and pass: the ONE shape that does not is a parameter WITH a default initializer, which is typed from that initializer — give it an explicit annotation instead of JSDoc (in a .ts file `@param`/`@type` are comments, not type sources; see src/host/lifecycle.ts). noEmit:true means this check never produces artifacts — the build is tsdown's job (test/build-gate.mjs). Run it with `npm run typecheck`; since the 8 strict flags landed it is also part of `npm test` via test/typecheck-gate.mjs, which runs the tsc pinned in devDependencies (loud SKIP when typescript is absent, same rule as build-gate).",
+  "$comment": "Source is TypeScript now (src/host/*.ts, src/client/*.ts, plus src/shared/wire.ts — the wire contract both halves read, TYPE-ONLY), and every .ts file is type-checked unconditionally — `checkJs` only governs plain .js files, of which src/ has none (a .js under src/ would need a top-level '// @ts-check' pragma to be checked at all). strict/noImplicitAny stay false, so untyped parameters are implicit-any and pass: the ONE shape that does not is a parameter WITH a default initializer, which is typed from that initializer — give it an explicit annotation instead of JSDoc (in a .ts file `@param`/`@type` are comments, not type sources; see src/host/lifecycle.ts). noEmit:true means this check never produces artifacts — the build is tsdown's job (test/build-gate.mjs). Run it with `npm run typecheck`; since the 8 strict flags landed it is also part of `npm test` via test/typecheck-gate.mjs, which runs the tsc pinned in devDependencies (loud SKIP when typescript is absent, same rule as build-gate).",
   "compilerOptions": {
     "target": "ES2023",
     "module": "NodeNext",
@@ -25,6 +25,6 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["src/host", "src/client", "types/*.d.ts"],
+  "include": ["src/host", "src/client", "src/shared", "types/*.d.ts"],
   "exclude": ["node_modules", "upstream", "lib", "test", "assets", "docs", ".github", ".box-agent", ".box-agent-scratch", "src/host/doctor.ts"]
 }

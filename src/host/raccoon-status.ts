@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 import { fetchRaccoonBalance, fetchRaccoonCatalog, RACCOON_FALLBACK_MODELS, RACCOON_QR_POLL_INTERVAL_MS } from "./raccoon.ts";
 import { str, redactSecrets, optional, errMsg, pickDefined } from "./util.ts";
+import type { RaccoonState } from "../shared/wire.ts";
 
 /**
  * How long one Raccoon balance read stays fresh.
@@ -134,9 +135,9 @@ export interface RaccoonStatusDeps {
  * @param {boolean} [withDiagnostics] - opt into the `?debug=1` triage scaffold.
  *   The POST branches re-report through this same function WITHOUT the flag,
  *   so a mutation never answers with environment values.
- * @returns {Promise<object>} the secret-free state the tab renders.
+ * @returns {Promise<RaccoonState>} the secret-free state the tab renders.
  */
-export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics = false) {
+export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics = false): Promise<RaccoonState> {
   // ── The event read is FIRST, before any await in this function. ──
   //
   // Everything below costs at least one gateway read, which is time enough for

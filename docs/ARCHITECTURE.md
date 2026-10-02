@@ -35,6 +35,9 @@
 |---|---|---|---|
 | **Host（服务端）** | `src/host/*.ts`（清单以该目录为准，经 `npm run build` 构建为 `lib/`） | 启动时加载一次 | **重新构建 + 完全退出 DSH（含托盘）再启动**，`dsh web` 不会热重载 |
 | **Client（前端）** | `src/client/*.ts`（构建为根 `client.js`） | 浏览器侧，随页面加载 | `npm run build:client` 重建后浏览器刷新即可 |
+| **共享契约（类型）** | `src/shared/wire.ts` | 仅类型，不产出运行时 | 两端 `import type`，改动随下一次 typecheck / build 生效 |
+
+> `src/shared/wire.ts` 是两端共读的**线契约声明**（快照体 + 小浣熊 state），**纯 `interface`/`type`、零运行时值**：tsdown 在两端构建时都把它擦除，所以 client 产物照旧只依赖 `react`，host 产物不因此多带任何浏览器代码。它是 host 源图闭包（`test/package.test.mjs` §2）唯一声明例外——**只许放类型**：一旦放进运行时真值，就是第一批 host 逻辑进入浏览器产物，§5 的隔离就开始松动。客户端原先在 `src/client/wire.ts` 手写的镜像已退为它的再导出面；host 侧 `buildSnapshotBody` / `readRaccoonStatus` / `identifyVisionModel` 均以这里的类型为返回标注，`tsc`（本就同编两端）是第一道守门员，`docs.test.mjs` §5b 那套正则对账降为兜底。
 
 - `index.ts`：Host 入口——注册只读路由 `/api/dsh-connect-sensenova-token-plan/snapshot`（聚合控制台数据，401 自动续期重试一次）+ 账号配置路由 + 各 store 接线与 side-effect 编排。
 - `routes.ts`：**路由主模块**（990 行，本仓库最大的 Host 文件）——snapshot / account / api-key / provider / models / draw / raccoon 七条路由的 handler、同源闸、body 上限、`writeJson` 全部在此；`index.ts` 只保留 HTTP 面与装配。小浣熊的**读模型**已抽出为 `raccoon-status.ts`（原先它是 handler 内一个 190 行闭包），这里只剩扫码 walk 与四个 mutation。

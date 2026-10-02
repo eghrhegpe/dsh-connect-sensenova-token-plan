@@ -9,6 +9,7 @@
  */
 
 import { str, obj } from "./util.ts";
+import type { VisionModelData } from "../shared/wire.ts";
 
 /**
  * The top-level keys each console contract is expected to carry.
@@ -135,9 +136,9 @@ export function parseTrend(body, trendHours) {
  *   never pretend the platform declared it.
  *
  * @param {object} entry - one catalog entry (id + any extra fields).
- * @returns {{"id": string, "vision": boolean, "source": "field"|"name"|null}}
+ * @returns {VisionModelData} the vision verdict (`source` says how it was decided).
  */
-export function identifyVisionModel(entry) {
+export function identifyVisionModel(entry): VisionModelData {
   const source = obj(entry);
   const id = str(source.id, "");
   const modalities = modalitiesOf(source);

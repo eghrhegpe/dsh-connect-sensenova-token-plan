@@ -32,16 +32,16 @@ import { ModelRow } from "./model-row.ts";
 import { h } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
+import type { RaccoonModel } from "../shared/wire.ts";
 
-/** One model row as the /raccoon route reports it. */
-export interface RaccoonModel {
-  id?: string;
-  name?: string;
-  vision?: boolean;
-  multiplier?: number;
-  contextWindow?: number;
-  maxOutputLength?: number;
-}
+/**
+ * One model row as the /raccoon route reports it.
+ *
+ * The row shape now lives in `src/shared/wire.ts` (one declaration for both
+ * halves). Re-exported here so the row type stays reachable at this path; the
+ * component imports the same type for its own props.
+ */
+export type { RaccoonModel };
 
 /**
  * The model roster the Raccoon adapter offers.

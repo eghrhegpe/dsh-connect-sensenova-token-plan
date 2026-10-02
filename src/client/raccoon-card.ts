@@ -26,6 +26,7 @@ import { qrDataUrl } from "./qr.ts";
 import { RaccoonRoster } from "./raccoon-roster.ts";
 import { RACCOON_SITE_URL } from "./const.ts";
 import { S } from "./styles.ts";
+import type { RaccoonState } from "../shared/wire.ts";
 
 /**
  * The QR image is drawn at a fixed 208 px and the login window divides the
@@ -37,64 +38,16 @@ import { S } from "./styles.ts";
 const QR_SIZE = 208;
 const DAY_MS = 86_400_000;
 
-/** The secret-free state the /raccoon route answers. */
-export interface RaccoonState {
-  ok?: boolean;
-  enabled?: boolean;
-  switchSource?: string;
-  loggedIn?: boolean;
-  nickname?: string;
-  /** The stored access token's JWT `exp`, in ms (absent when unknowable). */
-  expiresAtMs?: number | null;
-  /** Whether that token has lapsed — `loggedIn` can be true while this is true. */
-  credentialExpired?: boolean;
-  /** The refresh token's own window (≈30 days): how long until a re-scan. */
-  refreshExpiresAtMs?: number | null;
-  balance?: number | null;
-  /** The gateway's split of the total — only parts it declared. */
-  balanceBreakdown?: { daily?: number; reward?: number; monthly?: number; topup?: number } | null;
-  /** The concrete reason a balance read came back empty (absent when fine). */
-  balanceDetail?: string;
-  /** Which roster the tab is drawing: the gateway catalogue ("live"), a read
-   *  that succeeded but listed no visible model ("empty"), or a read that
-   *  failed outright ("unreadable") — the last two both fall back to the
-   *  built-in table, but they must be worded differently. */
-  modelsSource?: "live" | "empty" | "unreadable";
-  models?: import("./raccoon-roster.ts").RaccoonModel[];
-  /** The saved pushed-model curation (`null`/absent = the whole roster). */
-  enabledModelIds?: string[] | null;
-  providerRegistered?: boolean;
-  providerError?: string;
-  error?: string;
-  /** The in-flight QR scan the route last issued (cleared when it settles). */
-  scanUrl?: string;
-  scanCode?: string;
-  /**
-   * The QR walk's outcome: `"scanning"` while one waits, otherwise a terminal
-   * `logged_in` / `timeout` / `canceled` / `failed`.
-   *
-   * It is an EVENT, not a state: the route hands a terminal outcome over once
-   * and clears it, so only the poll that catches it sees it. The durable
-   * "signed in" fact is `loggedIn`. What this drives is the poll CADENCE — a
-   * waiting scan is the only time the tab needs to poll faster than a minute.
-   */
-  loginStatus?: string;
-  /** The reason a `failed` walk gave; only ever present beside that status. */
-  loginError?: string;
-  /**
-   * The tab's idle poll cadence, in SECONDS, as stated by the route.
-   *
-   * The Host owns the two cache windows this poll has to respect
-   * (`RACCOON_BALANCE_TTL_MS` / `RACCOON_CATALOG_TTL_MS`), so it states the
-   * cadence it wants rather than leaving the client to guess a number that
-   * has to track them — the same contract the snapshot's own `pollSeconds`
-   * carries. Absent on an older Host: the tab then keeps its built-in
-   * fallback. See `statedCadenceMs`.
-   */
-  pollSeconds?: number;
-  /** The cadence while a scan waits on the phone (see `pollSeconds`). */
-  scanPollSeconds?: number;
-}
+/**
+ * The secret-free state the /raccoon route answers.
+ *
+ * Re-exported from `src/shared/wire.ts` — the ONE declaration both halves read,
+ * so the second upstream's wire shape finally has a counterpart on the Host
+ * side to be checked against. Re-exported here to keep the panel's
+ * `import type { RaccoonState } from "./raccoon-card.ts"` call sites working;
+ * the shape itself is not owned by this file anymore.
+ */
+export type { RaccoonState };
 
 /**
  * The QR image the login code encodes. The payload is the gateway's own

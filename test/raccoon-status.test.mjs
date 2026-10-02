@@ -26,6 +26,7 @@ import { RACCOON_API_BASE, RACCOON_POINTS_PREFIX, RACCOON_FALLBACK_MODELS, RACCO
 import { installNetworkGuard } from "./peer-roots.mjs";
 import { surface } from "./client-surface.js";
 import { statedCadenceMs } from "../src/client/format.ts";
+import { readFileSync } from "node:fs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -513,6 +514,70 @@ try {
   }
 } catch (error) {
   fail("F: switch, publisher and the expiry facts", error);
+}
+
+// === G. the shared wire declaration is the ONE account of this answer ======
+// `RaccoonState` used to live only in the client bundle — a hand-written mirror
+// with no counterpart on this side, and (unlike the snapshot, which
+// `docs.test.mjs` §5b pins) nothing compared its fields to the fields
+// `readRaccoonStatus` actually produces. It now lives in `src/shared/wire.ts`
+// (the one exception to the host source-graph closure, see `package.test.mjs`
+// §2). These checks assert declaration and production are the SAME SET, so a
+// field added to either side fails here instead of silently reaching only one.
+//
+// The one asymmetry is the `?debug=1` scaffold (`TRIAGE_KEYS`): those keys are
+// emitted on the wire but deliberately NOT part of `RaccoonState` — they
+// describe the environment, not the tab, and no client code reads any of them.
+{
+  const sharedSrc = readFileSync(new URL("../src/shared/wire.ts", import.meta.url), "utf8");
+  const iface = sharedSrc.match(/interface RaccoonState \{([\s\S]*?)\n\}/);
+  if (!iface) {
+    check("G the shared RaccoonState declaration exists", false, "interface not found");
+  } else {
+    const hostSrc = readFileSync(new URL("../src/host/raccoon-status.ts", import.meta.url), "utf8");
+    const okAt = hostSrc.indexOf("ok: true,");
+    const retAt = hostSrc.lastIndexOf("return {", okAt);
+    const endAt = hostSrc.indexOf("};", okAt);
+    const block = okAt < 0 || retAt < 0 || endAt < 0 ? "" : hostSrc.slice(retAt, endAt);
+    if (block.length === 0) {
+      check("G the host return block is locatable", false, "slice failed");
+    } else {
+      const hostFields = new Set();
+      // `key: value` lines (`ok: true`, `pollSeconds: …`).
+      for (const m of block.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)) hostFields.add(m[1]);
+      // Bare shorthand lines (`loggedIn,`, `balance,`).
+      for (const m of block.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*,?\s*$/gm)) hostFields.add(m[1]);
+      // `pickDefined({ … })` — the first identifier of each comma-split segment
+      // is the key, so `{ scanUrl: scan?.url }` yields `scanUrl`, not `url`.
+      for (const m of block.matchAll(/pickDefined\(\{([\s\S]*?)\}\)/g)) {
+        for (const segment of m[1].split(",")) {
+          const id = segment.match(/[A-Za-z_$][\w$]*/);
+          if (id) hostFields.add(id[0]);
+        }
+      }
+      // A conditional object literal (`...(cond ? { loginError } : {})`).
+      for (const m of block.matchAll(/\{\s*([A-Za-z_$][\w$]*)\s*\}/g)) hostFields.add(m[1]);
+
+      const declaredFields = new Set();
+      for (const m of iface[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\??\s*:/gm)) declaredFields.add(m[1]);
+
+      const debugOnly = new Set(TRIAGE_KEYS);
+      const hostOnly = [...hostFields].filter((f) => !declaredFields.has(f) && !debugOnly.has(f));
+      const declaredOnly = [...declaredFields].filter((f) => !hostFields.has(f));
+
+      check("G every field the route produces is declared in the shared wire contract",
+        hostOnly.length === 0, hostOnly.join(", "));
+      check("G every declared field is produced by the route (no phantom contract keys)",
+        declaredOnly.length === 0, declaredOnly.join(", "));
+      // The size agreement is over the ROUTE's own fields and the DECLARED set
+      // only: the `?debug=1` scaffold lives in the `diagnostics` object above
+      // the return block and is spread in by name, so its keys never appear in
+      // `hostFields` — the two subset checks above already make room for them.
+      check("G the declaration and the route agree in size",
+        hostFields.size === declaredFields.size,
+        `route ${hostFields.size} / declared ${declaredFields.size} (debug-only ${debugOnly.size} excluded by design)`);
+    }
+  }
 }
 
 // The two groups that drive the REAL coalescing cache serve their own fetch;

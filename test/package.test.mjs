@@ -90,13 +90,22 @@ while (queue.length > 0) {
   }
 }
 check("the host source graph is walkable", seen.size > 0, `${seen.size} module(s) reached`);
-// Every reachable source must live under src/host (the build's input root).
+// Every reachable source must live under src/host (the build's input root),
+// with ONE declared exception: `src/shared/`. That directory is the wire
+// contract both halves read (`src/shared/wire.ts`) — TYPE-ONLY exports, erased
+// by tsdown at build time, so they add no runtime code to either bundle. Keep
+// it that way: a runtime export there would be the first host logic to enter
+// the browser artifact, and it would loosen the isolation that
+// `docs/ARCHITECTURE.md` §5 assumes.
+const SHARED_ROOT = join(root, "src", "shared");
 let outside = 0;
 for (const file of seen) {
-  if (!file.startsWith(join(root, "src", "host"))) outside += 1;
+  const inHost = file.startsWith(join(root, "src", "host"));
+  const inShared = file.startsWith(SHARED_ROOT);
+  if (!inHost && !inShared) outside += 1;
 }
-check("every host source reachable from the entry lives under src/host", outside === 0,
-  outside === 0 ? "" : `${outside} source(s) escaped src/host`);
+check("every host source reachable from the entry lives under src/host (shared type root excepted)",
+  outside === 0, outside === 0 ? "" : `${outside} source(s) escaped src/host`);
 // The full graph is published as the `lib` directory (one bundle), so the
 // whitelist must contain it.
 check("files whitelists the built lib/ output", hasLib, hasLib ? "" : "lib missing from files — the host bundle would ship nothing");

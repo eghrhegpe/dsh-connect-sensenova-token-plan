@@ -26,6 +26,7 @@ import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedMod
 import { catalogSignature, syncSignaturesAfterPublish } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
 import { str, errMsg } from "./util.ts";
+import type { SnapshotData } from "../shared/wire.ts";
 
 /**
  * The operator's pseudo multiplier that names one model id, or undefined.
@@ -134,7 +135,7 @@ export function failureCode(error) {
  *   provider switch (`provider-store.enabled()`); null when untouched.
  * @param {() => Promise<boolean|null>} context.drawSwitch - the panel-saved
  *   draw-tool switch (`draw-store.enabled()`), same shape and precedence.
- * @returns {Promise<object>} the snapshot body (`{ ok, now, ..., pools, trend, ... }`).
+ * @returns {Promise<SnapshotData>} the snapshot body (`{ ok, now, ..., pools, trend, ... }`).
  */
 export async function buildSnapshotBody({
   settings,
@@ -147,7 +148,7 @@ export async function buildSnapshotBody({
   panelSwitch,
   drawSwitch,
   drawModelId
-}) {
+}): Promise<SnapshotData> {
   const providerState = publisher.state;
   const resolveApiKey = async () => (await apiKeyStore.resolve()).value;
 
