@@ -24,6 +24,7 @@
 import { LLM_PROVIDER_ID, LLM_DISPLAY_NAME } from "./llm-models.ts";
 import { identifyVisionModel } from "./parsers.ts";
 import { str } from "./util.ts";
+import { resolveSwitchEnabled } from "./switch-precedence.ts";
 import {
   createPublishQueue,
   createPairReleaser,
@@ -199,6 +200,18 @@ export function createProviderPublisher(deps: HostDeps = {}) {
     const previousEntries = state.entries;
     const previousEnabledIds = state.enabledIds;
     const previousUnavailable = state.unavailableIds;
+    // The three domain fields are written BEFORE the switch is consulted, and
+    // the switch-off branch below deliberately does NOT roll them back. That
+    // asymmetry is load-bearing, not an oversight: `routes/provider.ts` and
+    // `routes/models.ts` re-publish from exactly these fields when the switch
+    // comes back on, so they are where the user's allow-list edits and the last
+    // fetched catalogue must SURVIVE the off period. Restoring `previous*`
+    // here would silently discard both — a save made while the provider was
+    // switched off would vanish the moment it was switched on again.
+    // `swapRegistration`'s `onRollback` does restore them, but only for the
+    // path where a registration actually threw (PITFALLS §19) — a failure
+    // that must leave the previously serving pair serving, which is a
+    // different promise from "the switch is off".
     state.entries = Array.isArray(entries) ? entries : [];
     state.enabledIds = Array.isArray(enabledIds) ? enabledIds : [];
     state.unavailableIds = Array.isArray(unavailableModelIds) ? unavailableModelIds : [];
@@ -207,7 +220,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
     // panel-first (`provider-store.ts`), falling back to the patch value —
     // re-read here on every publish, so a flip applies without a restart.
     const panelValue = await effectivePanelSwitch().catch(() => null);
-    const registerWanted = panelValue ?? effectiveSettings.registerProvider === true;
+    const registerWanted = resolveSwitchEnabled(panelValue, effectiveSettings.registerProvider);
     if (!registerWanted) return unregister({ state, release });
     const llm = resolveRegistrationService({ state, getLlm: effectiveGetLlm, release });
     if (llm === null) return { ok: false, error: state.error };

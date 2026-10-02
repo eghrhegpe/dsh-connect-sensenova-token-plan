@@ -136,6 +136,16 @@ export const CREDENTIAL_REFUSALS: ReadonlySet<string> = Object.freeze(new Set([
  * walk, but it names a MISCONFIGURED row (an operator fix), not a failed token
  * acquisition — so `failureCode` maps it to {@link CODE.CONFIG_ERROR} and the
  * panel says "fix the row" instead of inviting a sign-in.
+ *
+ * {@link CODE.JWT_EXPIRED} is absent for a different and equally deliberate
+ * reason, and it is the one a future reader is most likely to "fix" by mistake:
+ * it means a token WAS obtained and the console then refused it (PITFALLS §4
+ * — 401 proves a token was rejected, not that none was ever issued), so it is
+ * not a failure to ACQUIRE one. `failureCode` passes it through verbatim,
+ * beside {@link CODE.NOT_CONFIGURED}, and the panel gives it its own wording.
+ * Folding it into the generic {@link CODE.AUTH_ERROR} would erase exactly the
+ * distinction that tells the user whether to wait for a silent renewal or to
+ * act. Do not add it here without moving that pass-through with it.
  * @type {ReadonlySet<string>}
  */
 export const AUTH_FAILURE_CODES: ReadonlySet<string> = Object.freeze(new Set([

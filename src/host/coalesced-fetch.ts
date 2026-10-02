@@ -161,7 +161,20 @@ export function createCoalescedFetch(options: {
     })().finally(() => {
       // Runs on BOTH paths: a rejection must not leave a poisoned promise
       // behind, or every later reader of this key inherits that failure.
-      inflight.delete(key);
+      //
+      // The identity check is load-bearing, not a micro-optimization. This
+      // finally belongs to a flight born under an OLD generation, and it can
+      // settle LONG after a `clear()` (which does `inflight.delete(key)` and a
+      // later read installs a FRESH flight for the same key). Deleting
+      // unconditionally would let the discarded flight evict its own
+      // successor: the next reader would find the slot empty and start a
+      // SECOND producer for a key that is already in flight — silently
+      // breaking the single-flight property this module exists to provide,
+      // and sending the panel back into the platform's rate limiter.
+      // Deleting only the promise that still occupies the slot leaves an
+      // unrelated flight untouched. (The evicted flight's own cache write is
+      // already handled by the `gen` check on read.)
+      if (inflight.get(key) === flight) inflight.delete(key);
     });
     inflight.set(key, flight);
     return flight;

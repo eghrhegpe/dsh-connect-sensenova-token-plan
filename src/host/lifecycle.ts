@@ -26,6 +26,7 @@ import { retryBounded, errMsg } from "./util.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
+import { resolveSwitchEnabled } from "./switch-precedence.ts";
 
 /** How many times a mount-time optional-service read is retried. */
 const SERVICE_RETRY_ATTEMPTS = 3;
@@ -125,7 +126,15 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
   const { settings, configError, providerState, catalogStore, resolveApiKey, publisher, drawStore } = wiring;
   const { loadToolsModule, drawFetch } = side;
   if (configError !== null) return;
-  const effectiveDrawEnabled = (drawStore ? await drawStore.enabled().catch(() => null) : null) ?? settings.drawEnabled;
+  // The panel's saved switch beats the patch default — resolved by the one
+  // adjudicator (`switch-precedence.ts`), not a hand-copied `?? settings.x`
+  // dialect. A tool has no source to report (unlike the panel snapshot, which
+  // tells the user WHICH side is in charge), so only the effective boolean is
+  // taken here.
+  const effectiveDrawEnabled = resolveSwitchEnabled(
+    drawStore ? await drawStore.enabled().catch(() => null) : null,
+    settings.drawEnabled
+  );
   if (effectiveDrawEnabled !== true) return;
   // Same precedence as the switch: a panel-saved model preference beats the
   // patch's `drawModelId` (empty string = auto-pick from the catalog).

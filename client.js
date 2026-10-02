@@ -3224,6 +3224,18 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		*/
 		const generation = useRef(0);
 		/**
+		* The request currently on the wire, so a superseded read can be ABORTED.
+		*
+		* The generation guard alone only stops a stale answer from being WRITTEN;
+		* the superseded request keeps occupying a Host connection until it settles
+		* on its own. The quota tab says so at the top of its `load`, and it matters
+		* most here: a scan drops this loop to a 2 s cadence, so a slow read can be
+		* superseded several times in a row and each one holds a connection open for
+		* nothing. Cancelling is not just ignoring — it also keeps the Host from
+		* serving a request the user has already navigated away from.
+		*/
+		const inFlight = useRef(null);
+		/**
 		* The time of the last SUCCESSFUL read — what the header's "更新于" shows.
 		*
 		* A failed read keeps it (the data is stale, not gone) but must still forward
@@ -3251,6 +3263,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			const at = Date.now();
 			const mine = generation.current += 1;
 			const isCurrent = () => alive.current && generation.current === mine;
+			inFlight.current?.abort?.();
+			const controller = typeof AbortController === "function" ? new AbortController() : null;
+			inFlight.current = controller;
 			/** Record a failed read: forward it to the header, the only place that renders it. */
 			const fail = (message) => {
 				if (!isCurrent()) return;
@@ -3259,7 +3274,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			try {
 				const response = await fetch(RACCOON_PATH, {
 					headers: { accept: "application/json" },
-					cache: "no-store"
+					cache: "no-store",
+					...controller ? { signal: controller.signal } : {}
 				});
 				if (!isCurrent()) return;
 				if (!response.ok) {
@@ -3282,6 +3298,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				report(null);
 			} catch {
 				fail("unable to reach the Host");
+			} finally {
+				if (inFlight.current === controller) inFlight.current = null;
 			}
 		}, [report, tt]);
 		loadRef.current = () => void load();
@@ -3300,6 +3318,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				alive.current = false;
 				generation.current += 1;
 				if (timer !== null) clearInterval(timer);
+				inFlight.current?.abort?.();
 			};
 		}, [
 			load,

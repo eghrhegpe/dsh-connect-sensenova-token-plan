@@ -95,6 +95,18 @@ export function RaccoonTab({
    */
   const generation = useRef(0);
   /**
+   * The request currently on the wire, so a superseded read can be ABORTED.
+   *
+   * The generation guard alone only stops a stale answer from being WRITTEN;
+   * the superseded request keeps occupying a Host connection until it settles
+   * on its own. The quota tab says so at the top of its `load`, and it matters
+   * most here: a scan drops this loop to a 2 s cadence, so a slow read can be
+   * superseded several times in a row and each one holds a connection open for
+   * nothing. Cancelling is not just ignoring — it also keeps the Host from
+   * serving a request the user has already navigated away from.
+   */
+  const inFlight = useRef<{ abort?: () => void } | null>(null);
+  /**
    * The time of the last SUCCESSFUL read — what the header's "更新于" shows.
    *
    * A failed read keeps it (the data is stale, not gone) but must still forward
@@ -130,13 +142,25 @@ export function RaccoonTab({
     const at = Date.now();
     const mine = (generation.current += 1);
     const isCurrent = () => alive.current && generation.current === mine;
+    // Cancel the superseded read, not merely ignore its answer (see `inFlight`).
+    inFlight.current?.abort?.();
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    inFlight.current = controller;
     /** Record a failed read: forward it to the header, the only place that renders it. */
     const fail = (message: string) => {
       if (!isCurrent()) return;
       report(message);
     };
     try {
-      const response = await fetch(RACCOON_PATH, { headers: { accept: "application/json" }, cache: "no-store" });
+      const response = await fetch(RACCOON_PATH, {
+        headers: { accept: "application/json" },
+        cache: "no-store",
+        // Spread rather than `signal: controller?.signal`: this project compiles
+        // with `exactOptionalPropertyTypes`, where an explicit `undefined` is
+        // not assignable to `signal` (`AbortSignal | null`). Matches the quota
+        // hook's own fetch.
+        ...(controller ? { signal: controller.signal } : {})
+      });
       // A superseded read says nothing; a CURRENT non-OK answer is a failure.
       // This used to `return` silently on any non-OK status, so a 401/500 left
       // the tab in its previous state forever while the poll continued. The
@@ -174,6 +198,11 @@ export function RaccoonTab({
       report(null);
     } catch {
       fail("unable to reach the Host");
+    } finally {
+      // The attempt is over either way. Only the CURRENT load may clear the
+      // slot: a superseded read that settles late must not wipe the pointer
+      // its own successor installed.
+      if (inFlight.current === controller) inFlight.current = null;
     }
   }, [report, tt]);
 
@@ -215,6 +244,11 @@ export function RaccoonTab({
       // pass the liveness test and overwrite the new loop's fresher answer.
       generation.current += 1;
       if (timer !== null) clearInterval(timer);
+      // The generation bump above only stops the read from being WRITTEN; this
+      // releases the connection it was holding. Quota's hook does the same in
+      // its cleanup, and for the same reason: `alive = false` alone leaves an
+      // already-sent fetch to settle on an unmounted (or superseded) tab.
+      inFlight.current?.abort?.();
       // NOTE: the header is deliberately NOT cleared here. This cleanup also
       // runs on every cadence rebuild (entering/leaving a scan), where the tab
       // is still mounted — clearing wiped the header's raccoon cluster until

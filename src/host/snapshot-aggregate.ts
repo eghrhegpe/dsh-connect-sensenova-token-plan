@@ -26,6 +26,7 @@ import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedMod
 import { catalogSignature, syncSignaturesAfterPublish } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
 import { str, errMsg } from "./util.ts";
+import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
 import type { SnapshotData } from "../shared/wire.ts";
 
 /**
@@ -277,6 +278,12 @@ export async function buildSnapshotBody({
   // The effective switch: a panel-saved value beats the patch default. Both
   // are reported so the panel can say which side is in charge.
   const effectivePanelSwitch = await panelSwitch().catch(() => null);
+  // Same read for the draw switch, taken ONCE. It used to be read twice — once
+  // for the value and once for the source — and a store that flipped between
+  // the two awaits could answer "enabled from panel" for one field and "off
+  // from config" for the other, a self-contradictory pair the panel would then
+  // render. Mirrors the provider switch above.
+  const effectiveDrawPanelSwitch = await drawSwitch?.().catch(() => null) ?? null;
   // The curated allow-list is read on every poll, not only when a fresh
   // catalogue arrived: a /models save must reach the picker even on a poll
   // that serves a cached catalogue.
@@ -319,8 +326,8 @@ export async function buildSnapshotBody({
   // the key value.
   const llmStatus = {
     ...keyState,
-    registerProvider: (effectivePanelSwitch ?? settings.registerProvider) === true,
-    registerSource: effectivePanelSwitch === null ? "config" : "panel",
+    registerProvider: resolveSwitchEnabled(effectivePanelSwitch, settings.registerProvider),
+    registerSource: switchSource(effectivePanelSwitch),
     llmAvailable: providerState.llmAvailable,
     providerRegistered: providerState.registered,
     providerId: LLM_PROVIDER_ID,
@@ -342,8 +349,8 @@ export async function buildSnapshotBody({
     }),
     enabledModelIds: enabledIds,
     quotaBlockedModelIds: unavailableModelIds,
-    drawEnabled: (await drawSwitch?.().catch(() => null) ?? settings.drawEnabled) === true,
-    drawSource: await drawSwitch?.().catch(() => null) === null ? "config" : "panel",
+    drawEnabled: resolveSwitchEnabled(effectiveDrawPanelSwitch, settings.drawEnabled),
+    drawSource: switchSource(effectiveDrawPanelSwitch),
     // A draw call's actual target model, picked by the same precedence the
     // tool itself uses (`pickDrawModel`) over the same normalized catalog —
     // so the panel's line and the tool's behavior cannot disagree. Emitted
