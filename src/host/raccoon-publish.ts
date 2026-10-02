@@ -43,6 +43,18 @@ import {
   BAD_FACTORY_SHAPE_ERROR
 } from "./publish-core.ts";
 import type { RaccoonPublisherDeps } from "./types.ts";
+import type { PublisherStateBase } from "./publish-core.ts";
+
+/**
+ * The Raccoon publisher's live state: the shared registration fields plus the
+ * roster facts this upstream rolls back on.
+ */
+export interface RaccoonPublisherState extends PublisherStateBase {
+  /** The roster the current registration was built from. */
+  rows: any[];
+  /** A cheap signature of the offered roster (ids + vision bits). */
+  signature: string;
+}
 
 /**
  * The Raccoon provider publisher.
@@ -86,7 +98,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
   const effectiveLogger = logger ?? { warn: () => {} };
 
   /** The live Raccoon registration state. */
-  const state = {
+  const state: RaccoonPublisherState = {
     /** The roster the current registration was built from. */
     rows: [],
     /** A cheap signature of the offered roster (ids + vision bits). */

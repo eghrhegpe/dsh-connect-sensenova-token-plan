@@ -29,10 +29,116 @@ import { createAuth } from "../sensenova-auth.ts";
 import { createMemoryThrottleStore } from "../throttle-store.ts";
 import { name as RECORD_SCOPE } from "../host-config.ts";
 
+/**
+ * The credential backend the blocks read and write through.
+ *
+ * Two implementations exist: the real DSH credentials service (resolved per
+ * use, so it may register after mount) and the in-memory vault above. The
+ * methods are the subset the store actually calls — declared so a block's
+ * `backend().readRecord(...)` is not a read off `unknown`.
+ */
+export interface CredentialBackend {
+  readRecord(key: string): Promise<unknown>;
+  modifyRecord(key: string, mutate: (current: unknown) => unknown): Promise<unknown>;
+  deleteRecord(key: string): Promise<unknown>;
+  resolve(ref: string): Promise<{ value?: unknown; source?: string } | undefined>;
+  set(ref: string, value: string): Promise<unknown>;
+  unset(ref: string): Promise<unknown>;
+}
+
+/** The throttle store the blocks persist refusals through (`throttle-store.ts`). */
+export interface ThrottleStore {
+  read(): Promise<HeldThrottle | null>;
+  write(held: HeldThrottle): Promise<unknown>;
+  clear(): Promise<unknown>;
+}
+
+/** The auth instance (`createAuth()`), as the login/renewal blocks consume it. */
+export interface AuthLike {
+  login(credentials: { username: string; password: string }, options?: { onTrace?: unknown }): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    [key: string]: unknown;
+  }>;
+  refresh(refreshToken: string, options?: unknown): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    [key: string]: unknown;
+  }>;
+}
+
+/**
+ * The read side of the store context — everything the four blocks may reach.
+ *
+ * Declared for the same reason as {@link TokenStoreState}: the inferred literal
+ * left `credentials` typed as its `null` default and `backend` as a function
+ * over `unknown`, which is what pushed `never` into the blocks downstream.
+ */
+export interface StoreContextWiring {
+  credentials?: unknown;
+  auth: AuthLike;
+  env: Record<string, string | undefined>;
+  skewMs: number;
+  throttleStore: ThrottleStore;
+  now: () => number;
+  onTrace?: (hops: unknown[], error: unknown) => void;
+  credentialKey: (scope: string, id: string) => string;
+  key: string;
+  THROTTLE_KEY: string;
+  backend: () => CredentialBackend;
+  ephemeral: () => boolean;
+}
+
 /** Record address: this plugin's own namespace, so a stranger cannot collide. */
 const RECORD_ID = "sensenova-console";
 const THROTTLE_ID = "sensenova-console-throttle";
 const DEFAULT_SKEW_MS = 120_000;
+
+/** The stored grant shape `grant.ts` parses and `acquire` carries. */
+export interface StoredGrant {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number | null;
+}
+
+/**
+ * The refusal a throttle stands for (`throttle.ts` owns the semantics).
+ *
+ * `until` is `null` for a parked (credential-shaped) refusal: it has no
+ * deadline, so there is nothing to count down.
+ */
+export interface HeldThrottle {
+  code: string;
+  parked: boolean;
+  until: number | null;
+  attempt: number;
+}
+
+/**
+ * The seven mutable fields the four blocks share (see the module doc above).
+ *
+ * Declared rather than inferred (docs/IMPROVEMENTS.md §8): under
+ * strictNullChecks a bare object literal pins each field to its INITIALIZER's
+ * type, so `cached: null` became the type `null` and `rejected: new Set()`
+ * became `Set<never>` — every reader downstream then saw `never`. The runtime
+ * values are unchanged; only the declaration is now explicit.
+ */
+export interface TokenStoreState {
+  /** In-memory token for this process; the record is the durable truth. */
+  cached: StoredGrant | null;
+  /** Tokens the console has already refused (never handed out again). */
+  rejected: Set<string>;
+  /** One in-flight acquisition, so N concurrent polls share one login. */
+  inflight: Promise<string> | null;
+  /** Last failure, surfaced to the panel instead of a bare "not configured". */
+  lastError: unknown;
+  /** The refusal in force, or `null` when sign-in may be attempted. */
+  throttle: HeldThrottle | null;
+  /** How many refusals in a row this store has seen (survives the throttle). */
+  consecutiveRefusals: number;
+  /** True once a legacy stored password has been swept. */
+  passwordSwept: boolean;
+}
 
 /**
  * Build one store instance's wiring + state.
@@ -55,7 +161,16 @@ export function createStoreContext({
   now = Date.now,
   onTrace,
   credentialKey
-}) {
+}: {
+  credentials?: unknown;
+  auth?: AuthLike;
+  env?: Record<string, string | undefined>;
+  skewMs?: number;
+  throttleStore?: ThrottleStore;
+  now?: () => number;
+  onTrace?: (hops: unknown[], error: unknown) => void;
+  credentialKey: (scope: string, id: string) => string;
+}): { wiring: StoreContextWiring; state: TokenStoreState } {
   const key = credentialKey(RECORD_SCOPE, RECORD_ID);
   const THROTTLE_KEY = credentialKey(RECORD_SCOPE, THROTTLE_ID);
   // Resolved here rather than as a parameter default, for two reasons.
@@ -130,7 +245,7 @@ export function createStoreContext({
     ephemeral
   };
 
-  const state = {
+  const state: TokenStoreState = {
     /** In-memory token for this process; the record is the durable truth. */
     cached: null,
     /**

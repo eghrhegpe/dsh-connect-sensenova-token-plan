@@ -522,3 +522,35 @@ provider-publish 5 / raccoon-publish 5 / index 3 / sensenova-auth 1 / api-key-st
 raccoon-store 1 / llm-error-fix 1 / raccoon-llm-adapter 1。每处需人判 null 语义 + 消费形状契约，
 按 `store-baseline` 那样的"逐帧评审 + 显式重生成"规格做，独立大 PR。
 
+---
+
+**批次C（2026-10-02）——登录/装配路径毕业，allowlist 收束为全局翻转**。
+
+上面"真·backlog"里的 43 处，实际探针（`strictNullChecks` + `noUncheckedIndexedAccess` 全项目，
+含 client + shared + host）为 **34 处**、跨 14 文件（43 是早前快照，部分已被批次A/B 顺手吸收）。
+本节按"修根因不逐点打补丁"的次序清到 0，全部纯类型层、`store-baseline` 零漂移（见下）：
+
+| 根因 | 手法 | 命中文件 |
+|---|---|---|
+| `let x = null` / `x: null` 字面量把类型锁成 `null` | 声明处给可赋值类型（`string \| null`、`T \| null`） | token-store、provider-publish、raccoon-publish、raccoon-status、raccoon-store、index |
+| `const a = []` 推断 `never[]` | 补元素类型（`Buffer[]`、`any[]`、`string[]`） | routes、sensenova-auth、llm-models |
+| **带默认初值的参数**由初值定型（`fallback = null`、`error = null`、`credentials = null`、`= []`） | 显式注解参数类型（`.ts` 里 JSDoc 不产类型） | util、publish-core、api-key-store、provider-publish、index |
+| 捕获组 `match[1]` 在 `noUncheckedIndexedAccess` 下为 `string\|undefined` | 归一到已声明契约（`?? null`）；该正则组 1 匹配时必有值 | llm-error-fix（真缺陷：`!== null` 守卫漏 `undefined`） |
+| 共享原语下游投影不匹配 | 一处修全：`optional<T,F>` 泛型化；`pickDefined` 返回值类型 `Exclude<null\|undefined>`（旧类型把 `{error}` 撑成 `string\|null`，RaccoonState.error 只收 `string`） | util |
+| **消费方形状之争**（§8 末尾"留独立大 PR"那条） | 逐帧裁定：`RaccoonState.models` 改 `readonly RaccoonModel[]`（全仓只读，无一处 push；测试用引用相等钉住 frozen fallback，`RaccoonModel[]` 是被违背的契约）+ client `RaccoonRoster` prop 同步；`roster` 显式 `readonly`；`settled` 收窄为带 `accessToken: string` 的交集类型（`raccoon-walk` 保存凭据处原为 `string\|undefined` → 真缺陷）；`publishProvider` 参数 `string[]` 注解（原 `never[]`）；`resolveToken` 改必填（对齐姊妹 `createSensenovaAdapter.resolveApiKey`，去掉 `= {}` 默认） | wire、raccoon-roster、raccoon-status、raccoon-walk、raccoon-llm-adapter、types、index、provider-publish |
+| 装配对象与 `Wiring` 声明不符 | 根因是 `publishProvider` 的 `never[]`，非 `Wiring` 本身 | index |
+
+`token-store` 整条链路（含 5 个 block）通过把隐式字面量升成显式接口 `TokenStoreState`
+/ `StoreContextWiring` / `StoredGrant` / `HeldThrottle` / `AuthLike` / `CredentialBackend`
+/ `ThrottleStore` 清零，`isFresh` 补 `token is StoredGrant` 类型谓词（其运行时契约本就
+"非 null 才算 fresh"，谓词不新增检查）。两个 publisher 的共享注册态收进
+`publish-core.PublisherStateBase`，领域差异（catalog 行 vs roster 行）留在各自的
+`ProviderPublisherState` / `RaccoonPublisherState`——正是 publish-core 头注的共享/差异纪律。
+
+**allowlist 收束**：34 处清零后，allowlist 覆盖已达 src 100%，per-file 分档机制的历史使命
+完成——**`tsconfig.json` 直接开 `strictNullChecks: true`**（§8 的"整体硬开"判为独立大 PR，
+如今以"逐档毕业到 100% 再翻转"的次序落地，而不是一次性 142 处硬开）。
+`tsconfig.strict-null.json` 保留（`typecheck-gate` 硬性要求存在），但已退化为与主配置
+等价的双重确认。验证：`npm test` 全绿（含 `typecheck-gate` 两份 config、`store-baseline`
+零漂移、`build-gate`、`e2e-gate`）。
+

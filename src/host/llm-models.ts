@@ -439,7 +439,12 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
     }
     out[seen.get(id)] = toPiDescriptor({ ...entry, id }, { providerId, baseUrl });
   }
-  return out;
+  // Every `undefined` pushed above is overwritten at that same index before the
+  // loop advances (see the comment on `out`), so no hole survives to here. The
+  // assertion states that invariant rather than re-filtering at runtime: a
+  // `filter` would allocate a second array on every catalog poll, and this
+  // function's contract is `object[]`, not "maybe a hole".
+  return out as object[];
 }
 
 /**

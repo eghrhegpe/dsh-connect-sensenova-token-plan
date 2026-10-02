@@ -224,7 +224,13 @@ export interface RaccoonState {
    *  failed outright ("unreadable") — the last two both fall back to the
    *  built-in table, but they must be worded differently. */
   modelsSource?: "live" | "empty" | "unreadable";
-  models?: RaccoonModel[];
+  /**
+   * The roster the tab draws. `readonly` because it is never mutated: the
+   * "empty"/"unreadable" paths pass the FROZEN `RACCOON_FALLBACK_MODELS`
+   * straight through (a test pins that by reference), so a mutable `RaccoonModel[]`
+   * would be a type that no runtime value satisfies.
+   */
+  models?: readonly RaccoonModel[];
   /** The saved pushed-model curation (`null`/absent = the whole roster). */
   enabledModelIds?: string[] | null;
   providerRegistered?: boolean;

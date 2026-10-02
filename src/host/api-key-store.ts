@@ -37,7 +37,7 @@ export const API_KEY_REF = "SENSENOVA_API_KEY";
  * @param {object} [options.env] - environment source; defaults to `process.env`.
  * @returns {{save: Function, forget: Function, resolve: Function, state: Function}}
  */
-export function createApiKeyStore({ credentials = null, env = process.env } = {}) {
+export function createApiKeyStore({ credentials = null, env = process.env }: { credentials?: unknown; env?: Record<string, string | undefined> } = {}) {
   /** Fallback vault for a Host that has no credentials service. */
   const memory = new Map();
 

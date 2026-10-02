@@ -133,8 +133,14 @@ export interface RaccoonAdapterOptions {
   rows?: any[];
   /** The credential's office identity (`""` for a personal account). */
   officeIdentity?: string;
-  /** Resolve the live Raccoon JWT per request (refreshes inside the expiry window first). */
-  resolveToken?: () => Promise<string>;
+  /**
+   * Resolve the live Raccoon JWT per request (refreshes inside the expiry window first).
+   *
+   * REQUIRED, not optional: an adapter without a token resolver can never serve
+   * a request — `assemblePiAiAdapter` calls it on every call. `createSensenovaAdapter`
+   * requires `resolveApiKey` for the same reason (docs/IMPROVEMENTS.md §8).
+   */
+  resolveToken: () => Promise<string>;
   /** Service resolver for the image hooks (`attachments`, `fs`). */
   get?: (service: string) => any;
 }

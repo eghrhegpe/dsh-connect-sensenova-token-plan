@@ -83,7 +83,7 @@ function writeJson(res: any, status: number, body: unknown, headers: Record<stri
  * @returns {Promise<{ok: true, value: object} | {ok: false, error: string}>}
  */
 async function readJsonBody(request: any, limit = MAX_ACCOUNT_BODY_BYTES) {
-  const chunks = [];
+  const chunks: Buffer[] = [];
   let received = 0;
   try {
     for await (const chunk of request) {

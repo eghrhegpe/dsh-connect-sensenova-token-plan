@@ -113,10 +113,14 @@ export function looksLikeRateLimit(message) {
  * @param {string} message
  * @returns {string|null}
  */
-export function extractStructuredType(message) {
+export function extractStructuredType(message): string | null {
   if (typeof message !== "string" || message.length === 0) return null;
   const match = STRUCTURED_TYPE.exec(message);
-  return match ? match[1] : null;
+  // `match[1]` reads as `string | undefined` under `noUncheckedIndexedAccess`,
+  // but group 1 always participates in this pattern, so it is never absent when
+  // the regex matched. The `?? null` states that against the declared return
+  // type rather than widening it (docs/IMPROVEMENTS.md §8).
+  return match ? (match[1] ?? null) : null;
 }
 
 /**

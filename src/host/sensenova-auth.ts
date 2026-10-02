@@ -271,7 +271,10 @@ function sanitizeBody(text) {
  * @returns {{hops: object[], step(name, info): void, done(): object[]}}
  */
 function createTrace() {
-  const hops = [];
+  // Element type declared: `hops.push({...})` below is otherwise a push onto
+  // `never[]` under strictNullChecks (the literal infers `never[]` with
+  // `noImplicitAny` off). The hop shape is documented on `step`.
+  const hops: any[] = [];
   return {
     hops,
     /** Record one hop; never throws — logging must not break the flow. */

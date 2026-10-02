@@ -28,6 +28,18 @@
 import { RACCOON_QR_STATUS, RACCOON_QR_POLL_INTERVAL_MS, RACCOON_LOGIN_TIMEOUT_MS, generateRaccoonQrCode, raccoonQrLoginUrl } from "./raccoon.ts";
 import type { RaccoonQrPollResult } from "./raccoon.ts";
 
+/**
+ * A settled scan carrying the credential pair.
+ *
+ * `pollRaccoonQrLogin` only reports `success` WITH a non-empty `accessToken`
+ * (a tokenless success stays `pending`), so the pair is guaranteed here — but
+ * `RaccoonQrPollResult` must keep `accessToken` optional for the other
+ * statuses. Narrowing once at the boundary is what lets `saveCredential`
+ * receive a `string` without a runtime re-check of a guarantee the parser
+ * already made (docs/IMPROVEMENTS.md §8).
+ */
+type SettledScan = RaccoonQrPollResult & { accessToken: string; refreshToken: string };
+
 /** The terminal outcomes the tab reads. */
 export const LOGIN_STATUS = Object.freeze({
   scanning: "scanning",
@@ -116,7 +128,7 @@ export function createRaccoonWalk(options: {
 
     const deadline = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
     let canceled = false;
-    let settled: RaccoonQrPollResult | null = null;
+    let settled: SettledScan | null = null;
 
     try {
       while (Date.now() < deadline) {
@@ -128,7 +140,10 @@ export function createRaccoonWalk(options: {
           poll = { status: RACCOON_QR_STATUS.PENDING };
         }
         if (poll.status === RACCOON_QR_STATUS.SUCCESS) {
-          settled = poll;
+          // The parser guarantees a non-empty pair on `success` (a tokenless
+          // success is reported as `pending`, never here) — this narrowing
+          // states that contract instead of re-checking it at runtime.
+          settled = poll as SettledScan;
           break;
         }
         if (poll.status === RACCOON_QR_STATUS.CANCELED) {

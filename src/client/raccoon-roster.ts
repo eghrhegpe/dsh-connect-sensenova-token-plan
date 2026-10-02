@@ -62,7 +62,7 @@ export type { RaccoonModel };
  * @returns {unknown} the roster list element.
  */
 export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered, onToggle }: {
-  models: RaccoonModel[];
+  models: readonly RaccoonModel[];
   tt: Tt;
   source?: "live" | "empty" | "unreadable";
   enabledIds?: string[] | null;

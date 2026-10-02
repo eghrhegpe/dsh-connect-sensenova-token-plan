@@ -100,12 +100,18 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // A malformed row is reported through the snapshot rather than thrown out of
   // `apply`, which would take the whole plugin down at mount.
   const { settings, configError: rowError } = resolveSettings(config);
-  let configError = rowError;
+  let configError: string | null = rowError;
   // Build the auth instance once, at mount: after this every console call,
   // token renewal, and password seal uses the configured hosts. A malformed
   // override must fail loudly here rather than become a baffling network error
   // on the first poll.
-  let auth = null;
+  //
+  // Declared `any` rather than inferred from the `null` initializer: under
+  // strictNullChecks that initializer pins the type to `null`, so the
+  // `createAuth(...)` assignment below and every `auth` read were type errors
+  // (docs/IMPROVEMENTS.md §8 — the shape is pinned by `createAuth` and the
+  // token store, not by this annotation).
+  let auth: any = null;
   if (configError === null) {
     try {
       auth = createAuth(settings.auth);
@@ -212,7 +218,12 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     logger: ctx.logger
   });
   const providerState = publisher.state;
-  const publishProvider = (entries, enabledIds, unavailableModelIds = []) =>
+  // `unavailableModelIds` is annotated rather than left to the `= []`
+  // initializer: a default initializer types the parameter from it, so without
+  // the annotation it read as `never[]` and `publisher.publish` (which takes a
+  // `string[]`) was unreachable — and the wrapper's OWN type in `Wiring`
+  // declared the parameter as `string[]` (docs/IMPROVEMENTS.md §8).
+  const publishProvider = (entries, enabledIds, unavailableModelIds: string[] = []) =>
     publisher.publish(entries, enabledIds, unavailableModelIds);
   const releaseProvider = () => publisher.release();
 

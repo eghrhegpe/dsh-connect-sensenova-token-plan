@@ -70,13 +70,16 @@ export async function resolveServiceWithRetry(
   // and in a `.ts` file `@param` / `@type` are comments, not type sources — so
   // the destructuring below would read three properties off `{}` (TS2339).
   options: { isDisposed?: () => boolean; attempts?: number; delayMs?: number } = {}
-) {
+): Promise<any> {
   const {
     isDisposed = () => false,
     attempts = SERVICE_RETRY_ATTEMPTS,
     delayMs = SERVICE_RETRY_DELAY_MS
   } = options;
-  let found = null;
+  // Declared `any`, not inferred from `null`: under strictNullChecks the
+  // initializer pins the type to `null`, so every assignment below (and every
+  // `tools.register` / `settings.update` at the call site) read as `never`.
+  let found: any = null;
   await retryBounded({
     attempts,
     delayMs,
@@ -227,7 +230,11 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
             await raccoonStore.refresh().catch(() => {});
           }
           const { credential: live } = await raccoonStore.resolve().catch(() => ({ credential: null }));
-          let rows = RACCOON_FALLBACK_MODELS;
+          // Declared as a mutable row array rather than inferred from the
+          // frozen fallback table: the live catalogue (a plain array) replaces
+          // it below, and inferring from `Object.freeze([...])` would make that
+          // assignment a readonly-vs-mutable error. Runtime value unchanged.
+          let rows: any[] = RACCOON_FALLBACK_MODELS as any[];
           if (live?.accessToken) {
             const catalog = await fetchRaccoonCatalog(live).catch(() => null);
             if (catalog !== null && catalog.length > 0) rows = catalog;

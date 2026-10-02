@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto";
 import { fetchRaccoonBalance, fetchRaccoonCatalog, RACCOON_FALLBACK_MODELS, RACCOON_QR_POLL_INTERVAL_MS } from "./raccoon.ts";
 import { str, redactSecrets, optional, errMsg, pickDefined } from "./util.ts";
-import type { RaccoonState } from "../shared/wire.ts";
+import type { RaccoonState, RaccoonModel } from "../shared/wire.ts";
 
 /**
  * How long one Raccoon balance read stays fresh.
@@ -171,7 +171,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
   let envCredentialFingerprint: string | null = null;
   let accessTokenFingerprint: string | null = null;
   let hostProxyEnv: string[] | null = null;
-  let error = null;
+  let error: string | null = null;
   // The credential's own expiry facts. `store.state()` already resolves them
   // (from the JWT `exp` claim); dropping them here is what made the tab say
   // "已登录" long after the access token died — the registration stayed up (the
@@ -292,7 +292,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
   // panel is looking at — and WHY the fallback is in play, so the note does
   // not lie: a gateway that read fine but listed no visible model is "empty",
   // not "unreadable" (the two read as very different facts to the user).
-  let models = null;
+  let models: RaccoonModel[] | null = null;
   let catalogReadFailed = false;
   try {
     if (store !== null) {
@@ -318,7 +318,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
     catalogReadFailed = true;
   }
   const rosterLive = models !== null && Array.isArray(models) && models.length > 0;
-  const roster = rosterLive ? models : RACCOON_FALLBACK_MODELS;
+  const roster: readonly RaccoonModel[] = rosterLive ? models! : RACCOON_FALLBACK_MODELS;
   const modelsSource = rosterLive ? "live" : catalogReadFailed ? "unreadable" : "empty";
   const publisherState = deps.publisher?.state ?? null;
   // The pushed-model curation, so the tab's checkboxes render the saved list

@@ -31,6 +31,31 @@ import { name as pluginName } from "./host-config.ts";
 /** The event a successful (re)registration emits so readers refresh. */
 export const ADAPTERS_UPDATED_EVENT = "llm/adapters-updated";
 
+/**
+ * The state fields EVERY publisher shares — the part `publish-core` itself
+ * reads (`createPairReleaser`, `registerProviderPair`, `unregister`).
+ *
+ * Declared here, not per publisher (docs/IMPROVEMENTS.md §8): the two
+ * publishers' inline literals each pinned `error: null` to the type `null` and
+ * `built: null`/`releaseAdapter: null` likewise, so assigning a real error
+ * string or release function was a type error in both. The domain fields
+ * (`entries`/`enabledIds` vs `rows`/`signature`) stay on each publisher's own
+ * interface — the split publish-core.ts's header calls out.
+ */
+export interface PublisherStateBase {
+  /** Whether an `llm` service answering `registerAdapter` is present. */
+  llmAvailable: boolean;
+  /** Whether our provider pair is currently registered without error. */
+  registered: boolean;
+  /** The last registration error, surfaced secret-free in the snapshot. */
+  error: string | null;
+  /** Release functions for the registered pair (recorded by `registerProviderPair`). */
+  releaseAdapter: (() => void) | null;
+  releaseDirectory: (() => void) | null;
+  /** The built adapter the active release functions belong to. */
+  built: unknown;
+}
+
 /** The error a publisher reports when the Host exposes no `llm` service. */
 export const NO_LLM_SERVICE_ERROR = "the Host exposes no llm registration service";
 
@@ -92,7 +117,7 @@ export function createPublishQueue() {
  * @param {object} state - the publisher state holding the release functions.
  * @returns {() => void} release, safe to call any number of times.
  */
-export function createPairReleaser(state) {
+export function createPairReleaser(state: PublisherStateBase) {
   return () => {
     const releaseFn = (fn) => {
       try {
@@ -131,7 +156,7 @@ export function createPairReleaser(state) {
  * @param {string} identity.displayName
  * @returns {void}
  */
-export function registerProviderPair(llm, built, target, { providerId, displayName }) {
+export function registerProviderPair(llm, built, target: PublisherStateBase, { providerId, displayName }) {
   target.releaseAdapter = llm.registerAdapter(built.providerIds, built.adapter);
   // `registerConfigurableProviders` is how a provider gains its row on the
   // models settings page; an older runtime without it still gets models
@@ -230,7 +255,7 @@ export function warnBuildFailure(logger, label, described) {
  * @param {() => void} job.release - the publisher's releaser.
  * @returns {object|null} the service, or null when it cannot register.
  */
-export function resolveRegistrationService({ state, getLlm, release }) {
+export function resolveRegistrationService({ state, getLlm, release }: { state: PublisherStateBase; getLlm: (service: string) => any; release: () => void }) {
   const llm = getLlm("llm");
   state.llmAvailable = llm !== null && typeof llm.registerAdapter === "function";
   if (!state.llmAvailable) {
@@ -256,7 +281,7 @@ export function resolveRegistrationService({ state, getLlm, release }) {
  *   absence is the wanted state (switch off).
  * @returns {{ok: boolean, skipped: boolean}} the publish outcome.
  */
-export function unregister({ state, release, error = null }) {
+export function unregister({ state, release, error = null }: { state: PublisherStateBase; release: () => void; error?: string | null }) {
   release();
   state.registered = false;
   state.built = null;
@@ -297,6 +322,15 @@ export function swapRegistration({
   registerPair,
   emit,
   onRollback
+}: {
+  llm: any;
+  built: any;
+  previousBuilt: any;
+  state: PublisherStateBase;
+  release: () => void;
+  registerPair: (llm: any, built: any, target: PublisherStateBase) => void;
+  emit: (event: string) => void;
+  onRollback?: () => void;
 }) {
   // Build first (it can throw); only then take down the old pair.
   release();

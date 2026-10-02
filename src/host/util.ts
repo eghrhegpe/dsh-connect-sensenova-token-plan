@@ -152,13 +152,20 @@ export function numOrNull(value) {
  * Use it as `await optional(store ? store.enabled() : null)`: the guard then
  * sits on the value, where "not a promise" and "a rejected promise" both read
  * as `null`.
- * @param {unknown} value - the call's result (usually a promise), or `null`.
- * @param {unknown} [fallback] - what to read on absence or rejection; `null`
- *   by default, so callers that only need "no answer" pass nothing.
- * @returns {Promise<unknown>} the value, or `fallback` on absence or rejection.
+ * @param value - the call's result (usually a promise), or `null`.
+ * @param fallback - what to read on absence or rejection; `null` by default,
+ *   so callers that only need "no answer" pass nothing.
+ * @returns the value, or `fallback` on absence or rejection.
+ *
+ * Generic over both the value and the fallback rather than annotated `unknown`
+ * (docs/IMPROVEMENTS.md §8): the caller's declared fallback is what makes the
+ * result usable at the call site — `optional(x, { credential: null })` must
+ * yield that object's shape, not `unknown`. The default-parameter form this
+ * replaces was typed FROM the `null` initializer under strictNullChecks, so
+ * every explicit fallback became an argument error.
  */
-export function optional(value, fallback = null) {
-  return Promise.resolve(value).catch(() => fallback);
+export function optional<T, F = null>(value: T | Promise<T> | null | undefined, fallback: F = null as F): Promise<T | F> {
+  return Promise.resolve(value).catch(() => fallback) as Promise<T | F>;
 }
 
 /**
@@ -170,12 +177,12 @@ export function optional(value, fallback = null) {
  * @param fields - the candidate field map.
  * @returns a new object holding only the defined fields.
  */
-export function pickDefined<T extends Record<string, unknown>>(fields: T): Partial<T> {
+export function pickDefined<T extends Record<string, unknown>>(fields: T): Partial<{ [K in keyof T]: Exclude<T[K], null | undefined> }> {
   const out: Partial<T> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (value !== null && value !== undefined) (out as Record<string, unknown>)[key] = value;
   }
-  return out;
+  return out as Partial<{ [K in keyof T]: Exclude<T[K], null | undefined> }>;
 }
 
 /**

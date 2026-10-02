@@ -38,6 +38,24 @@ import {
   unregister
 } from "./publish-core.ts";
 import type { HostDeps } from "./types.ts";
+import type { PublisherStateBase } from "./publish-core.ts";
+
+/**
+ * The Token Plan publisher's live state: the shared registration fields plus
+ * the catalog/allow-list facts this upstream rolls back on.
+ */
+export interface ProviderPublisherState extends PublisherStateBase {
+  /** The catalog entries the current registration was built from. */
+  entries: any[];
+  /** The curated allow-list at registration time (empty = all models). */
+  enabledIds: string[];
+  /** The last quota-exhausted model ids published to the picker. */
+  unavailableIds: string[];
+  /** A cheap signature of the offered set (catalog ids + vision bits + allow-list). */
+  signature: string;
+  /** A cheap signature of the quota-exhausted set; flips when a pool crosses zero. */
+  quotaSignature: string;
+}
 
 /**
  * The provider publisher.
@@ -102,7 +120,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
    * registration that throws AFTER the adapter was registered must still
    * be reachable, or the adapter outlives the plugin (see `registerPair`).
    */
-  const state = {
+  const state: ProviderPublisherState = {
     /** The catalog entries the current registration was built from. */
     entries: [],
     /** The curated allow-list at registration time (empty = all models). */
@@ -172,7 +190,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
    *   drop from the picker's offer.
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publishProviderOnce = async (entries, enabledIds, unavailableModelIds = []) => {
+  const publishProviderOnce = async (entries, enabledIds, unavailableModelIds: string[] = []) => {
     // A publish that arrives after the plugin was disposed registers a
     // provider into a Host that has already withdrawn this plugin: no owner,
     // no release, and nothing on screen saying where it came from.
@@ -254,7 +272,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
    * @param {string[]} [unavailableModelIds] - quota-exhausted model ids.
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publish = (entries, enabledIds, unavailableModelIds = []) =>
+  const publish = (entries, enabledIds, unavailableModelIds: string[] = []) =>
     queue.enqueue(() => publishProviderOnce(entries, enabledIds, unavailableModelIds));
 
   /**

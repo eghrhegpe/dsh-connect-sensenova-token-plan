@@ -14,6 +14,7 @@
 
 import { readJwtExpiry } from "../sensenova-auth.ts";
 import { str, obj, num, numOrNull } from "../util.ts";
+import type { StoredGrant } from "./state.ts";
 
 /** Bumped if the stored payload shape ever changes incompatibly. */
 const GRANT_VERSION = 1;
@@ -184,7 +185,7 @@ export async function purgeGrant(wiring, state, accessToken) {
  * @param {number} [at] - the clock reference; defaults to `now()`.
  * @returns {boolean}
  */
-export function isFresh(wiring, state, token, at) {
+export function isFresh(wiring, state, token, at): token is StoredGrant {
   const { now, skewMs } = wiring;
   if (at === undefined) at = now();
   if (token === undefined || token === null) return false;

@@ -52,7 +52,7 @@ export function createRaccoonAdapter({
   officeIdentity = "",
   resolveToken,
   get
-}: RaccoonAdapterOptions = {}) {
+}: RaccoonAdapterOptions) {
   const models = buildRaccoonDescriptors(rows ?? raccoonRoster(null), { officeIdentity });
 
   return assemblePiAiAdapter({

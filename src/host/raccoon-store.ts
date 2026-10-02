@@ -95,7 +95,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
   /** Fallback vault for a Host that has no credentials service. */
   const memory = new Map();
   /** Single-flight: a refresh already in flight is shared, never raced. */
-  let refreshInFlight = null;
+  let refreshInFlight: Promise<{ ok: boolean; code?: string; message?: string }> | null = null;
 
   const resolveService = () => {
     const value = typeof credentials === "function" ? credentials() : credentials;
