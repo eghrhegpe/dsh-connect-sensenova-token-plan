@@ -107,6 +107,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 排查「这条配置到底生效没」 / 改了源码却没变 | `docs/PITFALLS.md` §22（bundles 装载 → patch overlay → `$DSH_HOME/state/<profile>/<name>/` 三层，desktop 是安装副本、web 是 symlink） |
 | 加/改 **state 文件**、读 `profileContext`、判断某状态该不该按 profile 分段 | `docs/PITFALLS.md` §23（catalog/provider/draw 分段；throttle 与凭据 grant **故意共享**，别统一） |
 | 提交约定、`upstream/` 红线 | `docs/CONTRIBUTING.md` |
+| 发版 / 补发（tag・`main`・npm・Release 四条独立通道） | `RELEASING.md`（状态表 S0–S4 **含 S2′ 顺序颠倒**、§4.5 推荐顺序、§5.5 发布内容一致性核验） |
 
 ## 已知的真实坑（改前先看这里有没有）
 
