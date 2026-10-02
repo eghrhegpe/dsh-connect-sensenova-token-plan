@@ -55,9 +55,6 @@ export const RACCOON_POINTS_PREFIX = "/api/web/points/v1";
  */
 export const RACCOON_DESKTOP_PREFIX = "/api/web/desktop/v1";
 
-/** The OpenAI-compatible chat endpoint the adapter targets. */
-export const RACCOON_CHAT_URL = `${RACCOON_API_BASE}${RACCOON_LLM_PREFIX}/chat/completions`;
-
 /** The QR poll cadence: the gateway's own client polls every 2 s. */
 export const RACCOON_QR_POLL_INTERVAL_MS = 2_000;
 /** The QR login's overall deadline: a scan that takes longer is voided. */

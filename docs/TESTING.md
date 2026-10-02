@@ -7,7 +7,7 @@
 ## 1. 运行
 
 ```powershell
-npm test       # 依次跑 auth / store / store-baseline / routes / panel / render / parsers / provider / config / package / docs / wiring / contract / retry / error-fix / peer-contract / draw / doctor / raccoon / state-segmentation，末尾 typecheck-gate（用 devDeps 钉住的本地 tsc 跑 tsconfig.json 的严格开关；无 typescript 则 SKIP）+ build-gate（重建 src/ 全部源码并验证 lib/ 与 client.js 产物；无 tsdown 则 SKIP，见 ROADMAP §6.2）+ e2e-gate（无 dsh CLI 则 SKIP）
+npm test       # 依次跑 auth / store / store-baseline / routes / panel / render / parsers / provider / provider-rollback-guard / switch-precedence / config / package / docs / wiring / contract / retry / error-fix / peer-contract / draw / doctor / raccoon / raccoon-status / state-segmentation，末尾 typecheck-gate（用 devDeps 钉住的本地 tsc 跑 tsconfig.json 的严格开关；无 typescript 则 SKIP）+ build-gate（重建 src/ 全部源码并验证 lib/ 与 client.js 产物；无 tsdown 则 SKIP，见 ROADMAP §6.2）+ e2e-gate（无 dsh CLI 则 SKIP）
 npm run commit:lint  # 提交信息底线（零依赖）：检查 HEAD 一条提交；CI 检查 origin/main..HEAD 内的新提交（见下方 commit 红线）
 npm run test:e2e    # 只跑端到端：真 Host + 假平台，需 dsh CLI 在 PATH
 npm run test:live   # 仅 live-jwks.test.mjs，需联网，验证 JWKS 文档可达

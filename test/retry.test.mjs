@@ -273,8 +273,9 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       check("peer-resolved retryableCodes includes RATE_LIMIT",
         resolved.retryableCodes.includes(QUOTA_CODES.rateLimit));
     } else {
-      check("peer not resolvable on clean checkout (skipped, e2e covers it)", true,
-        "resolveRetryPolicy unavailable; integration covered by test/e2e.mjs");
+      // Same semantics as peer-contract.test.mjs: a SKIP must not push a fake
+      // pass into the totals — say it loudly and leave the check count honest.
+      console.log("SKIP: peer @deepseek-ai/dsh-llm not resolvable here; the resolveRetryPolicy integration is covered by test/e2e.mjs");
     }
   } catch (error) {
     fail("peer resolveRetryPolicy integration", error);
