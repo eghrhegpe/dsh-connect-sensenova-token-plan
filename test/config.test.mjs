@@ -183,31 +183,36 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
     credentialKey(name, "sensenova-console") === `${name}/sensenova-console`);
 }
 
-// --- 6b. the client's route literals match the host's derived ones ---------
+// --- 6b. the client's route templates match the host's derived ones --------
 // §6 pins the slug in package.json, the patch row and the credential scope.
 // It does NOT reach the HTTP paths: `src/client/const.ts` spells seven
-// `/api/<slug>/<resource>` LITERALS (the browser bundle cannot import the
-// host, so it has no way to derive them), while `src/host/routes.ts` derives
-// the same seven as `/api/${name}/<resource>`. Between the two, and the
-// literals re-declared in `test/routes.test.mjs`, there was no pin — so a
-// rename of the slug, or adding a route on one side only, read as green
-// until the panel 404'd. All three copies are scanned as text so the check
-// proves the CLIENT side really is literals, the HOST side really is derived,
-// and the SUITE's own copies did not drift away from either.
+// `/api/${NS}/<resource>` TEMPLATES (the browser bundle cannot import the
+// host, so it derives them from its own NS), while `src/host/routes.ts`
+// derives the same seven as `/api/${name}/<resource>` from the registered
+// name. Between the two, and the literals re-declared in
+// `test/routes.test.mjs`, there was no pin — so a rename of the slug, or
+// adding a route on one side only, read as green until the panel 404'd. All
+// three spellings are scanned as text and expanded to their literal form, so
+// the check proves the CLIENT side really is a template off NS, the HOST side
+// really is derived, the two slugs agree, and the SUITE's own copies did not
+// drift away from either.
 {
   const clientSrc = readFileSync(join(here, "..", "src", "client", "const.ts"), "utf8");
   const hostSrc = readFileSync(join(here, "..", "src", "host", "routes.ts"), "utf8");
   const suiteSrc = readFileSync(join(here, "..", "test", "routes.test.mjs"), "utf8");
 
-  // The client spells the whole path as a literal (`"/api/<slug>/snapshot"`);
-  // the host derives the same one (`\`/api/${name}/snapshot\``). Comparing the
-  // FULL paths (not just the resource) is what makes a slug rename fail too.
-  // The suite re-declares the same literals once, at its top (the request
-  // helpers call them by name); those are scanned too, by the same rule as the
+  // The client spells the whole path as a template off its own NS
+  // (`\`/api/${NS}/snapshot\``); the host derives the same one off the
+  // registered `name` (`\`/api/${name}/snapshot\``). Both are expanded to the
+  // literal form before comparing, which is what makes a slug rename fail: the
+  // NS literal must equal the host's name, or every expanded path differs. The
+  // suite re-declares the same literals once, at its top (the request helpers
+  // call them by name); those are scanned too, by the same rule as the
   // client's, so a third copy that fell behind turns this red rather than
   // silently testing a path the panel never uses.
-  const clientPaths = [...clientSrc.matchAll(/"(?:https?:)?\/api\/([^"\s]+)"/g)]
-    .map((m) => `/api/${m[1]}`)
+  const clientNs = clientSrc.match(/export const NS = "([^"]+)"/)?.[1] ?? "";
+  const clientPaths = [...clientSrc.matchAll(/\/api\/\$\{NS\}\/([^`"\s]+)/g)]
+    .map((m) => `/api/${clientNs}/${m[1]}`)
     .sort();
   const hostPaths = [...hostSrc.matchAll(/\/api\/\$\{name\}\/([^`"\s]+)/g)]
     .map((m) => `/api/${name}/${m[1]}`)
@@ -216,7 +221,9 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
     .map((m) => `/api/${m[2]}`)
     .sort();
 
-  check("client/const.ts actually declares route literals", clientPaths.length >= 7, clientPaths.join(", "));
+  check("client/const.ts NS literal equals the host slug",
+    clientNs !== "" && clientNs === name, `client NS: ${clientNs} | host name: ${name}`);
+  check("client/const.ts actually declares route templates", clientPaths.length >= 7, clientPaths.join(", "));
   check("host/routes.ts derives the same number of routes", hostPaths.length === clientPaths.length, hostPaths.join(", "));
   check("test/routes.test.mjs re-declares the same paths", suitePaths.length === clientPaths.length, suitePaths.join(", "));
   check("the client, the host and the suite agree path for path",

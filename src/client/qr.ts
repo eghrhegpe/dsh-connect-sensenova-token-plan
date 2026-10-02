@@ -305,6 +305,28 @@ function maskInvert(row: number, col: number, mask: number): boolean {
   }
 }
 
+/**
+ * Toggle every data cell the given mask selects.
+ *
+ * The single home of "apply a mask" — masking the candidate, rolling it back,
+ * and finalising the winner used to be the same twin loops copy-pasted three
+ * times (jscpd's only clone in the tree). XOR is its own inverse, so applying
+ * a mask twice returns to the pre-mask state; the caller relies on that for
+ * the rollback step.
+ *
+ * The loops walk exactly the size×size grid `buildMatrix` produced, so every
+ * cell below exists; the assertions state that invariant.
+ */
+function applyMask(modules: boolean[][], isFunction: boolean[][], mask: number): void {
+  const size = modules.length;
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      if (isFunction[row]![col]!) continue;
+      if (maskInvert(row, col, mask)) modules[row]![col]! = !modules[row]![col]!;
+    }
+  }
+}
+
 /** The 15-bit format information for one mask at EC level M. */
 function formatBits(mask: number): number {
   const data = (0b00 << 3) | (mask & 0b111);
@@ -444,14 +466,7 @@ export function buildQrMatrix(text: string): QrMatrix {
   let bestMask = 0;
   let bestPenalty = Infinity;
   for (let mask = 0; mask < 8; mask++) {
-    for (let row = 0; row < size; row++) {
-      for (let col = 0; col < size; col++) {
-        // The loops walk exactly the size×size grid buildMatrix produced, so
-        // every cell below exists; the assertions state that invariant.
-        if (isFunction[row]![col]!) continue;
-        if (maskInvert(row, col, mask)) modules[row]![col]! = !modules[row]![col]!;
-      }
-    }
+    applyMask(modules, isFunction, mask);
     writeFormat(modules, isFunction, mask);
     if (version >= 7) writeVersion(modules, isFunction, version);
     const score = penaltyScore(modules);
@@ -459,23 +474,11 @@ export function buildQrMatrix(text: string): QrMatrix {
       bestPenalty = score;
       bestMask = mask;
     }
-    for (let row = 0; row < size; row++) {
-      for (let col = 0; col < size; col++) {
-        // The loops walk exactly the size×size grid buildMatrix produced, so
-        // every cell below exists; the assertions state that invariant.
-        if (isFunction[row]![col]!) continue;
-        if (maskInvert(row, col, mask)) modules[row]![col]! = !modules[row]![col]!;
-      }
-    }
+    applyMask(modules, isFunction, mask);
   }
 
   // Apply the winning mask for good and write its format block.
-  for (let row = 0; row < size; row++) {
-    for (let col = 0; col < size; col++) {
-      if (isFunction[row]![col]!) continue;
-      if (maskInvert(row, col, bestMask)) modules[row]![col]! = !modules[row]![col]!;
-    }
-  }
+  applyMask(modules, isFunction, bestMask);
   writeFormat(modules, isFunction, bestMask);
   if (version >= 7) writeVersion(modules, isFunction, version);
 
