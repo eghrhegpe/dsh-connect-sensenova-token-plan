@@ -22,6 +22,8 @@ AI 协作会话从根目录 [AGENTS.md](../AGENTS.md) 进入：验证怎么跑�
 | [CHANGELOG.md](../CHANGELOG.md) | 公开行为变化的版本记录（非 git log 替代） | 看「这个版本改了什么」 |
 | [IMPROVEMENTS.md](./IMPROVEMENTS.md) | 深化改进研究（定位对齐 / `index.js` 收编 / peer 契约护栏 / 状态·契约·UX·client 四块债），实证引用兄弟插件与本机 peer 源码，附分步落地顺序与门禁 | 定改进优先级、排重构顺序、查每项的投入风险比 |
 | [TOKEN-STORE-SPLIT.md](./TOKEN-STORE-SPLIT.md) | `token-store.js` 拆分蓝图（登录/续期/节流/迁移四块 + 显式 state 容器）：状态归属表、迁移块退役条件、7 步落地计划（每步门禁=行为基线零漂移）、红线核对表 | 动刀 token-store 之前先读这份 |
+| [ADR.md](./ADR.md) | 决策账本（大统一定位 / 边界放宽 / 路由拆分 / maxTokens 决策）：裁定事实、理由与取代关系；现行文档只写现状，沿革一律在此 | 查「当初为什么这么定」、改裁定（新增条目而非内联修订） |
+| [REFERENCES.md](./REFERENCES.md) | 参照件索引：`upstream/` 容器（商汤 Token Plan 历史上游 + 生态核实样本）的来源、版本、许可与「承重在哪」；容器纪律与维护 | 查「某条事实当初从哪来」、落盘新参照件、核对参照版本 |
 
 ## 文档边界（不在此目录写的内容）
 

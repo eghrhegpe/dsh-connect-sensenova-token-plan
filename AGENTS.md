@@ -113,6 +113,8 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 动第二个上游（小浣熊 / `sensenova-raccoon`） | `docs/ROADMAP.md` §6.1.2（网关契约复测表）/ §6.1.4（接入面盘点：死常量、死负载、签到边界）→ `src/host/raccoon*.ts` |
 | 给用户看的文案（README / `cordis.patch.yml`）改了 | `test/docs.test.mjs` 检查 9/10（tab 全覆盖 + 槽位一致），两者都进 npm 包 |
 | 理解 Host/Client 分流、双仓库关系 | `docs/ARCHITECTURE.md` |
+| 拍/改裁定、回溯边界与定位沿革（现行表述 vs 历史依据） | `docs/ADR.md`（决策账本；取代关系与举证链在此，现行规则见 `docs/ARCHITECTURE.md` §5）；**现行正文禁内联「修订（日期）」补丁**，`docs.test.mjs` 检查 `ARCHAEOLOGY` 把关 |
+| 查某条事实「当初从哪来」 / 要落盘新参照件 | `docs/REFERENCES.md`（`upstream/` 容器清单：来源 / 版本 / 许可 / 承重在哪） |
 | 加配置字段 / 改路由 | `docs/API.md`、`docs/SETUP.md`；提供方开关见 `docs/PROVIDER-HOT-RELOAD.md` |
 | 改测试前 | `docs/TESTING.md` |
 | 改任何代码前扫一眼 | `docs/PITFALLS.md`（36 条现象→根因→修法） |

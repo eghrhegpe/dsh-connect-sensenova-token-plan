@@ -72,7 +72,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 | `draw-store.ts`（新增） | 出图开关状态文件 `$DSH_HOME/state/<profile>/<plugin>/draw.json`；完整性纪律与 `provider-store.ts` 完全一致 |
 | `index.ts` | wiring 里增补 `drawStore`；传给 `registerRoutes` 与 `startSideEffects` |
 | `lifecycle.ts` | `registerDrawTool` 改为读「面板保存值 > 配置默认值」的生效值，而不是直接读 `settings.drawEnabled` |
-| `routes.ts` | 新增 `POST /api/<name>/draw`，与 `/provider` 同一信任形状 |
+| `routes/draw.ts` | 新增 `POST /api/<name>/draw`（2026-10 路由拆分后按资源归入 `routes/` 家族），与 `/provider` 同一信任形状 |
 | `snapshot-aggregate.ts` | 快照 `llm.drawEnabled` / `llm.drawSource` 回显生效值与来源 |
 | `client.js` | `ApiKeyForm` 区新增「出图工具」卡片，含 `DrawSwitch` 控件 |
 

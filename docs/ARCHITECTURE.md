@@ -40,7 +40,7 @@
 > `src/shared/wire.ts` 是两端共读的**线契约声明**（快照体 + 小浣熊 state），**纯 `interface`/`type`、零运行时值**：tsdown 在两端构建时都把它擦除，所以 client 产物照旧只依赖 `react`，host 产物不因此多带任何浏览器代码。它是 host 源图闭包（`test/package.test.mjs` §2）唯一声明例外——**只许放类型**：一旦放进运行时真值，就是第一批 host 逻辑进入浏览器产物，§5 的隔离就开始松动。客户端原先在 `src/client/wire.ts` 手写的镜像已退为它的再导出面；host 侧 `buildSnapshotBody` / `readRaccoonStatus` / `identifyVisionModel` 均以这里的类型为返回标注，`tsc`（本就同编两端）是第一道守门员，`docs.test.mjs` §5b 那套正则对账降为兜底。
 
 - `index.ts`：Host 入口——注册只读路由 `/api/dsh-connect-sensenova-token-plan/snapshot`（聚合控制台数据，401 自动续期重试一次）+ 账号配置路由 + 各 store 接线与 side-effect 编排。
-- `routes.ts`：**路由主模块**（990 行，本仓库最大的 Host 文件）——snapshot / account / api-key / provider / models / draw / raccoon 七条路由的 handler、同源闸、body 上限、`writeJson` 全部在此；`index.ts` 只保留 HTTP 面与装配。小浣熊的**读模型**已抽出为 `raccoon-status.ts`（原先它是 handler 内一个 190 行闭包），这里只剩扫码 walk 与四个 mutation。
+- `routes.ts`：**路由门面**（2026-10 拆分：先冻结行为再搬，`routes.test.mjs` + `wiring.test.mjs` 拆分前后零漂移）——`registerRoutes(ctx, wiring)` 只做装配与注册顺序，返回 7 个 `off()` 回执；同源闸、body 上限、`writeJson` 等共享原语在 `routes/http.ts`，snapshot / account / api-key / provider / models / draw / raccoon 七条路由各自一个模块（`routes/<resource>.ts`，每个模块声明自己的路径常量）。小浣熊的**读模型**已抽出为 `raccoon-status.ts`（原先它是 handler 内一个 190 行闭包），`routes/raccoon.ts` 只剩扫码 walk 与四个 mutation。
 - `lifecycle.ts`：Host 生命周期——`registerRoutes` / `startSideEffects`（draw 工具注册、catalog seed）/ `teardown`（dispose + release + off×5）。
 - `host-config.ts`：配置契约——`CONFIG_DEFAULTS`、`resolveSettings` / `resolveAuthOverrides`（含嵌套 `auth:` 块拒绝）、`isAdmitted` 同源闸、`hostName` 解析。
 - `codes.ts`：全部错误码与 IAM 平台原因码的唯一声明处。`sensenova-auth.ts` 产出、`token-store.ts` 判定是否 parked、`index.ts` 判定是否属于「拿不到令牌」，三处都从这里取。
@@ -55,16 +55,17 @@
 - `types.ts`：Host 侧共享类型定义。
 - `state-store.ts`：状态文件公共原语——版本载荷 + 原子写 + 0600 + `createStateReadCache`（TTL 读缓存）+ `profileSegment` / `profileStateDir`（profile 分段，见 PITFALLS §23）。
 - `catalog-store.ts`：模型目录缓存（version 载荷、allow-list）；`provider-store.ts`：provider 开关（面板值 > 配置默认值）；`draw-store.ts`：出图开关与模型偏好；`api-key-store.ts`：推理 Key 存取（credentials → memory → env 优先级）。四个 store 同纪律：版本化、temp + rename 原子写、0600、损坏即忽略、按 profile 分段。
+- `switch-precedence.ts`：**开关优先级的唯一裁决处**（peer-free，2026-10-02 抽出）——`resolveSwitchEnabled` / `resolveSwitchValue` / `switchSource` 承载所有 opt-in 开关的「面板存过的值 vs 补丁声明的默认」判定并随答案返回来源（panel / config）。此前该规则手抄在 provider / models / draw 三条路由（两种长得像但语义不同的方言）；统一后任何一处再自己拼 `?? settings.x` 都会由 `test/switch-precedence.test.mjs` 钉红。Raccoon 开关无配置默认（无默认那一型落到 `off`），不经过此模块。
 - `provider-publish.ts`：直接注册的 provider 的发布状态机（peer-free）——`publishChain` 串行化、`disposed` 闸、单点 `registerPair` 与回滚路径（PITFALLS §18/§19）。
 - `snapshot-aggregate.ts`：快照路由的数据聚合（peer-free）——并行取数 / 解析 / 形状漂移 / 可调用-vs-锁定拆分 / 配额耗尽标记 / vision 识别 / `llm` 状态块组装。
-- `llm-models.ts`：目录条目 → pi-ai descriptor 映射（vision 自动识别、`supportsDeveloperRole:false`、不声明 maxTokens 值、`isChatModel` 排除出图模型、`buildDescriptors` / `rosterWithAvailability` / `exhaustedModelIds`）。
+- `llm-models.ts`：目录条目 → pi-ai descriptor 映射（vision 自动识别、`supportsDeveloperRole:false`、声明目录权威 maxTokens 值（有则声明、缺则回落不声明——harness 对未声明值强制填 32768，2026-10-02 真机探针钉住）、`buildDescriptors` / `rosterWithAvailability` / `exhaustedModelIds`）。对话/出图的方向性判定由 `modality.ts` 单一裁决（`isChatModel` 宽松方向与 `isImageGenModel` 严格方向读同一份 `outputModalityOf`，缺字段不会让两份清单朝相反方向失手——2026-10-02 抽出，姊妹插件 Agnes 同款结构见其 ARCHITECTURE §5.4「前提反转」）。
 - `llm-adapter.ts`：LLM provider adapter 装配（动态 import peer、`resolveApiKey` 每次请求现取、429 分诊委托 `llm-error-fix.ts`）。
 - `llm-retry.ts`：peer-free 的 429 重试策略配置（`buildRetryPolicyConfig`，排除 QUOTA/ACCOUNT_QUOTA、保留 RATE_LIMIT）。
 - `llm-error-fix.ts`：host 侧 Proxy 包裹 `PiAiAdapter` 流出口，把误判的限频 QUOTA 纠正回 RATE_LIMIT（PITFALLS §20/§21 的 429 分诊）。
 - `draw.ts`：出图模块（peer-free）——结构化识别 image-output 模型、端点拼接、wire body 钳制、响应解析、失败分诊（429 配额 vs 限频）、失败冷却。
 - `doctor.ts`：只读状态文件诊断（peer-free，`npm run doctor` / `doctor:json`）——回答「这台机器上 provider 到底是开是关」（PITFALLS §22）。
 - `raccoon.ts`：第二上游协议层——微信扫码登录走查、信封解析、refresh 轮换、余额与目录读取。
-- `raccoon-status.ts`：小浣熊面板的**读模型**（peer-free）——把 switch / 凭据 / 余额 / roster / 注册态 / `?debug=1` 脚手架组装成一次 GET 的答案。余额 60 s、目录 300 s，按**凭据指纹**走 `coalesced-fetch`；终态登录事件在**首个 await 之前**读取（PITFALLS §31 的 T3 修复）。答案里一并**播报 tab 的两档轮询节奏**（`pollSeconds` / `scanPollSeconds`，取自本模块的窗口常量与路由的 QR 间隔）——与 snapshot 用 `pollSeconds` 播报节奏同一纪律：节奏归拥有缓存与网关预算的一侧定义，客户端只负责照用（内置常量降级为「首帧兜底」，并与这里的值钉死）。吃 `store` / `switchStore` / `publisher` / `read` / `login` 五个注入项，因此可脱开路由单测（`test/raccoon-status.test.mjs`）；walk 本身仍归 `routes.ts`。
+- `raccoon-status.ts`：小浣熊面板的**读模型**（peer-free）——把 switch / 凭据 / 余额 / roster / 注册态 / `?debug=1` 脚手架组装成一次 GET 的答案。余额 60 s、目录 300 s，按**凭据指纹**走 `coalesced-fetch`；终态登录事件在**首个 await 之前**读取（PITFALLS §31 的 T3 修复）。答案里一并**播报 tab 的两档轮询节奏**（`pollSeconds` / `scanPollSeconds`，取自本模块的窗口常量与路由的 QR 间隔）——与 snapshot 用 `pollSeconds` 播报节奏同一纪律：节奏归拥有缓存与网关预算的一侧定义，客户端只负责照用（内置常量降级为「首帧兜底」，并与这里的值钉死）。吃 `store` / `switchStore` / `publisher` / `read` / `login` 五个注入项，因此可脱开路由单测（`test/raccoon-status.test.mjs`）；walk 本身仍归 `routes/raccoon.ts`。
 - `raccoon-store.ts`：小浣熊凭据（DSH 凭据服务引用）；`raccoon-switch-store.ts`：小浣熊开关（按 profile 分段）；`raccoon-models.ts`：小浣熊模型目录归一化与描述符映射；`raccoon-publish.ts` + `raccoon-llm-adapter.ts`：小浣熊独立 provider 注册与 adapter（与 Token Plan 注册完全隔离——**隔离的是状态与凭据，不是代码**：两个 publisher 实例的 `state`、开关、凭据引用互不相干，而两者的发布状态机与 adapter 装配共用 `publish-core.ts` / `llm-adapter-core.ts`，理由见 §5.5）。
 - `client.js`：Plugins 页内的配置卡与三个 tab（积分额度 / 接入 API / 小浣熊）+ 账号表单（React，纯主题令牌样式）。内部 `interpretSnapshot` 把 Host 的响应读成 `(data, error)` 对，再交给决策块。客户端也按「能否脱离 hook 被挂载」分层：`cards.ts` / `provider-controls.ts`（状态行）/ `model-picker.ts` / `model-row.ts` / `raccoon-roster.ts` / `raccoon-card.ts` 全部是**无 hook 组件**，因此渲染套件挂的就是浏览器画的同一棵树；`panel-page.ts` / `raccoon-tab.ts` / 各表单持有 hook，是各 tab 的**生命周期**层（轮询、cadence、四个 mutation、向 header 上报新鲜度），渲染委托给上面那层。
 - `model-row.ts`：两个模型列表共用的**行骨架**（`li` + `modelRowHead` + label/checkbox/name/rate + badges + 参数行）。领域事实留在调用方——`on` 怎么判（Token Plan 读 allow-list、小浣熊把 `null` 读成"整份 roster"）、费率为 0 怎么措辞（`×0` 是运营侧伪系数、小浣熊的 0 真是免费）、tooltip 用哪个键、哪些 badge 值得报、参数行有没有思考阶梯——所以它吃的是**渲染好的内容**，不是模式开关（理由见 PITFALLS §34）。
@@ -130,12 +131,10 @@ client.js: interpretSnapshot(body) → {data, error}
   DSH 凭据服务（含未来若引入多 Key 池），永不入库、永不进日志。
 - **只吸收与商汤（SenseTime）产品线强相关的能力**，不做跨 provider 通用聚合——
   §5.3 里 `dsh-provider-quota` / `dsh-musage` 的定位边界就是本插件的边界。
-  > **2026-10-01 修订（边界放宽）**：原表述是「只吸收与商汤 **Key/账号线**强相关的能力」，
-  > 按 Key 域名 / 认证域划线。该划法会把同一厂商的姐妹产品线误划到界外——Token Plan
-  > 控制台与小浣熊（`xiaohuanxiong.com`）同属商汤旗下产品，却走互不相通的两个认证域
-  >（实测见 [ROADMAP.md](./ROADMAP.md) §6.1.1 的两次复测）。
-  > 界定依据改为**厂商归属**而非域名或认证域，第二上游因此属**界内**，裁定详情见 §5.5。
-  > 另外两条不变量（opt-in 默认关、凭据红线）不受本次修订影响。
+  划线依据是**厂商归属**而非 Key 域名 / 认证域：Token Plan 控制台与小浣熊
+  （`xiaohuanxiong.com`）同属商汤旗下产品、却走互不相通的两个认证域（实测见
+  [ROADMAP.md](./ROADMAP.md) §6.1.1 的两次复测），第二上游因此属**界内**。
+  该划法从「Key/账号线」放宽而来的沿革登记在 [ADR.md](./ADR.md) ADR-002。
 
 变更前的三层分工，改作吸收路线图：
 
@@ -225,8 +224,10 @@ OpenAI 兼容 provider，用户不再需要手写 `llm-pi-ai` patch 行。
   经 `llm-models.ts`（**无 peer 依赖**，离线可测）映射成 pi-ai descriptor：
   vision 判定复用 §5.1 同一份 `identifyVisionModel`，vision 模型自动带
   `input:["text","image"]`。两个承重字段：`compat.supportsDeveloperRole:
-  false`（不设会自动探测成 true，商汤端点持续 403）；**不声明 maxTokens
-  值**（声明了会变成输出上限、截断长回复，只钉字段名 `max_tokens`）。
+  false`（不设会自动探测成 true，商汤端点持续 403）；**maxTokens 声明目录权威值**
+  （2026-10-02 真机探针钉住：harness 对未声明值强制填 32768 = 输出被截一半，目录
+  `max_output_length` 有值就声明、缺值回落不声明，只钉字段名 `max_tokens`；
+  实测上限因模型而异——flash-lite 硬上限 65536，v4-flash / glm-5.2 接受 131072）。
 - **catalog/勾选清单是插件私有状态，不进 dsh 配置**：
   `catalog-store.ts` 写 `$DSH_HOME/state/<profile>/<name>/catalog.json`（按 profile 分段，见 [PITFALLS.md](./PITFALLS.md) §23）
   （version 载荷、temp+rename 原子写、0600/0700、损坏即忽略），
@@ -307,7 +308,7 @@ lifetime `AbortController` + `AbortSignal.any` 超时合并模式（line 103-115
 - 快照契约**零改动**（14 键不动，`API.md` 不变）：工具要么在要么不在，
   agent 直接可见；面板不新增展示。
 
-### 5.5 边界裁定：第二上游（小浣熊）属于界内（2026-10-01）
+### 5.5 边界裁定：第二上游（小浣熊）属于界内（2026-10-01，沿革见 [ADR.md](./ADR.md) ADR-002）
 
 **裁决**：小浣熊（`xiaohuanxiong.com` 网关，`sensenova-raccoon` provider）**属于**
 §5 不变量 3 界内的能力，不是破例，也不是例外许可。随本次裁定，不变量 3 的划线依据

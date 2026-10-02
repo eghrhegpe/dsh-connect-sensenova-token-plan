@@ -554,3 +554,90 @@ raccoon-store 1 / llm-error-fix 1 / raccoon-llm-adapter 1。每处需人判 null
 等价的双重确认。验证：`npm test` 全绿（含 `typecheck-gate` 两份 config、`store-baseline`
 零漂移、`build-gate`、`e2e-gate`）。
 
+---
+
+## 9. 姊妹插件对照：`dsh-connect-agnes-token-plan` 的设计差异与借鉴清单（2026-10-02 快照）
+
+> **档案性质**：本文是**研究档案**（同 §1–§8 定位），不是待执行清单。对照对象是
+> 兄弟插件 `~/.dsh/plugins/dsh-connect-agnes-token-plan`（**v0.8.0**，本插件 **v0.4.7**，
+> 同一作者 eghrhegpe，同一「大统一」架构家族）。快照日期 2026-10-02；文中 Agnes 侧的行号/
+> 版本/模块清单以该日期的本机源码为准，平台改行为时以实测为准。
+> **一句话结论**：差异不是"两套设计"，而是"同一蓝图、Agnes 多走了 2~3 个版本的重构步"——
+> 路由拆分、开关统一、决策账本、maxTokens 实测钉值四件事 Agnes 已完成，本插件恰好停在
+> 各自"改造前"；反过来，线契约单一声明、全仓 strictNullChecks 翻转、jscpd/commit-lint
+> 三道护栏是本插件领先 Agnes 的。
+
+### 9.1 共同底座（别误读成两套设计）
+
+两者机制几乎逐字同构：Host/Client 两半 TS、Plugins 页三 tab 卡片、`大统一`定位
+（两侧同为 2026-09-29 改）、三条不变量（opt-in 默认关 / 凭据红线 / 厂商边界）、
+`token-store/` 六块拆分 + `store-baseline` 冻结、`publish-core`/`provider-publish`
+发布状态机、`llm-error-fix` 429 分诊、`state-store` profile 分段、e2e 假平台、
+doctor CLI、PITFALLS 文档文化。可比的是各自演进到哪一步，不是机制本身。
+
+### 9.2 核心差异对照
+
+| 维度 | 本插件（SenseNova） | Agnes 插件（v0.8.0） | 谁更成熟 |
+|---|---|---|---|
+| 登录 | OIDC+PKCE+JWE（密码 RSA-OAEP+A256GCM 封包）+ **refresh_token 静默续期**，密码可删（`../src/host/sensenova-auth.ts` / `sensenova-crypto.ts`） | 一跳 `POST /api/user/login`，**无 OIDC/无 refresh**，过期用存密码重登；fallback 7 天防误杀 | 平台决定：SenseNova 有刷新流所以本插件更省心；Agnes 是平台不给 refresh 的被迫形态 |
+| 第二上游 | 小浣熊：面板内**微信扫码登录**（`../src/client/qr.ts` + `../src/host/raccoon-walk.ts`） | AgnesCode：**读本机桌面 App 会话文件**（os_crypt+DPAPI），JWT≈28 天、**无自动续期**须手动重采 | 小浣熊交互自洽；AgnesCode 零配置但每 28 天手动一次（其文档自标"已知限制"） |
+| 路由组织 | `routes.ts` 门面 + `routes/` 8 模块（**2026-10-02 拆分已落地**，§9.4 P0；先冻结 `routes`/`wiring` 再搬，零漂移） | `routes.ts` 88 行 facade + `src/host/routes/` 8 模块（2026-10 按 token-store 术式先冻结测试再搬） | 已对齐 Agnes 术式 |
+| 开关商店 | `provider-store` / `draw-store` / `raccoon-switch-store` 共享 `state-store` 原语 + **`switch-precedence.ts` 单一裁决处**（2026-10-02 落地：resolveSwitchEnabled/Source 统一三处手抄方言，`switch-precedence.test.mjs` 钉红） | `switch-store.ts`（四开关共用一层）+ `switch-precedence.ts`（"面板值 vs 配置默认"唯一裁决处，带来源标签） | **已对齐核心**：底层原语共享 + 唯一裁决处；store 文件级行为层暂不强制合并（差异属真实领域形状） |
+| maxTokens | **声明目录权威值**（2026-10-02 落地：真机探针钉住 harness 对未声明值强制填 32768；目录 `max_output_length` 有则声明、缺则回落不声明；实测上限因模型而异——flash-lite 硬上限 65536、v4-flash/glm-5.2 接受 131072） | 真机探针推翻旧决策：**钉 65536**（harness 对未声明值强制填 32768=减半，见其 AGNES-API.md §7.3） | **已对齐并细化**：Agnes 全局钉 65536，本插件按目录逐模型声明（更准） |
+| 模态判定 | `modality.ts` **单一裁决**（2026-10-02 落地：`outputModalityOf` 一份判断，`isChatModel` 宽松方向与 `isImageGenModel` 严格方向从它派生，缺字段不再让两方向反向失手；llm-models/draw 各自 re-export 保持导出面） | `modality.ts` **单一函数三级判定**（声明字段→名称段→默认），矛盾由构造消除 | **已对齐**（SenseNova 平台恒有模态字段，无需名称段兜底） |
+| 出图/视频 | 只有 `sensenova_draw_image`（视频线**判停**：2026-10-02 探测平台无视频模型/端点，前提不成立） | draw + **`agnes_video_generate`**（异步任务、V2.0/2.5 双参数族互斥分派） | 功能面 Agnes 更宽，但 SenseNova 平台无视频能力，不构成对标缺口 |
+| 线契约 | `../src/shared/wire.ts` **单一声明**，client 侧只是再导出面，`tsc` 是第一守门员 | 契约仍留 client 侧镜像，靠 `contract.test.mjs` §10 解析对账 | **本插件领先**（Agnes 尚未收敛） |
+| 类型门禁 | 2026-10-02 **全仓 strictNullChecks 全局翻转**（§8 分批毕业，`../test/typecheck-gate.mjs` 把关） | `noUncheckedIndexedAccess`+`exactOptionalPropertyTypes` 全局开，`tsc-gate.mjs` 保证 `npm test` 真跑 tsc | 两者殊途同归；本插件翻转更彻底 |
+| 文档治理 | `./ARCHITECTURE.md` §5 用**内联「修订（日期）」补丁**记录沿革 | **`docs/ADR.md` 决策账本** + `ARCHAEOLOGY` 机械检查**禁内联修订补丁**；另有 `REFERENCES.md` 登记 `upstream/` 容器 | **Agnes 领先**：裁定沿革外置账本，正文只写现状 |
+| 测试编排 | package.json 用 `&&` 链 25 个套件 + jscpd + commit-lint | `test/run.mjs` 聚合器（`--only` 过滤）+ tsc-gate | 各有取舍；本插件多了 jscpd 与 commit-lint 两道护栏 |
+| 上游容器 | `upstream/` 12 个对照仓库，但**无清单登记** | `upstream/` 20+ 件 + `REFERENCES.md` + `SOURCES.md` 登记来源/版本/承重 | **Agnes 领先** |
+
+### 9.3 优缺点归纳
+
+**Agnes 设计优点（本插件应借鉴）**：
+1. **`routes/` 拆分 + 冻结先行**：875 行单文件 → 8 个资源路由，facade 只留注册顺序；
+   做法是"先让测试在 facade 上全绿再搬家"，零漂移。本仓 `.agnes` 可读性评审的 P0 建议与它完全同向。
+2. **`switch-store` + `switch-precedence`**：四开关共用行为层 + 唯一裁决处，"值来自哪
+   （panel/config/off）"随答案一起返回——本插件三份 store 还欠的工程收敛。
+3. **maxTokens 钉实测值**：用真机探针推翻"不声明"旧决策。**已落地（2026-10-02）**——
+   harness 兜底坐实（`dsh-llm-pi-ai` resolveRouteModels 对未声明强制 32768），真机探针
+   钉住 SenseNova 上限因模型而异（flash-lite 硬上限 65536、v4-flash/glm-5.2 接受 131072），
+   descriptor 改为声明目录权威值（有则声明、缺则回落）。
+4. **`ADR.md` 账本 + 禁内联修订补丁**：决策沿革不进正文，docs.test 机械把关——本插件
+   §5.5 的内联修订恰恰是它明令禁止的形态。
+5. **`modality.ts` 单点判定**：模态判定一个函数服务两方向，避免"缺字段时严格/宽松朝相反
+   方向失手"这类矛盾。
+6. **视频工具**：异步任务状态机 + 双参数族互斥分派，是出图之外的完整第二工具线。
+
+**本插件设计优点（Agnes 反而欠着）**：
+1. **`../src/shared/wire.ts` 单一契约声明**：Agnes 还在 client 镜像 + 正则对账；我们已由
+   `tsc` 直接守门（含嵌套结构，Agnes 的解析只比顶层字段）。
+2. **全仓 strictNullChecks 全局翻转**：分批毕业、`tsconfig.strict-null.json` 留作冗余双查，
+   登录/装配路径已清零——Agnes 只做到"tsc 真跑"层级。
+3. **jscpd 重复代码检查 + commit-lint**：Agnes 的 scripts 里没有这两道。
+4. **refresh_token 自动续期**：登录一次后密码可删；Agnes 每到期一次就要依赖存密码重登。
+5. **小浣熊面板内扫码登录**：交互闭环在面板内；AgnesCode 的 28 天手动重采是它自认的
+   "已知限制"。
+
+**各自短板**：本插件——开关优先级三处手抄、无 ADR 账本（内联修订
+在沉积）、无 maxTokens 钉值、注释密度过高（`.agnes` 评审已量化：18 个文件注释占比 >48%，
+最高 77%）。Agnes——密码明文过 TLS（平台无 JWE 端点）、无 refresh 导致"令牌疑似死"时会真花
+一次登录尝试（靠 7 天 fallback 补偿）、AgnesCode 无自动续期、client 契约镜像未收敛、无全局
+strictNullChecks 翻转。
+
+### 9.4 可落地借鉴清单（按优先级，门禁对齐 §5 风格）
+
+| 优先级 | 借鉴项 | 对应现状 | 门禁 |
+|---|---|---|---|
+| **P0** | 拆 `../src/host/routes.ts` 为 8 个资源路由 + facade（先冻结 `routes.test.mjs` 再搬） | **✅ 已落地（2026-10-02）**——`routes/` 8 模块 + facade，`routes`/`wiring`/`config`/`raccoon` 拆分前后零漂移 | `routes` + `wiring` + `e2e-gate` |
+| **P0** | 真机探针钉 SenseNova 的 `max_tokens` 平台上限（验证是否也吃 32768 兜底） | **✅ 已落地（2026-10-02）**——live-contract 新增 §2c 探针；harness 兜底坐实（未声明强制 32768），flash-lite 硬上限 65536 / v4-flash、glm-5.2 接受 131072；descriptor 改声明目录权威值 | `live-contract`（best-effort）+ `contract` + `provider` + `typecheck` |
+| **P1** | 建 `docs/ADR.md` 账本 + docs.test 的 `ARCHAEOLOGY` 检查，把 §5 内联修订迁出正文 | **✅ 已落地（2026-10-02）**——ADR-001~004 入账本，§5 内联修订迁为现状表述，`docs.test` 新增考古纪律检查 | `docs` |
+| **P1** | 三份开关 store 收敛为共享 `switch-store` + `switch-precedence` | **✅ 已落地（2026-10-02）**——`switch-precedence.ts` 单一裁决处（resolveSwitchEnabled/Value/Source）替换 provider/models/draw 三处手抄方言；store 底层原语本就共享 `state-store`；`switch-precedence.test.mjs` 进 `npm test` + CI | `store` + `routes` + `switch-precedence` + `package` |
+| **P1** | `modality.ts` 单函数统一两个判定方向 | **✅ 已落地（2026-10-02）**——`outputModalityOf` 单一裁决 + `isChatModel`/`isImageGenModel` 派生；矛盾由构造消除（provider.test 补互补断言） | `provider` + `draw` + `contract` + `typecheck` |
+| **P2** | `docs/REFERENCES.md` 登记 `upstream/` 容器清单 | **✅ 已落地（2026-10-02）**——商汤线 + 生态核实线 12 件登记来源/版本/承重，容器纪律与维护入档 | `docs` |
+| **P2** | 视频工具线（若 SenseNova 平台有视频模型） | **判停（2026-10-02 探测）**——平台文档、冻结契约与真机目录（live-contract 拉取，9 模型全为对话/图像生成）均无视频模型/视频端点；对标前提不成立，待平台出视频能力再议 | — |
+
+> 执行纪律：落地任何一项前先读 [AGENTS.md](../AGENTS.md) 红线与对应 [PITFALLS.md](./PITFALLS.md)
+> 条目；Agnes 侧的完整决策沿革与裁定账本见其 `docs/ADR.md` / `docs/ARCHITECTURE.md` §5
+> （本机路径 `~/.dsh/plugins/dsh-connect-agnes-token-plan/`，非本仓库文件，不经 docs.test 校验）。
+

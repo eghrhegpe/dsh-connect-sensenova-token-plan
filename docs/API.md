@@ -6,7 +6,7 @@
 
 ## 1. 本插件路由（Host 半边注册）
 
-五条路由都经过**同源校验**：带 `Origin` 的请求必须与 Host 同源，因此只有本机 DSH 自己提供的页面能写入账号或 Key。请求体上限 **4 KB**。
+七条路由都经过**同源校验**：带 `Origin` 的请求必须与 Host 同源，因此只有本机 DSH 自己提供的页面能写入账号或 Key。请求体上限 **4 KB**。
 
 ### `GET /api/dsh-connect-sensenova-token-plan/snapshot`
 面板轮询的聚合结果。返回体（HTTP 恒为 200，成败靠 body 区分）：
