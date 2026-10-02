@@ -217,7 +217,7 @@ export function createTokenStore(options: {
         rejected.add(refused);
         // Bounded: only the most recent refusals can still be in play, since a
         // token that was superseded is never handed out again.
-        while (rejected.size > 8) rejected.delete(rejected.values().next().value);
+        while (rejected.size > 8) rejected.delete(rejected.values().next().value ?? "");
       }
       state.cached = null;
     },

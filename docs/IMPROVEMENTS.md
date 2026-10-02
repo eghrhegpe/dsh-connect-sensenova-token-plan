@@ -556,6 +556,40 @@ raccoon-store 1 / llm-error-fix 1 / raccoon-llm-adapter 1。每处需人判 null
 
 ---
 
+
+**批次D（2026-10-03）——noImplicitAny 八域迁移 + strict 全局翻转**。
+
+批次C 翻 strictNullChecks 后，剩余最大的类型洞是 `noImplicitAny: false`：
+全项目探针 **449 处**隐式 any（TS7006 参数 389 + TS7031 解构 36 + TS7053 索引 12 +
+TS7005/7034/7023/7024 杂类 12），跨 43 文件，host 侧 446 / client 3。按"从叶子往根、
+每域一个测试过的 commit"分八域清到 0，再翻 flag（与 SNC 同一 graduation-track 纪律）：
+
+| 域 | 文件 | 消数 | 备注 |
+|---|---|---|---|
+| 叶子域 | util/codes/trace/modality/coalesced-fetch | 16 | 全库地基；`redactSecrets` 等防御性函数标 `unknown`（诚实签名） |
+| token-store 域 | token-store 全家 + throttle/api-key-store + index 一行 | ~83 | 接线 state.ts 已声明未接线的 `StoreContextWiring`/`TokenStoreState` 等接口 |
+| state-store 域 | 5 个状态文件 store | 47 | 提取 `CatalogRecord`；同构开关 store 三件套 |
+| LLM/console 域 | host-config/console-client/llm-models/llm-adapter(-core)/llm-error-fix | 64 | 提取 `ResolvedSettings`（下游首个受益者）；`CatalogEntry` 接口 |
+| 解析/聚合域 | parsers/snapshot-aggregate/draw/switch-precedence | 71 | `PoolRow`/`PoolUsage`；nestedMissing 递归补返回注解（消 TS7023） |
+| 发布链域 | publish-core/provider-publish/lifecycle/index/raccoon-publish | 54 | `PublisherStateBase` 复用；`DrawFetchResponse` 具名（消嵌套泛型语法冲突） |
+| raccoon 家族 + client | raccoon 全家 + 3 个 client 文件 + 2 个 routes | 23 | raccoonHeaders 改 `Record<string,string>`（消 3×TS7053） |
+| 凭据红线域 | sensenova-auth/sensenova-crypto | 82 | `AuthConfig`/`AuthTrace` 接口；IAM_REASON_CODES 索引收窄 |
+
+**接线过程揭穿的潜伏问题**（不开 noImplicitAny 永远看不到）：`isFresh` type predicate
+误用（stale grant 也是 StoredGrant，false 分支窄化成 never——改显式 null 检查）；
+`AuthLike.expiresIn` 被 `[key: string]: unknown` 索引签名吞成 unknown；`writeLoginTrace`
+的 JSDoc 说 `object[]` 而 types.ts 真类型是 `unknown[]`（JSDoc 撒谎按真类型标）；
+`resolveSettings` catch 降级分支缺 8 字段与 happy path 形状不一致。
+
+**翻转**：449→0 后开 `noImplicitAny: true`；随即干查 `strict: true` 仅剩 1 条
+（`Set.next().value` 在 noUncheckedIndexedAccess 下 `string|undefined`，`?? ""` 守卫），
+**同日再翻 `strict: true`**——8 个 strict 子旗标至此全开，`tsconfig.json` 的
+`strict`/`noImplicitAny` 均 true。`tsconfig.strict-null.json` 保留作冗余双查
+（其 include 含 doctor.ts，翻转后暴露 7 条隐式 any，已同 commit 标净）。
+验证：`npm test` 全链绿（typecheck-gate 两配置 strict 下 0 错、store-baseline
+零漂移、e2e 91）。
+
+
 ## 9. 姊妹插件对照：`dsh-connect-agnes-token-plan` 的设计差异与借鉴清单（2026-10-02 快照）
 
 > **档案性质**：本文是**研究档案**（同 §1–§8 定位），不是待执行清单。对照对象是
