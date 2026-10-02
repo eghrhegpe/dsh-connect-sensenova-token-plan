@@ -31,7 +31,7 @@ import type { JwksOptions } from "./types.ts";
  * @param {Uint8Array|ArrayBuffer} bytes - the bytes to encode.
  * @returns {string} the unpadded base64url text.
  */
-export function b64url(bytes) {
+export function b64url(bytes: Uint8Array | ArrayBuffer): string {
   // Accept Uint8Array and ArrayBuffer (what WebCrypto returns); reject other
   // TypedArrays whose element width would silently truncate the output.
   const isAcceptable = bytes instanceof Uint8Array || bytes instanceof ArrayBuffer;
@@ -40,14 +40,14 @@ export function b64url(bytes) {
     // ArrayBuffer reach the encoder. Inside the reject branch the tightened
     // param type narrows `bytes` to `never`, so read the offending shape off a
     // loose view purely to describe it in the message.
-    const bad = /** @type {*} */ (bytes);
+    const bad = bytes as unknown as { constructor?: { name?: string } };
     throw pluginError(CODE.CONFIG, `b64url expects Uint8Array or ArrayBuffer, got ${bad?.constructor?.name ?? typeof bad}`);
   }
   return Buffer.from(bytes as unknown as ArrayBuffer).toString("base64url");
 }
 
 /** Decode a base64url JWT segment into a UTF-8 string. */
-export function b64urlDecode(segment) {
+export function b64urlDecode(segment: string): string {
   return Buffer.from(segment, "base64url").toString("utf8");
 }
 
@@ -60,11 +60,11 @@ export function b64urlDecode(segment) {
  * @param {string} token - a JWT.
  * @returns {Record<string, unknown>} the payload, or `{}` when unreadable.
  */
-export function readJwtClaims(token) {
+export function readJwtClaims(token: string): Record<string, unknown> {
   const segments = str(token, "").split(".");
   if (segments.length < 2) return {};
   try {
-    const parsed = JSON.parse(b64urlDecode(segments[1]));
+    const parsed = JSON.parse(b64urlDecode(segments[1] ?? ""));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -77,7 +77,7 @@ export function readJwtClaims(token) {
  * @param {string} token - a JWT.
  * @returns {number|null}
  */
-export function readJwtExpiry(token) {
+export function readJwtExpiry(token: string): number | null {
   const exp = readJwtClaims(token).exp;
   return typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : null;
 }
@@ -151,7 +151,12 @@ export function createJwksCache() {
  *   no two instances share it unless they are handed the same map on purpose.
  * @returns {Promise<object[]>} the key set.
  */
-async function fetchJwks({ jwksEndpoint, timeoutMs = 15_000, now = Date.now, cache }) {
+async function fetchJwks({ jwksEndpoint, timeoutMs = 15_000, now = Date.now, cache }: {
+  jwksEndpoint: string;
+  timeoutMs?: number;
+  now?: () => number;
+  cache: Map<string, { keys: object[]; at: number }>;
+}): Promise<object[]> {
   const cached = cache.get(jwksEndpoint);
   if (cached !== undefined && now() - cached.at < JWKS_TTL_MS) return cached.keys;
   const response = await fetch(jwksEndpoint, {
@@ -200,14 +205,13 @@ export async function sealPassword(password: string, options: JwksOptions = {}) 
   const { jwksEndpoint, encKeyId, timeoutMs, cache = createJwksCache() } = options;
   if (str(jwksEndpoint, "") === "") throw pluginError(CODE.CONFIG, "no JWKS endpoint is configured");
   if (str(encKeyId, "") === "") throw pluginError(CODE.CONFIG, "no encryption key id is configured");
-  const keys = await fetchJwks({ jwksEndpoint, timeoutMs, cache });
-  const entry = keys.find((key) => obj(key).kid === encKeyId);
+  const keys = await fetchJwks({ jwksEndpoint: str(jwksEndpoint, ""), timeoutMs, cache });
+  const entry = keys.find((key: object) => obj(key).kid === encKeyId);
   if (entry === undefined) throw pluginError(CODE.JWKS, `JWKS has no key ${encKeyId}`);
   const source = obj(entry);
   const modulus = str(source.n, "");
   const exponent = str(source.e, "");
   if (modulus === "" || exponent === "") throw pluginError(CODE.JWKS, "JWKS key is missing n/e");
-
   // Import the JWK by handing WebCrypto the public JWK itself, which also
   // proves the key is well-formed before any password is fed to it.
   const key = await crypto.subtle.importKey(

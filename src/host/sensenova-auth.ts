@@ -34,7 +34,7 @@
 
 import { CODE, IAM_REASON_CODES } from "./codes.ts";
 import { b64url, pkce, sealPassword, createJwksCache } from "./sensenova-crypto.ts";
-import { str, obj, verbatim, pluginError } from "./util.ts";
+import { str, obj, num, verbatim, pluginError } from "./util.ts";
 
 // The JWE/PKCE/JWKS primitives now live in sensenova-crypto.ts, so this module
 // carries no module-level crypto state (no shared JWKS cache, no global key id).
@@ -76,18 +76,18 @@ const AUTH_DEFAULTS = Object.freeze({
 // every function that needs it, never as a captured module variable.
 
 /** Read a non-empty string, else `undefined`, so a bad override is skipped. */
-function optionalStr(value) {
+function optionalStr(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 }
 
 /** Read a finite positive number, else `undefined`. */
-function optionalNum(value) {
+function optionalNum(value: unknown): number | undefined {
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) && number > 0 ? number : undefined;
 }
 
 /** Whether a host is loopback — the only place plain http is tolerable. */
-function isLoopback(hostname) {
+function isLoopback(hostname: string): boolean {
   // Strip IPv6 brackets (`[::1]`) before comparing; the e2e fake platform
   // serves `http://127.0.0.1`, and plain http has no man-in-the-middle
   // corridor on the loopback interface itself.
@@ -103,18 +103,18 @@ function isLoopback(hostname) {
  * real host quietly downgrades the session credentials to cleartext. The
  * loopback exception keeps the e2e fake platform (http://127.0.0.1) reachable.
  */
-function checkEndpoint(value, field) {
+function checkEndpoint(value: unknown, field: string): string {
   let parsed;
   try {
-    parsed = new URL(value);
+    parsed = new URL(String(value));
   } catch {
-    throw pluginError(CODE.CONFIG,`${field} is not an absolute URL: ${value}`);
+    throw pluginError(CODE.CONFIG, `${field} is not an absolute URL: ${value}`);
   }
   if (parsed.protocol !== "https:") {
-    if (parsed.protocol === "http:" && isLoopback(parsed.hostname)) return value;
-    throw pluginError(CODE.CONFIG,`${field} must be https (plain http is allowed only for loopback, e.g. the e2e fake platform), got ${parsed.protocol}//${parsed.host}`);
+    if (parsed.protocol === "http:" && isLoopback(parsed.hostname)) return String(value);
+    throw pluginError(CODE.CONFIG, `${field} must be https (plain http is allowed only for loopback, e.g. the e2e fake platform), got ${parsed.protocol}//${parsed.host}`);
   }
-  return value;
+  return String(value);
 }
 
 /**
@@ -128,9 +128,9 @@ function checkEndpoint(value, field) {
  * @param {object} [overrides] - values to apply; absent keys keep their default.
  * @returns {object} the effective configuration (frozen).
  */
-function resolveAuthConfig(overrides = {}) {
+function resolveAuthConfig(overrides: object = {}): AuthConfig {
   const source = obj(overrides);
-  const pick = (key, fallback, isNumber) => {
+  const pick = (key: string, fallback: unknown, isNumber: boolean): unknown => {
     if (!Object.prototype.hasOwnProperty.call(source, key)) return fallback;
     const value = isNumber ? optionalNum(source[key]) : optionalStr(source[key]);
     return value === undefined ? fallback : value;
@@ -142,17 +142,16 @@ function resolveAuthConfig(overrides = {}) {
     authEndpoint: `${consoleOrigin}/oauth2/auth`,
     tokenEndpoint: checkEndpoint(pick("tokenEndpoint", AUTH_DEFAULTS.tokenEndpoint, false), "tokenEndpoint"),
     jwksEndpoint: checkEndpoint(pick("jwksEndpoint", AUTH_DEFAULTS.jwksEndpoint, false), "jwksEndpoint"),
-    clientId: pick("clientId", AUTH_DEFAULTS.clientId, false),
-    scope: pick("scope", AUTH_DEFAULTS.scope, false),
-    encKeyId: pick("encKeyId", AUTH_DEFAULTS.encKeyId, false),
-    userAgent: pick("userAgent", AUTH_DEFAULTS.userAgent, false),
+    clientId: str(pick("clientId", AUTH_DEFAULTS.clientId, false), AUTH_DEFAULTS.clientId),
+    scope: str(pick("scope", AUTH_DEFAULTS.scope, false), AUTH_DEFAULTS.scope),
+    encKeyId: str(pick("encKeyId", AUTH_DEFAULTS.encKeyId, false), AUTH_DEFAULTS.encKeyId),
+    userAgent: str(pick("userAgent", AUTH_DEFAULTS.userAgent, false), AUTH_DEFAULTS.userAgent),
     redirectUri: checkEndpoint(pick("redirectUri", consoleOrigin, false), "redirectUri"),
-    requestTimeoutMs: pick("requestTimeoutMs", AUTH_DEFAULTS.requestTimeoutMs, true),
-    maxHops: pick("maxHops", AUTH_DEFAULTS.maxHops, true),
-    assumedTokenLifetimeSeconds: pick(
-      "assumedTokenLifetimeSeconds",
-      AUTH_DEFAULTS.assumedTokenLifetimeSeconds,
-      true
+    requestTimeoutMs: num(pick("requestTimeoutMs", AUTH_DEFAULTS.requestTimeoutMs, true), AUTH_DEFAULTS.requestTimeoutMs),
+    maxHops: num(pick("maxHops", AUTH_DEFAULTS.maxHops, true), AUTH_DEFAULTS.maxHops),
+    assumedTokenLifetimeSeconds: num(
+      pick("assumedTokenLifetimeSeconds", AUTH_DEFAULTS.assumedTokenLifetimeSeconds, true),
+      AUTH_DEFAULTS.assumedTokenLifetimeSeconds
     ),
     // The key-set cache this instance seals through. Built here so it is owned
     // by the config, not by the module: two instances (two tenants, or a test
@@ -160,7 +159,7 @@ function resolveAuthConfig(overrides = {}) {
     // rest of cfg — freezing the object does not freeze the Map's contents, but
     // nothing here mutates the reference, only what lives inside it.
     jwksCache: createJwksCache()
-  });
+  } as AuthConfig);
 }
 
 /**
@@ -173,13 +172,13 @@ function resolveAuthConfig(overrides = {}) {
  * @param {object} [overrides] - platform overrides; see {@link resolveAuthConfig}.
  * @returns {{login: Function, refresh: Function, getConfig: Function}} the instance.
  */
-export function createAuth(overrides = {}) {
+export function createAuth(overrides: object = {}) {
   const cfg = resolveAuthConfig(overrides);
   return {
     /** Log in with an account password; see {@link loginWith}. */
-    login(credentials, options) { return loginWith(cfg, credentials, options); },
+    login(credentials: { username: string; password: string }, options?: object) { return loginWith(cfg, credentials, options); },
     /** Renew a refresh token; see {@link refreshWith}. */
-    refresh(token, options) { return refreshWith(cfg, token, options); },
+    refresh(token: string, options?: object) { return refreshWith(cfg, token, options); },
     /** The effective configuration, as a copy. */
     getConfig() { return { ...cfg }; }
   };
@@ -223,7 +222,7 @@ const TRACE_MAX_HOPS = 12;
  * @param {string} url - any URL.
  * @returns {string} the redacted URL, or the input when it does not parse.
  */
-function sanitizeUrl(url) {
+function sanitizeUrl(url: string): string {
   const raw = str(url, "");
   if (raw === "") return "";
   let parsed;
@@ -242,22 +241,46 @@ function sanitizeUrl(url) {
   return parsed.href;
 }
 
+/** The resolved auth configuration every flow function walks with. */
+export interface AuthConfig {
+  consoleOrigin: string;
+  iamOrigin: string;
+  authEndpoint: string;
+  tokenEndpoint: string;
+  jwksEndpoint: string;
+  clientId: string;
+  scope: string;
+  encKeyId: string;
+  userAgent: string;
+  redirectUri: string;
+  requestTimeoutMs: number;
+  maxHops: number;
+  assumedTokenLifetimeSeconds: number;
+  jwksCache: unknown;
+}
+
+/** The trace recorder the walk functions receive. */
+interface AuthTrace {
+  step(name: string, info?: Record<string, unknown>): void;
+  done(): unknown[];
+}
+
 /**
  * Reduce a response body to a log-safe snippet.
  * @param {string} text - the raw body text (may be JSON, HTML, or nothing).
  * @returns {string} a sanitized, length-capped snippet.
  */
-function sanitizeBody(text) {
+function sanitizeBody(text: unknown): string {
   const raw = str(text, "");
   if (raw === "") return "";
   let body = raw;
   // JSON first: redact the value of every secret key in place.
   try {
     const parsed = JSON.parse(raw);
-    const scrub = (value) => {
+    const scrub = (value: unknown): unknown => {
       if (Array.isArray(value)) return value.map(scrub);
       if (value && typeof value === "object") {
-        const out = {};
+        const out: Record<string, unknown> = {};
         for (const [key, item] of Object.entries(value)) {
           out[key] = SECRET_BODY_KEYS.has(key.toLowerCase()) ? "[REDACTED]" : scrub(item);
         }
@@ -333,7 +356,7 @@ function createTrace() {
  * @param {Response} response - the IAM response, for its headers.
  * @returns {number|undefined} the wait, or `undefined` when none is stated.
  */
-function retryWindowMs(body, response) {
+function retryWindowMs(body: unknown, response: { status?: number; headers?: { get?: (name: string) => string | null } }): number | undefined {
   // A Retry-After in seconds is the authoritative form when present.
   const header = Number(response?.headers?.get?.("retry-after"));
   if (Number.isFinite(header) && header > 0) return Math.ceil(header * 1000);
@@ -344,7 +367,7 @@ function retryWindowMs(body, response) {
   if (match === null) return undefined;
   const amount = Number(match[1]);
   if (!Number.isFinite(amount) || amount <= 0) return undefined;
-  return amount * durationFactorMs(match[2]);
+  return amount * durationFactorMs(match[2] ?? "");
 }
 
 /**
@@ -356,7 +379,7 @@ function retryWindowMs(body, response) {
  * @param {string} unit - the matched unit.
  * @returns {number} milliseconds.
  */
-function durationFactorMs(unit) {
+function durationFactorMs(unit: string): number {
   if (/^h/i.test(unit) || unit.includes("小时") || unit === "时") return 3_600_000;
   if (/^m/i.test(unit) || unit.includes("分")) return 60_000;
   return 1000;
@@ -388,7 +411,7 @@ async function httpGet(url: string, init: RequestInit & { timeoutMs?: number } =
  * @param {string} name - the parameter to read.
  * @returns {string} the value, or `""` when absent.
  */
-function paramOf(url, name) {
+function paramOf(url: string, name: string): string {
   try {
     return new URL(url).searchParams.get(name) ?? "";
   } catch {
@@ -406,7 +429,7 @@ function paramOf(url, name) {
  * @param {RegExp} wanted - matches the parameter that marks a hit.
  * @returns {string} the next URL, or `""` when the body carries none.
  */
-function nextFromBody(body, wanted) {
+function nextFromBody(body: string, wanted: RegExp): string {
   const text = str(body, "");
   if (text === "") return "";
   const absolute = /https?:\/\/[^"'\s<>]+[?&][^"'\s<>]*/g;
@@ -414,7 +437,7 @@ function nextFromBody(body, wanted) {
     if (wanted.test(match[0])) return match[0];
   }
   const meta = /<meta[^>]+http-equiv=["']refresh["'][^>]+url=["']([^"']+)/i.exec(text);
-  if (meta !== null) return meta[1];
+  if (meta !== null) return meta[1] ?? "";
   for (const pattern of [
     /window\.location\.replace\(["']([^"']+)["']/,
     /window\.location\.href\s*=\s*["']([^"']+)["']/,
@@ -422,7 +445,7 @@ function nextFromBody(body, wanted) {
     /window\.location\s*=\s*["']([^"']+)["']/
   ]) {
     const found = pattern.exec(text);
-    if (found !== null) return found[1];
+    if (found !== null) return found[1] ?? "";
   }
   return "";
 }
@@ -441,7 +464,7 @@ function nextFromBody(body, wanted) {
  *   for the next hop from the response text.
  * @returns {Promise<string>} the matching URL, or `""` when the chain ends first.
  */
-async function followUntil(start, wanted, jar, cfg, trace) {
+async function followUntil(start: string, wanted: RegExp, jar: Map<string, string>, cfg: AuthConfig, trace?: AuthTrace): Promise<string> {
   const budget = cfg.maxHops;
   let location = start;
   for (let hop = 0; hop < budget && location !== ""; hop += 1) {
@@ -469,15 +492,15 @@ async function followUntil(start, wanted, jar, cfg, trace) {
 }
 
 /** Render a cookie jar as a request `cookie` header. */
-function cookieHeader(jar) {
+function cookieHeader(jar: Map<string, string>): string {
   return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
 }
 
 /** Absorb `set-cookie` headers into the jar, name/value only. */
-function collectCookies(response, jar) {
+function collectCookies(response: { headers: { getSetCookie?: () => string[] } }, jar: Map<string, string>): void {
   const raw = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
   for (const line of raw) {
-    const [pair] = line.split(";");
+    const [pair = ""] = line.split(";");
     const index = pair.indexOf("=");
     if (index > 0) jar.set(pair.slice(0, index).trim(), pair.slice(index + 1).trim());
   }
@@ -490,11 +513,11 @@ function collectCookies(response, jar) {
  *   consumed for the trace and is handed over parsed-once.
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresIn: number, scope: string}>}
  */
-async function readTokenResponse(response, cfg) {
+async function readTokenResponse(response: { status: number; jsonText?: string; json?: () => Promise<unknown> }, cfg: AuthConfig): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; scope: string }> {
   const status = typeof response.status === "number" ? response.status : 0;
-  const body = obj(/** @type {{ jsonText?: string }} */ (response).jsonText !== undefined
-    ? (() => { try { return JSON.parse(/** @type {{ jsonText?: string }} */ (response).jsonText); } catch { return {}; } })()
-    : await /** @type {Response} */ (response).json().catch(() => ({})));
+  const body = obj(response.jsonText !== undefined
+    ? (() => { try { return JSON.parse(response.jsonText as string); } catch { return {}; } })()
+    : await (response as { json: () => Promise<unknown> }).json().catch(() => ({})));
   const accessToken = str(body.access_token, "");
   if (accessToken === "") {
     const detail = str(body.error_description, str(body.error, `HTTP ${status}`));
@@ -522,7 +545,7 @@ async function readTokenResponse(response, cfg) {
  * @param {number} [options.timeoutMs] - deadline override.
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresIn: number, scope: string}>}
  */
-export async function refreshWith(cfg, refreshToken, options: { timeoutMs?: number } = {}) {
+export async function refreshWith(cfg: AuthConfig, refreshToken: string, options: { timeoutMs?: number } = {}): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; scope: string }> {
   const token = str(refreshToken, "");
   if (token === "") throw pluginError(CODE.NO_REFRESH_TOKEN, "no refresh token is stored");
   const response = await fetch(cfg.tokenEndpoint, {
@@ -568,7 +591,7 @@ export async function refreshWith(cfg, refreshToken, options: { timeoutMs?: numb
  * @param {object} body - the parsed IAM response.
  * @returns {string} the reason, or `""` when the body carries none.
  */
-function iamRejectionReason(body) {
+function iamRejectionReason(body: unknown): string {
   const details = obj(body).details;
   if (!Array.isArray(details)) return "";
   for (const entry of details) {
@@ -588,7 +611,7 @@ function iamRejectionReason(body) {
  * @param {number} status - the HTTP status.
  * @returns {string}
  */
-function rejectionDetail(body, status) {
+function rejectionDetail(body: unknown, status: number): string {
   const source = obj(body);
   const details = Array.isArray(source.details) ? source.details : [];
   for (const entry of details) {
@@ -614,12 +637,12 @@ function rejectionDetail(body, status) {
  * @param {object} body - the parsed IAM response.
  * @returns {string} a {@link CODE} value.
  */
-function rejectionCode(body) {
+function rejectionCode(body: unknown): import("./codes.ts").CodeValue {
   // The platform writes the reason camelCase (`invalidAccountOrPassword`);
   // other responses spell it snake_case or SCREAMING_CASE. Folding separators
   // away lets one table serve every casing.
   const reason = iamRejectionReason(body).toLowerCase().replace(/[\s_-]+/g, "");
-  const exact = IAM_REASON_CODES[reason];
+  const exact = IAM_REASON_CODES[reason as keyof typeof IAM_REASON_CODES];
   if (exact !== undefined) return exact;
   if (reason.includes("accountorpassword") || reason.includes("credential")) return CODE.LOGIN_REJECTED;
   if (reason.includes("lock") || reason.includes("disable")) return CODE.ACCOUNT_LOCKED;
@@ -647,7 +670,7 @@ function rejectionCode(body) {
  *   the access token (the console JWT), the refresh token when the platform
  *   issued one, and the access token lifetime in seconds.
  */
-export async function loginWith(cfg, credentials, options: { timeoutMs?: number; onTrace?: (trace: unknown, error: unknown) => void } = {}) {
+export async function loginWith(cfg: AuthConfig, credentials: { username: string; password: string }, options: { timeoutMs?: number; onTrace?: (trace: unknown, error: unknown) => void } = {}): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; scope: string }> {
   /** Run one attempt; every exit — success included — reports its trace. */
   const attempt = async () => {
     const trace = createTrace();
@@ -693,7 +716,7 @@ export async function loginWith(cfg, credentials, options: { timeoutMs?: number;
  * @param {string} nonce - the state nonce issued for this flow.
  * @returns {Promise<string>} the challenge URL, or `""`.
  */
-async function obtainLoginChallenge(cfg, jar, trace, challenge, nonce) {
+async function obtainLoginChallenge(cfg: AuthConfig, jar: Map<string, string>, trace: AuthTrace, challenge: string, nonce: string): Promise<string> {
   const authUrl = new URL(cfg.authEndpoint);
   authUrl.search = new URLSearchParams({
     client_id: cfg.clientId,
@@ -734,7 +757,7 @@ async function obtainLoginChallenge(cfg, jar, trace, challenge, nonce) {
  * @param {number} [deadline] - request deadline override (ms).
  * @returns {Promise<string>} the IAM callback redirect.
  */
-async function postIamLogin(cfg, jar, trace, loginChallenge, user, secret, fail, deadline) {
+async function postIamLogin(cfg: AuthConfig, jar: Map<string, string>, trace: AuthTrace, loginChallenge: string, user: string, secret: string, fail: (code: import("./codes.ts").CodeValue, message: string, extra?: object) => Error, deadline: number): Promise<string> {
   const encrypted = await sealPassword(secret, { jwksEndpoint: cfg.jwksEndpoint, encKeyId: cfg.encKeyId, cache: cfg.jwksCache });
   const iamUrl = `${cfg.iamOrigin}/iam/authn/v1/auth/nova/login`;
   const iamResponse = await fetch(iamUrl, {
@@ -792,7 +815,7 @@ async function postIamLogin(cfg, jar, trace, loginChallenge, user, secret, fail,
  * @param {(code: string, message: string, extra?: object) => Error} fail - trace-tagged error factory.
  * @returns {Promise<string>} the authorization code.
  */
-async function obtainAuthCode(cfg, jar, trace, redirect, expectedState, fail) {
+async function obtainAuthCode(cfg: AuthConfig, jar: Map<string, string>, trace: AuthTrace, redirect: string, expectedState: string, fail: (code: import("./codes.ts").CodeValue, message: string, extra?: object) => Error): Promise<string> {
   const codeUrl = await followUntil(redirect, /[?&]code=/, jar, cfg, trace);
   const code = paramOf(codeUrl, "code");
   if (code === "") {
@@ -818,7 +841,7 @@ async function obtainAuthCode(cfg, jar, trace, redirect, expectedState, fail) {
  * @param {number} [deadline] - request deadline override (ms).
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresIn: number, scope: string}>}
  */
-async function exchangeCodeForToken(cfg, trace, code, verifier, fail, deadline) {
+async function exchangeCodeForToken(cfg: AuthConfig, trace: AuthTrace, code: string, verifier: string, fail: (code: import("./codes.ts").CodeValue, message: string, extra?: object) => Error, deadline: number): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; scope: string }> {
   const tokenResponse = await fetch(cfg.tokenEndpoint, {
     method: "POST",
     headers: {
@@ -855,14 +878,14 @@ async function exchangeCodeForToken(cfg, trace, code, verifier, fail, deadline) 
  * The login flow proper. Throws with `error.trace` attached on every exit;
  * `login` wraps this so even out-of-band failures carry the trace.
  */
-async function performLogin({ username, password }, options, trace, cfg) {
+async function performLogin({ username, password }: { username: string; password: string }, options: { timeoutMs?: number }, trace: AuthTrace, cfg: AuthConfig): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; scope: string }> {
   const deadline = options.timeoutMs ?? cfg.requestTimeoutMs;
   // The username is trimmed (an identifier), the password is not (a secret).
   const user = str(username, "");
   const secret = verbatim(password, "");
   if (user === "" || secret.trim() === "") throw pluginError(CODE.MISSING_CREDENTIALS, "username and password are required");
 
-  const fail = (code, message, extra = {}) => {
+  const fail = (code: import("./codes.ts").CodeValue, message: string, extra: object = {}) => {
     const error = pluginError(code, message, extra);
     error.trace = trace.done();
     return error;
