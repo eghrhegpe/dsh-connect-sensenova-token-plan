@@ -150,3 +150,59 @@ export interface PluginError extends Error {
   detail?: unknown;
   trace?: unknown[];
 }
+
+/**
+ * The wiring bag `index.ts` assembles once at mount and hands to the route
+ * handlers (`routes.ts`). It is the single seam that decides what a route may
+ * touch: every service a handler reaches for is listed here, so a route that
+ * needs a new dependency gets it through the wiring, never by importing the
+ * service directly.
+ *
+ * The stores / publishers / caches are opaque injected objects (the DSH peers
+ * ship no declarations in this repo), so they are typed loosely — the shape is
+ * pinned by the creators (`createFile*Store`, `createProviderPublisher`, …)
+ * and by the tests, not by this annotation. A new field must keep the "one
+ * seam" discipline: add it here, wire it in `index.ts`, and read it through.
+ */
+export interface Wiring {
+  /** The resolved settings row (panel values + config defaults). */
+  settings: any;
+  /** A settings/auth misconfiguration surfaced through the snapshot; `null` when clean. */
+  configError: string | null;
+  /** The console-response cache shared across polls. */
+  cache: Map<string, any>;
+  /** The single-flight map shared across polls. */
+  inflight: Map<string, any>;
+  /** The token store (`createTokenStore`). */
+  tokenStore: any;
+  /** The inference API-key store (`createApiKeyStore`). */
+  apiKeyStore: any;
+  /** The model-catalog store (`createFileCatalogStore`). */
+  catalogStore: any;
+  /** The provider switch store (`createFileProviderStore`). */
+  providerStore: any;
+  /** The draw-tool store (`createFileDrawStore`); may be absent on some Hosts. */
+  drawStore: any | null;
+  /** The directly-registered provider publisher (`createProviderPublisher`). */
+  publisher: any;
+  /** The publisher's live registration state (shared reference). */
+  providerState: any;
+  /** `(entries, enabledIds, unavailableIds) => publisher.publish` with rollback. */
+  publishProvider: (entries: any[], enabledIds: string[], unavailableModelIds?: string[]) => Promise<any>;
+  /** Release the registered provider pair (adapter + directory). */
+  releaseProvider: () => void;
+  /** Resolve the live `sk-` key per request. */
+  resolveApiKey: () => Promise<string>;
+  /** The settings-row vision writer filled by `startSideEffects` (no-op until then). */
+  visionPublish: { current: ((models: any[], ids: string[]) => Promise<any>) | null };
+  /** `ctx.logger` (Host logging); optional so tests may omit it. */
+  logger?: any;
+  /** The Raccoon credential store (`createRaccoonStore`); the second upstream. */
+  raccoonStore: any | null;
+  /** The Raccoon switch store (`createFileRaccoonStore`); may be absent. */
+  raccoonSwitch: any | null;
+  /** The Raccoon publisher (`createRaccoonPublisher`); may be absent. */
+  raccoonPublisher: any | null;
+  /** The Raccoon gateway read cache (balance + catalogue); may be absent. */
+  raccoonCache: any | null;
+}

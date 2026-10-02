@@ -25,8 +25,8 @@
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-walk
  */
-import { RACCOON_QR_STATUS, pollRaccoonQrLogin, RACCOON_LOGIN_TIMEOUT_MS, RACCOON_QR_POLL_INTERVAL_MS, generateRaccoonQrCode, raccoonQrLoginUrl } from "./raccoon.ts";
-import { str } from "./util.ts";
+import { RACCOON_QR_STATUS, RACCOON_QR_POLL_INTERVAL_MS, RACCOON_LOGIN_TIMEOUT_MS, generateRaccoonQrCode, raccoonQrLoginUrl } from "./raccoon.ts";
+import type { RaccoonQrPollResult } from "./raccoon.ts";
 
 /** The terminal outcomes the tab reads. */
 export const LOGIN_STATUS = Object.freeze({
@@ -71,7 +71,7 @@ export interface RaccoonWalkView {
  * @returns {{ view: RaccoonWalkView, issueScan: () => Promise<void> }}
  */
 export function createRaccoonWalk(options: {
-  fetcher: typeof fetch;
+  fetcher: (code: string) => Promise<RaccoonQrPollResult>;
   saveCredential: (credential: { accessToken: string; refreshToken: string; expiresAtMs?: number; nickname?: string }) => Promise<void>;
   invalidateCache: () => void;
   onSettled: () => void;
@@ -112,7 +112,7 @@ export function createRaccoonWalk(options: {
 
     const deadline = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
     let canceled = false;
-    let settled: { accessToken: string; refreshToken: string; expiresAtMs?: number; nickname?: string; dataFields?: string[] } | null = null;
+    let settled: RaccoonQrPollResult | null = null;
 
     try {
       while (Date.now() < deadline) {

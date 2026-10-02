@@ -1,11 +1,11 @@
 /**
  * The HTTP route handlers.
  *
- * `apply()` stays the single mount seam: it assembles a `wiring` object and
- * hands it to {@link registerRoutes}; the handlers keep exactly the behaviour
- * they had inline (the trust fence, the method allowances, the body ceilings,
- * the trace writes, the publish-after-save calls). Nothing here imports a Host
- * peer — the only lazy peer loads (the adapter / tools modules) live in
+ * `apply()` (in `index.ts`) stays the single mount seam: it assembles a
+ * `wiring` object and hands it to {@link registerRoutes}; each route is its
+ * own named function (one per resource) that closes over the wiring, so a
+ * route never imports a service directly. Nothing here imports a Host peer —
+ * the only lazy peer loads (the adapter / tools modules) live in
  * `lifecycle.ts` and are injected from `apply` via `deps`.
  *
  * @module dsh-connect-sensenova-token-plan/routes
@@ -15,18 +15,13 @@ import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { buildSnapshotBody, failureCode } from "./snapshot-aggregate.ts";
 import { CODE } from "./codes.ts";
 import { writeLoginTrace } from "./trace.ts";
-import { str, redactSecrets, optional } from "./util.ts";
-import type { PluginError } from "./types.ts";
+import { str, optional } from "./util.ts";
+import type { PluginError, Wiring } from "./types.ts";
 import { normalizeEnabledIds } from "./catalog-store.ts";
 import { syncSignaturesAfterPublish } from "./provider-publish.ts";
 import {
-  generateRaccoonQrCode,
-  raccoonQrLoginUrl,
   pollRaccoonQrLogin,
   fetchRaccoonCatalog,
-  RACCOON_QR_STATUS,
-  RACCOON_QR_POLL_INTERVAL_MS,
-  RACCOON_LOGIN_TIMEOUT_MS,
   RACCOON_FALLBACK_MODELS
 } from "./raccoon.ts";
 // The tab's read model lives in its own peer-free module (it is not HTTP), so
@@ -58,10 +53,13 @@ const RACCOON_PATH = `/api/${name}/raccoon`;
 const MAX_RACCOON_BODY_BYTES = 2048;
 // The QR walk's deadline and poll cadence are GATEWAY wire facts, so they live
 // in the protocol layer (`raccoon.ts`) and are imported — never re-declared
-// here. They used to be declared twice with identical values, which is the one
-// shape that drifts in silence: two literals, no runtime assertion able to tell
-// them apart (see ROADMAP §6.1.4 and `test/raccoon.test.mjs`'s single-source
-// check).
+// here. `RACCOON_LOGIN_TIMEOUT_MS` and `RACCOON_QR_POLL_INTERVAL_MS` are the
+// walk's two timing constants; since the scan lifecycle moved to
+// `raccoon-walk.ts` (which imports both from `raccoon.ts`), nothing here
+// imports them directly — only the walk does. They used to be declared twice
+// with identical values, which is the one shape that drifts in silence: two
+// literals, no runtime assertion able to tell them apart (see ROADMAP §6.1.4
+// and `test/raccoon.test.mjs`'s single-source check).
 /** Ceiling on a submitted account, so a hostile page cannot stream a body. */
 const MAX_ACCOUNT_BODY_BYTES = 4096;
 /** Ceiling on the curated allow-list: a catalogue this large is a posting accident. */
@@ -73,7 +71,7 @@ const JSON_HEADERS = {
 };
 
 /** Write one JSON response with the family headers. */
-function writeJson(res, status, body, headers = {}) {
+function writeJson(res: any, status: number, body: unknown, headers: Record<string, string> = {}) {
   const payload = JSON.stringify(body);
   res.writeHead(status, { ...JSON_HEADERS, ...headers });
   res.end(payload);
@@ -89,7 +87,7 @@ function writeJson(res, status, body, headers = {}) {
  * @param limit - the byte ceiling.
  * @returns {Promise<{ok: true, value: object} | {ok: false, error: string}>}
  */
-async function readJsonBody(request, limit = MAX_ACCOUNT_BODY_BYTES) {
+async function readJsonBody(request: any, limit = MAX_ACCOUNT_BODY_BYTES) {
   const chunks = [];
   let received = 0;
   try {
@@ -123,7 +121,7 @@ async function readJsonBody(request, limit = MAX_ACCOUNT_BODY_BYTES) {
  * @param response - the outgoing HTTP response.
  * @returns {void}
  */
-function refuseOrigin(response) {
+function refuseOrigin(response: any) {
   writeJson(response, 403, { ok: false, error: "forbidden: origin mismatch" });
 }
 
@@ -136,7 +134,7 @@ function refuseOrigin(response) {
  * @param response - the outgoing HTTP response.
  * @returns {void}
  */
-function refuseMethod(response) {
+function refuseMethod(response: any) {
   writeJson(response, 405, { ok: false, error: "method not allowed" });
 }
 
@@ -156,7 +154,7 @@ function refuseMethod(response) {
  * @param {object} request - the incoming HTTP request.
  * @returns {boolean} whether the diagnostics were requested.
  */
-function wantsDiagnostics(request) {
+function wantsDiagnostics(request: any) {
   const url = str(request?.url, "");
   if (url === "") return false;
   try {
@@ -178,7 +176,7 @@ function wantsDiagnostics(request) {
  * @param response - the outgoing HTTP response (written on failure).
  * @returns {Promise<object|null>} the read result, or null if a 400 was sent.
  */
-async function readJsonBodyOr400(request, response, limit = MAX_ACCOUNT_BODY_BYTES) {
+async function readJsonBodyOr400(request: any, response: any, limit = MAX_ACCOUNT_BODY_BYTES) {
   const body = await readJsonBody(request, limit);
   if (!body.ok) {
     writeJson(response, 400, { ok: false, error: /** @type {{ok: false, error: string}} */ (body).error }, { "cache-control": "no-store" });
@@ -188,68 +186,56 @@ async function readJsonBodyOr400(request, response, limit = MAX_ACCOUNT_BODY_BYT
 }
 
 /**
- * Register the six routes on the Host's web server.
+ * Wrap a route handler with the trust fence every route opens with.
  *
- * The handlers close over `wiring` only — every service they touch is listed
- * there, so `apply()` is the single place that decides what a route can do.
- * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {object} wiring - assembled by `apply()` in `index.ts`.
- * @param {object} wiring.settings - the resolved settings row.
- * @param {string|null} wiring.configError - a settings/auth misconfiguration
- *   surfaced through the snapshot instead of a mount crash.
- * @param {Map} wiring.cache - the console-response cache (shared across polls).
- * @param {Map} wiring.inflight - the single-flight map (shared across polls).
- * @param {object} wiring.tokenStore - the `createTokenStore` instance.
- * @param {object} wiring.apiKeyStore - the `createApiKeyStore` instance.
- * @param {object} wiring.catalogStore - the `createFileCatalogStore` instance.
- * @param {object} wiring.providerStore - the `createFileProviderStore` instance.
- * @param {object} wiring.publisher - the `createProviderPublisher` instance.
- * @param {object} wiring.providerState - `publisher.state` (shared reference).
- * @param {Function} wiring.publishProvider - (entries, enabledIds, unavailableIds) =>
- *   publisher.publish with rollback.
- * @param {{current: Function|null}} wiring.visionPublish - the settings-row
- *   writer filled by `startSideEffects` (no-op until then).
- * @param {object} wiring.drawStore - the `createFileDrawStore` instance; the
- *   draw switch route reads and writes it.
- * @param {object} [wiring.logger] - `ctx.logger` (Host logging), used by the
- *   trace-write handler; optional so tests may omit it.
- * @returns {Function[]} the six `off()` unregister callbacks, in registration
- *   order — `teardown` runs them last.
+ * The seven handlers each used to repeat the identical
+ * `if (!isAdmitted(...))` block; this folds it into one seam so a forgotten
+ * fence is impossible and the 403 wording stays in {@link refuseOrigin}. A
+ * handler wrapped here must NOT repeat the fence — doing so is only a second,
+ * dead guard.
+ * @param {(request: object, response: object) => Promise<void>} handler - the route logic.
+ * @param {unknown} allowedHosts - the settings' allowed-hosts list the fence checks against.
+ * @returns {(request: object, response: object) => Promise<void>} the fenced handler.
  */
-export function registerRoutes(ctx, wiring) {
-  const { settings, configError, cache, inflight, tokenStore, apiKeyStore, catalogStore, providerStore, drawStore, publisher, providerState, publishProvider, visionPublish, logger, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache } = wiring;
-  // The Raccoon gateway reads (balance + catalogue) go through the SAME
-  // coalescing cache primitive the console route uses, so a scan's fast poll
-  // shares one call instead of issuing one per panel refresh. The instance is
-  // the wiring's (created in `index.ts`) so a login/logout can clear it in one
-  // place; a Host that wired none still gets a private one rather than a crash.
-  const raccoonRead = raccoonCache ?? createCoalescedFetch();
+function withOrigin(handler: (request: any, response: any) => Promise<void>, allowedHosts: unknown) {
+  return async (request: any, response: any) => {
+    if (!isAdmitted(request, allowedHosts)) {
+      refuseOrigin(response);
+      return;
+    }
+    return handler(request, response);
+  };
+}
 
-  /**
-   * Wrap a route handler with the trust fence every route opens with.
-   *
-   * The seven handlers each used to repeat the identical
-   * `if (!isAdmitted(...))` block; this folds it into one seam so a forgotten
-   * fence is impossible and the 403 wording stays in {@link refuseOrigin}. A
-   * handler wrapped here must NOT repeat the fence — doing so is only a second,
-   * dead guard.
-   * @param {(request: object, response: object) => unknown} handler - the route logic.
-   * @returns {(request: object, response: object) => Promise<void>} the fenced handler.
-   */
-  function withOrigin(handler) {
-    return async (request, response) => {
-      if (!isAdmitted(request, settings.allowedHosts)) {
-        refuseOrigin(response);
-        return;
-      }
-      return handler(request, response);
-    };
-  }
+/**
+ * Register the six Token Plan routes plus the Raccoon route on the Host's web
+ * server. Each route is its own named function; this assembler only decides
+ * what they may touch (the wiring) and hands back the unregister callbacks,
+ * in registration order — `teardown` runs them last.
+ * @param ctx - the host root context (only `ctx.webServer` is used here).
+ * @param {Wiring} wiring - assembled by `apply()` in `index.ts`.
+ * @returns {Function[]} the seven `off()` unregister callbacks, in registration order.
+ */
+export function registerRoutes(ctx: any, wiring: Wiring) {
+  return [
+    snapshotRoute(ctx, wiring),
+    accountRoute(ctx, wiring),
+    apiKeyRoute(ctx, wiring),
+    providerRoute(ctx, wiring),
+    modelsRoute(ctx, wiring),
+    drawRoute(ctx, wiring),
+    raccoonRoute(ctx, wiring)
+  ];
+}
 
-  const offRoute = ctx.webServer.register({
+/** The read-only snapshot route: the one the Client panel polls. */
+function snapshotRoute(ctx: any, wiring: Wiring) {
+  const { settings, configError, cache, inflight, tokenStore, publisher, catalogStore, providerStore, drawStore, visionPublish, logger } = wiring;
+
+  return ctx.webServer.register({
     kind: "exact",
     path: SNAPSHOT_PATH,
-    handler: withOrigin(async (request, response) => {
+    handler: withOrigin(async (request: any, response: any) => {
       if (request.method !== undefined && request.method !== "GET" && request.method !== "HEAD") {
         refuseMethod(response);
         return;
@@ -276,7 +262,7 @@ export function registerRoutes(ctx, wiring) {
           cache,
           inflight,
           tokenStore,
-          apiKeyStore,
+          apiKeyStore: wiring.apiKeyStore,
           publisher,
           catalogStore,
           panelSwitch: () => optional(providerStore.enabled()),
@@ -288,7 +274,7 @@ export function registerRoutes(ctx, wiring) {
           // persist to this row's settings, so the later image-routing plugin
           // reads a stale or empty set with no trace to explain why. Log it; the
           // in-memory body the panel already got is unaffected.
-          void visionPublish.current?.(body.visionModels, body.visionModels.map((entry) => entry.id))
+          void visionPublish.current?.(body.visionModels, body.visionModels.map((entry: any) => entry.id))
             .catch((error) => logger?.warn?.(`${name}: vision model list write failed`, error));
         }
         writeJson(response, 200, body, { "cache-control": "no-store" });
@@ -302,13 +288,18 @@ export function registerRoutes(ctx, wiring) {
           auth: await optional(tokenStore.state())
         }, { "cache-control": "no-store" });
       }
-    })
+    }, settings.allowedHosts)
   });
+}
 
-  const offAccount = ctx.webServer.register({
+/** The account route: sign in / forget, without editing `.env`. */
+function accountRoute(ctx: any, wiring: Wiring) {
+  const { settings, tokenStore, cache } = wiring;
+
+  return ctx.webServer.register({
     kind: "exact",
     path: ACCOUNT_PATH,
-    handler: withOrigin(async (request, response) => {
+    handler: withOrigin(async (request: any, response: any) => {
       // The same fence as the snapshot route: without it, any page the
       // browser visits could post an account into this panel.
       const method = request.method === undefined ? "POST" : request.method;
@@ -380,13 +371,18 @@ export function registerRoutes(ctx, wiring) {
       // console responses from the previous account must not survive it.
       cache.clear();
       writeJson(response, 200, { ...(await tokenStore.state()), ok: true }, { "cache-control": "no-store" });
-    })
+    }, settings.allowedHosts)
   });
+}
 
-  const offApiKey = ctx.webServer.register({
+/** The inference API-key route (`sk-…`), step three of the one-stop plan. */
+function apiKeyRoute(ctx: any, wiring: Wiring) {
+  const { settings, apiKeyStore, catalogStore, providerState, publishProvider, cache, logger } = wiring;
+
+  return ctx.webServer.register({
     kind: "exact",
     path: API_KEY_PATH,
-    handler: withOrigin(async (request, response) => {
+    handler: withOrigin(async (request: any, response: any) => {
       // Same trust fence as the other two routes: a foreign page must not be
       // able to plant or wipe an inference key.
       const method = request.method === undefined ? "GET" : request.method;
@@ -444,13 +440,18 @@ export function registerRoutes(ctx, wiring) {
       // resolved per REQUEST by the adapter, so no provider rebuild is needed.
       cache.clear();
       await answer();
-    })
+    }, settings.allowedHosts)
   });
+}
 
-  const offProvider = ctx.webServer.register({
+/** The provider-registration switch route. */
+function providerRoute(ctx: any, wiring: Wiring) {
+  const { settings, providerStore, providerState, publishProvider } = wiring;
+
+  return ctx.webServer.register({
     kind: "exact",
     path: PROVIDER_PATH,
-    handler: withOrigin(async (request, response) => {
+    handler: withOrigin(async (request: any, response: any) => {
       // Same trust fence as the other three routes: a foreign page must not be
       // able to flip model routing for the whole Host.
       const method = request.method === undefined ? "GET" : request.method;
@@ -498,13 +499,18 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
       await answer();
-    })
+    }, settings.allowedHosts)
   });
+}
 
-  const offModels = ctx.webServer.register({
+/** The model-roster curation route. */
+function modelsRoute(ctx: any, wiring: Wiring) {
+  const { settings, catalogStore, providerStore, providerState, publishProvider } = wiring;
+
+  return ctx.webServer.register({
     kind: "exact",
     path: MODELS_PATH,
-    handler: withOrigin(async (request, response) => {
+    handler: withOrigin(async (request: any, response: any) => {
       // Same fence as the other routes: a foreign page must not be able to
       // decide which models this Host offers.
       const method = request.method === undefined ? "POST" : request.method;
@@ -553,13 +559,18 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
       await answer();
-    })
+    }, settings.allowedHosts)
   });
+}
 
-  const offDraw = ctx.webServer.register({
+/** The draw-tool switch route. */
+function drawRoute(ctx: any, wiring: Wiring) {
+  const { settings, drawStore } = wiring;
+
+  return ctx.webServer.register({
     kind: "exact",
     path: DRAW_PATH,
-    handler: withOrigin(async (request, response) => {
+    handler: withOrigin(async (request: any, response: any) => {
       // Same trust fence as the other routes: a foreign page must not be able
       // to turn an agent image tool on or off.
       const method = request.method === undefined ? "GET" : request.method;
@@ -646,36 +657,48 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
       await answer();
-    })
+    }, settings.allowedHosts)
   });
+}
 
-  // The Raccoon route (ROADMAP §6.1 "second upstream provider"). One route,
-  // one GET + one POST: the GET reports the secret-free state a tab renders
-  // (switch value, login state, balance, offered roster, registration status);
-  // the POST carries `{ action }` for the four panel actions. The QR login is
-  // a single server-side walk (no client long-poll): the route generates the
-  // scan code, blocks up to the login deadline polling the gateway every 2 s,
-  // and answers with the scan URL to display the moment it is issued. The
-  // credential never touches this plugin's directory, git, or logs — it goes
-  // straight to the DSH credentials service through `raccoonStore`.
-  //
-  // The walk lifecycle is owned by `raccoon-walk.ts`: one instance for the
-  // entire route, so a second click / tab mid-walk sees the SAME scan
-  // (concurrency gate via `view.isInFlight()`). The route only drives the
-  // side-effects (save credential → invalidate cache → publish) and reads
-  // the transient state through `view`. One scan per process; cleared on
-  // settle; no handler-local state survives a re-mount.
+// The Raccoon route (ROADMAP §6.1 "second upstream provider"). One route,
+// one GET + one POST: the GET reports the secret-free state a tab renders
+// (switch value, login state, balance, offered roster, registration status);
+// the POST carries `{ action }` for the four panel actions. The QR login is
+// a single server-side walk (no client long-poll): the route generates the
+// scan code, blocks up to the login deadline polling the gateway every 2 s,
+// and answers with the scan URL to display the moment it is issued. The
+// credential never touches this plugin's directory, git, or logs — it goes
+// straight to the DSH credentials service through `raccoonStore`.
+//
+// The walk lifecycle is owned by `raccoon-walk.ts`: one instance for the
+// entire route, so a second click / tab mid-walk sees the SAME scan
+// (concurrency gate via `view.isInFlight()`). The route only drives the
+// side-effects (save credential → invalidate cache → publish) and reads
+// the transient state through `view`. One scan per process; cleared on
+// settle; no handler-local state survives a re-mount.
+function raccoonRoute(ctx: any, wiring: Wiring) {
+  const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache } = wiring;
+
+  // The Raccoon gateway reads (balance + catalogue) go through the SAME
+  // coalescing cache primitive the console route uses, so a scan's fast poll
+  // shares one call instead of issuing one per panel refresh. The instance is
+  // the wiring's (created in `index.ts`) so a login/logout can clear it in one
+  // place; a Host that wired none still gets a private one rather than a crash.
+  const raccoonRead = raccoonCache ?? createCoalescedFetch();
+
   const raccoonWalkManager = createRaccoonWalk({
-    fetcher: (code) => pollRaccoonQrLogin(code),
+    fetcher: (code: string) => pollRaccoonQrLogin(code),
     saveCredential: (credential) => raccoonStore.save(credential),
     invalidateCache: () => raccoonRead.clear(),
     onSettled: () => { /* no-op — status flows through the view */ }
   });
   const walkView = raccoonWalkManager.view;
-  const offRaccoon = ctx.webServer.register({
+
+  return ctx.webServer.register({
     kind: "exact",
     path: RACCOON_PATH,
-    handler: withOrigin(async (request, response) => {
+    handler: withOrigin(async (request: any, response: any) => {
       // The GET's secret-free state, reused by every POST branch so a mutation
       // always re-reports the same facts a GET would (the `scanUrl`/`code` it
       // carries are the scan the pending login walk last issued). The read model
@@ -719,7 +742,7 @@ export function registerRoutes(ctx, wiring) {
       // catalogue when a credential exists, else the static fallback, MINUS
       // the panel's curated-away ids (filterRaccoonRows). `switch`, `models`
       // and the settled `login` walk all drive the same publisher with it.
-      const collectRaccoonRows = async (catalogToken) => {
+      const collectRaccoonRows = async (catalogToken?: unknown) => {
         let rows = RACCOON_FALLBACK_MODELS;
         let officeIdentity = "";
         try {
@@ -772,7 +795,7 @@ export function registerRoutes(ctx, wiring) {
       // ── models: save the pushed-model curation and rebuild the offer ──
       if (action === "models") {
         const ids = body.value.enabledModelIds;
-        if (!Array.isArray(ids) || ids.some((entry) => typeof entry !== "string")) {
+        if (!Array.isArray(ids) || ids.some((entry: any) => typeof entry !== "string")) {
           writeJson(response, 400, { ok: false, error: "expected { action: \"models\", enabledModelIds: string[] }" }, { "cache-control": "no-store" });
           return;
         }
@@ -811,10 +834,10 @@ export function registerRoutes(ctx, wiring) {
         }
         // Replace walk's default save/invalidate with one that also publishes
         // when the switch is on (so a logged-in user sees models immediately).
-        raccoonWalkManager.invalidateCache = () => {
+        (raccoonWalkManager as any).invalidateCache = () => {
           raccoonRead.clear();
           if (raccoonPublisher !== null && raccoonPublisher !== undefined && !raccoonPublisher.isDisposed()) {
-            optional(raccoonSwitch?.enabled()).then((sw) => {
+            optional(raccoonSwitch?.enabled()).then((sw: boolean | null) => {
               if (sw === true) {
                 collectRaccoonRows(null).then(({ rows, officeIdentity }) => {
                   void raccoonPublisher.publish(rows, officeIdentity);
@@ -828,14 +851,14 @@ export function registerRoutes(ctx, wiring) {
           // a second one. Two walks would each own a different code while the
           // GET can only ever report one — a scan that looks permanently stuck.
           const cur = walkView.liveScan();
-          await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur.url, scanCode: cur.code });
+          await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur!.url, scanCode: cur!.code });
           return;
         }
         void raccoonWalkManager.issueScan();
         // The scan is now in flight: report it to the caller so the tab can
         // render the QR. The GET will poll for the settled event via takeEvent().
         const cur = walkView.liveScan();
-        await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur.url, scanCode: cur.code });
+        await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur!.url, scanCode: cur!.code });
         return;
       }
 
@@ -863,8 +886,6 @@ export function registerRoutes(ctx, wiring) {
       }
 
       writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
-    })
+    }, settings.allowedHosts)
   });
-
-  return [offRoute, offAccount, offApiKey, offProvider, offModels, offDraw, offRaccoon];
 }

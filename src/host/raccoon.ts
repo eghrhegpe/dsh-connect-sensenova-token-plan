@@ -88,6 +88,24 @@ export const RACCOON_QR_STATUS = Object.freeze({
 });
 
 /**
+ * The one answer a single QR-poll can return (`pollRaccoonQrLogin`).
+ *
+ * `status` always present; the success branch adds the credential pair (and
+ * the display name + probed field names, kept for the next scan's evidence).
+ * Shared by `raccoon-walk.ts` (its `fetcher` returns this, not a `Response`)
+ * so the walk module can be typed without a cast.
+ */
+export interface RaccoonQrPollResult {
+  status: string;
+  expiredAt?: string;
+  nickname?: string;
+  dataFields?: string[];
+  expiresAtMs?: number;
+  accessToken?: string;
+  refreshToken?: string;
+}
+
+/**
  * Extract the account display name from a login payload. The fallback ladder
  * below was written when the success envelope had never been probed; a real
  * scan (2026-10-01, see docs/ROADMAP.md §6.1.2) settled it: the envelope's
@@ -215,7 +233,7 @@ export function parseRaccoonEnvelope(raw, status) {
  * @param {typeof fetch} [fetcher] - injected fetch.
  * @returns {Promise<object>} `{ status }` plus, on success, the token pair.
  */
-export async function pollRaccoonQrLogin(code: string, fetcher?: typeof fetch) {
+export async function pollRaccoonQrLogin(code: string, fetcher?: typeof fetch): Promise<RaccoonQrPollResult> {
   const effective = fetcher ?? globalThis.fetch;
   let envelope;
   try {
