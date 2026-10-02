@@ -106,12 +106,13 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // override must fail loudly here rather than become a baffling network error
   // on the first poll.
   //
-  // Declared `any` rather than inferred from the `null` initializer: under
-  // strictNullChecks that initializer pins the type to `null`, so the
-  // `createAuth(...)` assignment below and every `auth` read were type errors
-  // (docs/IMPROVEMENTS.md §8 — the shape is pinned by `createAuth` and the
-  // token store, not by this annotation).
-  let auth: any = null;
+  // Annotated `ReturnType<typeof createAuth> | null` rather than `any`:
+  // under strictNullChecks a `null` initializer would pin the type to `null`
+  // and make the `createAuth(...)` assignment below — plus every later `auth`
+  // read — a type error, which is what an `any` annotation was working around
+  // (docs/IMPROVEMENTS.md §8). Naming the shape costs nothing at the call site
+  // and now lets the compiler check the two places `auth` is consumed.
+  let auth: ReturnType<typeof createAuth> | null = null;
   if (configError === null) {
     try {
       auth = createAuth(settings.auth);

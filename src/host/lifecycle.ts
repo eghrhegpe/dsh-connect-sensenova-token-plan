@@ -53,6 +53,13 @@ const SERVICE_RETRY_DELAY_MS = 300;
  *
  * The loop itself is the shared `retryBounded` (`util.ts`) — the same backoff
  * shape the Raccoon mount seed uses; only the window length is set here.
+ * @template T - the shape of the service being waited for. The reader knows
+ *   what it wants (`{ register }` for tools, `{ update }` for settings); this
+ *   function only knows a name, so the shape is declared at the call site and
+ *   the `as T` below is the single place that claim is trusted. Defaulting to
+ *   `unknown` means a caller that forgets the parameter gets a type it cannot
+ *   accidentally dereference — which is the failure the old `Promise<any>`
+ *   invited on every one of its seven property reads.
  * @param {object} ctx - the host root context.
  * @param {string} service - the service name for `ctx.get`.
  * @param {object} [options]
@@ -61,10 +68,10 @@ const SERVICE_RETRY_DELAY_MS = 300;
  *   absence.
  * @param {number} [options.attempts] - test seam for the attempt count.
  * @param {number} [options.delayMs] - test seam for the backoff base.
- * @returns {Promise<unknown|null>} the service, or `null` when it never
- *   appeared inside the window.
+ * @returns {Promise<T|null>} the service, or `null` when it never appeared
+ *   inside the window.
  */
-export async function resolveServiceWithRetry(
+export async function resolveServiceWithRetry<T = unknown>(
   ctx: { get?: (n: string) => unknown; [key: string]: unknown },
   service: string,
   // Typed explicitly rather than left to inference, and NOT via JSDoc: a
@@ -72,16 +79,17 @@ export async function resolveServiceWithRetry(
   // and in a `.ts` file `@param` / `@type` are comments, not type sources — so
   // the destructuring below would read three properties off `{}` (TS2339).
   options: { isDisposed?: () => boolean; attempts?: number; delayMs?: number } = {}
-): Promise<any> {
+): Promise<T | null> {
   const {
     isDisposed = () => false,
     attempts = SERVICE_RETRY_ATTEMPTS,
     delayMs = SERVICE_RETRY_DELAY_MS
   } = options;
-  // Declared `any`, not inferred from `null`: under strictNullChecks the
-  // initializer pins the type to `null`, so every assignment below (and every
-  // `tools.register` / `settings.update` at the call site) read as `never`.
-  let found: any = null;
+  // Annotated `T | null` rather than inferred from the `null` initializer,
+  // which under strictNullChecks would pin the type to `null` and make every
+  // assignment below — and every `tools.register` / `settings.update` at the
+  // call sites — read as `never`.
+  let found: T | null = null;
   await retryBounded({
     attempts,
     delayMs,
@@ -90,7 +98,12 @@ export async function resolveServiceWithRetry(
       try {
         const value = ctx.get?.(service) ?? ctx[service] ?? null;
         if (value !== null && value !== undefined) {
-          found = value;
+          // The one trusted claim in this module: `ctx.get` hands back
+          // `unknown` because the Host is dynamically typed, so the shape is
+          // whatever the caller's `T` says it is. Both call sites below keep
+          // their own `typeof x.method !== "function"` guard, which is what
+          // makes the wrong `T` a degraded path rather than a crash.
+          found = value as T;
           return true;
         }
       } catch {
@@ -165,7 +178,7 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
   // plugin mounts; retry the read, never the registration — a tool cannot be
   // unregistered, so registering it twice would be a worse failure than
   // missing it.
-  const tools = await resolveServiceWithRetry(ctx, "tools", {
+  const tools = await resolveServiceWithRetry<{ register: (definition: unknown) => void }>(ctx, "tools", {
     isDisposed: () => publisher.isDisposed()
   });
   if (tools === null || typeof tools.register !== "function") return;
@@ -281,15 +294,21 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
             await raccoonStore.refresh().catch(() => {});
           }
           const { credential: live } = await raccoonStore.resolve().catch(() => ({ credential: null }));
-          // Declared as a mutable row array rather than inferred from the
-          // frozen fallback table: the live catalogue (a plain array) replaces
-          // it below, and inferring from `Object.freeze([...])` would make that
-          // assignment a readonly-vs-mutable error. Runtime value unchanged.
-          let rows: any[] = RACCOON_FALLBACK_MODELS as any[];
+          // A mutable COPY rather than an `as any[]` cast over the frozen
+          // table. The seed only ever REBINDS `rows` (it never pushes), so a
+          // fresh array is behaviourally identical — and it stops the frozen
+          // fallback from being shared with a value the publisher may hold on
+          // to. The element type stays `unknown` deliberately:
+          // `filterRaccoonRows` accepts `unknown` and `fetchRaccoonCatalog`
+          // returns an unannotated value, so the old `any[]` was buying no
+          // safety at all — only the implicit widening that silenced the
+          // readonly-vs-mutable error.
+          let rows: unknown[] = [...RACCOON_FALLBACK_MODELS];
           if (live?.accessToken) {
             const catalog = await fetchRaccoonCatalog(live).catch(() => null);
             if (catalog !== null && catalog.length > 0) rows = catalog;
-          }          // The seed honours the panel's pushed-model curation too: a restart
+          }
+          // The seed honours the panel's pushed-model curation too: a restart
           // must not widen the offer back to the whole roster behind the tab's
           // back (the switch/login/models handlers all publish filtered).
           const curated = await raccoonSwitch.enabledIds().catch(() => null);
@@ -367,15 +386,26 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // ------------------------------------------------------------------
   void (async () => {
     try {
-      const settingsService = await resolveServiceWithRetry(ctx, "settings", {
+      const settingsService = await resolveServiceWithRetry<{
+        update: (ns: string, value: unknown, revision?: unknown) => Promise<unknown>;
+        describe?: (options: { redactSecrets: boolean }) => unknown;
+      }>(ctx, "settings", {
         isDisposed: () => publisher.isDisposed()
       });
       if (settingsService === null || typeof settingsService.update !== "function") return;
-      const descriptorOf = () => {
+      // Named return type, because `describe` is typed `unknown`: the row this
+      // finds carries a `revision` that `update` must hand back, and an
+      // inferred `unknown | null` would push a cast onto every read below.
+      const descriptorOf = (): { ns?: unknown; revision?: unknown } | null => {
         try {
-          const view = settingsService.describe?.({ redactSecrets: true });
+          const view = settingsService.describe?.({ redactSecrets: true }) as
+            | unknown[]
+            | { entries?: unknown[] }
+            | undefined;
           const rows = Array.isArray(view) ? view : view?.entries ?? [];
-          return rows.find((candidate: { ns?: unknown } | null | undefined) => candidate?.ns === name) ?? null;
+          const hit = rows.find((candidate) =>
+            (candidate as { ns?: unknown } | null | undefined)?.ns === name);
+          return (hit as { ns?: unknown; revision?: unknown } | undefined) ?? null;
         } catch {
           return null;
         }
