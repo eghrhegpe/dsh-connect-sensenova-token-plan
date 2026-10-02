@@ -36,7 +36,10 @@ import {
   pollRaccoonQrLogin,
   fetchRaccoonBalance,
   fetchRaccoonCatalog,
-  RACCOON_QR_STATUS
+  RACCOON_QR_STATUS,
+  RACCOON_CODE,
+  isDeadRaccoonSession,
+  isDeadRaccoonEnvelope
 } from "../src/host/raccoon.ts";
 import {
   createRaccoonStore,
@@ -222,10 +225,34 @@ function section(title) {
     check("a missing refresh token refuses without a network call",
       (await refreshRaccoonCredential({}, async () => {
         throw new Error("must not be called");
-      })).ok === false);
+      })).code === RACCOON_CODE.NO_REFRESH_TOKEN);
+    // The check below used to assert only `.ok === false` while its NAME claimed
+    // `session_dead` — so the classification could have been deleted outright and
+    // the suite stayed green. Asserting the code is what makes the name true.
     check("a dead refresh token (401) is a session_dead refusal",
       (await refreshRaccoonCredential({ refresh_token: "rt-1" },
-        fakeFetcher({ code: 401, message: "authorization_verify_error", data: null }, 401))).ok === false);
+        fakeFetcher({ code: 401, message: "authorization_verify_error", data: null }, 401))).code === RACCOON_CODE.SESSION_DEAD);
+    // The gateway also says "dead" with an envelope code under an HTTP 200, so
+    // both numbers must map to the same classification — the ternary this
+    // replaced had them as two bare literals.
+    check("an envelope 200003 under HTTP 200 is the same dead-session refusal",
+      (await refreshRaccoonCredential({ refresh_token: "rt-1" },
+        fakeFetcher({ code: 200003, message: "token invalid", data: null }, 200))).code === RACCOON_CODE.SESSION_DEAD);
+    // ...and a refusal that is NOT one of those two must stay retryable, or the
+    // plugin would write off a login that a later attempt could still recover.
+    check("an unrecognized refusal stays retryable rather than dead",
+      (await refreshRaccoonCredential({ refresh_token: "rt-1" },
+        fakeFetcher({ code: 500, message: "server busy", data: null }, 500))).code === RACCOON_CODE.REFRESH_REJECTED);
+    // The two halves of the classification, pinned so they cannot drift:
+    // the gateway numbering (wire fact) and our label (panel fact).
+    check("isDeadRaccoonEnvelope reads the gateway numbering",
+      isDeadRaccoonEnvelope(401) === true && isDeadRaccoonEnvelope(200003) === true
+      && isDeadRaccoonEnvelope(500) === false && isDeadRaccoonEnvelope("401") === false);
+    check("isDeadRaccoonSession reads our label, and only that one",
+      isDeadRaccoonSession(RACCOON_CODE.SESSION_DEAD) === true
+      && isDeadRaccoonSession(RACCOON_CODE.REFRESH_REJECTED) === false
+      && isDeadRaccoonSession(RACCOON_CODE.REFRESH_FAILED) === false
+      && isDeadRaccoonSession(undefined) === false);
   } catch (error) {
     fail("QR login walk", error);
   }
@@ -397,6 +424,66 @@ function section(title) {
     const deadResult = await deadStore.refresh();
     check("a dead refresh token refuses without clobbering the stored pair",
       deadResult.ok === false && parseRaccoonCredential(records.get(RACCOON_CREDENTIAL_REF))?.refreshToken === "r");
+
+    // --- the dead-session latch -------------------------------------------
+    // The refusal above is a VERDICT, and every eager-refresh call site is
+    // shaped `if (isExpired()) refresh()`. So without a latch the plugin asks
+    // the gateway once per poll cycle, forever, for an answer that cannot
+    // change — the second upstream's answer to a refusal Token Plan answers
+    // with throttle-store.ts. These four checks are that latch's whole
+    // existence: count the calls, not just the return values.
+    let deadCalls = 0;
+    const latchedStore = createRaccoonStore({
+      credentials: service,
+      fetcher: async () => {
+        deadCalls += 1;
+        return fakeResponse({ code: 401, message: "dead", data: null }, 401);
+      }
+    });
+    // A LAPSED access token, and it has to be a real JWT: `parseRaccoonCredential`
+    // derives `expiresAtMs` from the token's `exp`, so a bare string like "a"
+    // leaves it undefined and `isExpired()` answers false forever — the poll
+    // loop below would then never call `refresh()`, and a "asked once" check
+    // would pass for the wrong reason. That is a green test that proves nothing.
+    const lapsedJwt = `header.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 60 })).toString("base64url")}.sig`;
+    await latchedStore.save({ accessToken: lapsedJwt, refreshToken: "r" });
+    check("the lapsed token really does read as expired (the loop below is live)",
+      (await latchedStore.isExpired()) === true);
+    await latchedStore.refresh();
+    const afterFirst = deadCalls;
+    // The poll loop: three more rounds of "is it expired? then renew".
+    for (let round = 0; round < 3; round += 1) {
+      if (await latchedStore.isExpired()) await latchedStore.refresh();
+    }
+    check("a dead session is asked ONCE, not once per poll",
+      afterFirst === 1 && deadCalls === 1, `calls=${deadCalls}`);
+    check("the latch reports the gateway's own verdict, not a synthetic skip",
+      (await latchedStore.refresh()).code === RACCOON_CODE.SESSION_DEAD);
+    check("a dead session still reads as expired so the panel keeps the re-login affordance",
+      (await latchedStore.isExpired()) === true);
+    // The escape hatch, and the reason the latch is in-process only: a re-scan
+    // stores a NEW pair and must re-open the door. If `save` forgot to clear it,
+    // the user would finish a successful QR login and still be refused.
+    deadCalls = 0;
+    await latchedStore.save({ accessToken: "fresh", refreshToken: "fresh-r" });
+    check("a fresh scan re-opens the door after a dead session",
+      deadCalls === 0 && (await latchedStore.isExpired()) === false);
+
+    // The counterpart: a refusal that is NOT a dead-session verdict must stay
+    // retryable, or one network blip would cost the user a working login.
+    let flakyCalls = 0;
+    const flakyStore = createRaccoonStore({
+      credentials: service,
+      fetcher: async () => {
+        flakyCalls += 1;
+        return fakeResponse({ code: 500, message: "busy", data: null }, 500);
+      }
+    });
+    await flakyStore.save({ accessToken: lapsedJwt, refreshToken: "r" });
+    await flakyStore.refresh();
+    await flakyStore.refresh();
+    check("a transient refusal keeps being retried (no latch)",
+      flakyCalls === 2, `calls=${flakyCalls}`);
 
     // forget clears both the durable reference and the memory copy.
     await store.forget();

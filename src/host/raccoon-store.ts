@@ -27,8 +27,11 @@
 import { obj, str } from "./util.ts";
 import {
   decodeRaccoonJwtExpMs,
-  refreshRaccoonCredential
+  refreshRaccoonCredential,
+  isDeadRaccoonSession,
+  RACCOON_CODE
 } from "./raccoon.ts";
+import type { RaccoonCodeValue } from "./raccoon.ts";
 import type { RaccoonStoreDeps } from "./types.ts";
 
 /** The reference name the credential pair is stored under. */
@@ -95,7 +98,25 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
   /** Fallback vault for a Host that has no credentials service. */
   const memory = new Map();
   /** Single-flight: a refresh already in flight is shared, never raced. */
-  let refreshInFlight: Promise<{ ok: boolean; code?: string; message?: string }> | null = null;
+  let refreshInFlight: Promise<{ ok: boolean; code?: RaccoonCodeValue; message?: string }> | null = null;
+  /**
+   * Latched when the gateway declares the session dead (401 / `200003`).
+   *
+   * The problem this answers: all three eager-refresh call sites are shaped
+   * `if (isExpired()) refresh()`, so a dead session meant one guaranteed-401
+   * request per poll cycle, forever — the access token's own window keeps the
+   * condition true and the gateway's answer never changes. Token Plan has
+   * `throttle-store.ts` for exactly this shape of upstream refusal; the second
+   * upstream had nothing, which is why the two halves answered the same problem
+   * differently.
+   *
+   * In-process only, and deliberately so: it is a COURTEOUS decision about one
+   * credential, not a fact about the machine, so it must not become a file (the
+   * credential could be replaced out from under it by a fresh login elsewhere,
+   * and a stale "dead" mark would then lock out a valid session). `save()`
+   * clears it, so a re-scan always re-opens the door.
+   */
+  let sessionDead = false;
 
   const resolveService = () => {
     const value = typeof credentials === "function" ? credentials() : credentials;
@@ -121,6 +142,10 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
     async save(credential: { accessToken?: unknown; refreshToken?: unknown; expiresAtMs?: unknown; officeIdentity?: unknown; nickname?: unknown }) {
       const accessToken = str(credential?.accessToken, "");
       if (accessToken === "") throw new Error("a Raccoon access token is required");
+      // A fresh scan is the ONLY thing that recovers a dead session, so it must
+      // clear the latch on the way in — otherwise a re-scan would store a valid
+      // pair and still be refused by the very next poll.
+      sessionDead = false;
       await storeNow(credential);
     },
 
@@ -129,6 +154,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
      * reference and the in-memory copy are cleared.
      */
     async forget() {
+      sessionDead = false;
       memory.delete(RACCOON_CREDENTIAL_REF);
       try {
         const service = resolveService();
@@ -162,11 +188,21 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
 
     /**
      * Whether the stored credential is within its expiry window.
+     *
+     * A latched dead session reads as expired WITHOUT asking the gateway: the
+     * stored access token may still be inside its own window (the panel keeps
+     * serving it, which is correct — `test/raccoon.test.mjs` pins that the pair
+     * is not clobbered on a dead refresh), while the refresh token is already
+     * worthless. Reporting `false` here would let a poll believe there is
+     * nothing to renew, so the answer has to stay `true` to keep the existing
+     * `if (isExpired()) refresh()` call sites working — the gate is inside
+     * {@link refresh}, which short-circuits without a network call.
      * @param {number} [leadMs] - renew this long before expiry; defaults to 5 min.
      */
     async isExpired(leadMs = 5 * 60 * 1000) {
       const { credential } = await this.resolve();
       if (credential === null) return true;
+      if (sessionDead) return true;
       if (credential.expiresAtMs === undefined) return false;
       return Date.now() >= credential.expiresAtMs - leadMs;
     },
@@ -176,16 +212,28 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
      * rotated server-side, so the NEW pair is what gets stored). Single-
      * flighted: a second concurrent call joins the first, so a pair can never
      * be rotated twice and orphaned.
-     * @returns {Promise<{ok: boolean, code?: string}>}
+     * @returns {Promise<{ok: boolean, code?: RaccoonCodeValue}>}
      */
     async refresh() {
+      // The latch, in one place: every eager-refresh call site funnels through
+      // here, so this is the only line that has to know a dead session is not
+      // worth re-asking. Short-circuit BEFORE any network call, and report the
+      // same code the gateway gave, so a caller that inspects the result sees
+      // the truth rather than a synthetic "skipped".
+      if (sessionDead) return { ok: false, code: RACCOON_CODE.SESSION_DEAD };
       if (refreshInFlight === null) {
         refreshInFlight = (async () => {
           try {
             const { credential } = await this.resolve();
-            if (credential === null) return { ok: false, code: "not_configured" };
+            if (credential === null) return { ok: false, code: RACCOON_CODE.NOT_CONFIGURED };
             const rotated = await refreshRaccoonCredential({ refresh_token: credential.refreshToken }, fetcher);
-            if (!rotated.ok) return rotated;
+            if (!rotated.ok) {
+              // Only a gateway verdict latches; a network error or an
+              // unrecognized refusal stays retryable, or a blip would cost the
+              // user a login they did not need to redo.
+              if (isDeadRaccoonSession(rotated.code)) sessionDead = true;
+              return rotated;
+            }
             await storeNow({
               accessToken: rotated.accessToken,
               refreshToken: rotated.refreshToken,
