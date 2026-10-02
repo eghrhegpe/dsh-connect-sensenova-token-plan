@@ -39,3 +39,12 @@
 - **状态**：现行（descriptor 决策正文见 `llm-models.ts` 头注决策 2 与 ARCHITECTURE §5.2）
 - **裁定**：废除「不声明 maxTokens」旧决策。`dsh-llm-pi-ai`（peer）对未声明的 maxTokens 强制填 `defaultMaxTokens ?? 32768`（resolveRouteModels）——「不声明」的实际效果是输出被截在 32768，比平台声明的上限少一半。descriptor 改为：目录 `max_output_length` 有值则声明为该值、缺值则回落不声明（harness 32768 兜底）；只钉字段名 `max_tokens` 不变。
 - **理由（真机探针 2026-10-02）**：flash-lite `max_tokens:131072` → 400「field MaxTokens invalid, should be in [1, 65536]」（目录 65536 是硬上限）；v4-flash / glm-5.2 `max_tokens:131072` → 200（接受翻倍，上限更高）——上限**因模型而异**，故按目录逐模型声明，而非像 Agnes 那样全局钉 65536。探针已进 `test/live-contract.mjs` §2c，证据入基线 `driftLog`。
+
+## ADR-005 构建产物 lib/ 从「gitignore 不入库」改为「版本化入库」
+
+- **日期**：2026-10-03
+- **状态**：现行（现行表述见 [ARCHITECTURE.md](./ARCHITECTURE.md) 语言表、`docs/SETUP.md` §2、`docs/DSH-PLUGIN.md` §构建化、`.gitignore` 注释；门禁见 `ci.yml` 的 `build-freshness` job）
+- **裁定**：`lib/`（Host ESM bundle + 切分 chunk）与根 `client.js`（Client IIFE）**不再 gitignore，随 `src/` 一起提交**；CI 新增 `build-freshness` 硬门禁——`npm run build` 后 `git diff --exit-code -- lib client.js` 必须为空，并双跑构建比对字节稳定，防止「源码动了却没重生成产物」。发布到 npm registry 的那一份仍由 `prepack` 现场重建，不受影响。
+- **理由**：DSH 市场的 `github:` 安装源是 **pnpm git-dep**，pnpm 11 在没有 allowBuilds 批准时**不会**替仓库跑 `prepack`/`prepare`——此前 `lib/` 被 gitignore，用户打 GitHub 仓库地址装出来的插件缺宿主入口 `lib/index.js`，卡片静默失效。兄弟插件 `dsh-connect-qoder`（其 `.gitignore` 的 docs/issues/19）已踩过同一坑并采用同款版本化方案。另：构建产物经实测**字节可复现**（双跑 `diff` 为空），门禁可信。
+- **取代**：2026-09-30 的「`lib/` 与 `client.js` 一并 gitignore、产物彻底不入库」方案（原载 [ROADMAP.md](./ROADMAP.md) §6.2，已在该处标注被本 ADR 推翻）。该方案当时依赖「删 lib 可重建」即可，未考虑 github: 安装源不跑 prepack 的现实，故作废。
+- **新约定（团队纪律）**：此后改 `src/` 后，除 `npm run build` 重建，必须把 `lib/`、`client.js` 与源码一并提交，否则 `build-freshness` 门禁红。
