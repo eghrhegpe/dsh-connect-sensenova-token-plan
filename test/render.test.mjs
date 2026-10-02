@@ -704,6 +704,27 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       failure: quotaFailure, authChip: quotaChip, raccoonStatus: null, tt, onRefreshQuota: () => {}
     });
     check("raccoon header is empty before the tab reports", raccoonIdle.length === 0, raccoonIdle.join("\n"));
+
+    // Raccoon, reporting a FAILED read. This is the anti-regression for the
+    // write-only error state the tab used to keep: it forwarded an `error` that
+    // no component rendered, so an unreachable Host left a stale 更新于 and a
+    // stale roster on screen with no hint anything had failed. Both facts must
+    // now be visible at once — the timestamp (still the last GOOD read) AND the
+    // failure — because either one alone misleads.
+    const raccoonFailed = rendered(render.HeaderStatus, {
+      activeTab: "raccoon", hasData: true, updatedAt: 1_700_000_000_000,
+      failure: quotaFailure, authChip: quotaChip,
+      raccoonStatus: { updatedAt: 1_700_000_000_000, error: "unable to reach the Host", onRefresh: () => {} },
+      tt, onRefreshQuota: () => {}
+    });
+    check("raccoon header surfaces its own failed read",
+      raccoonFailed.includes("panel.error"), raccoonFailed.join("\n"));
+    check("raccoon header still shows the last GOOD timestamp when the read failed",
+      raccoonFailed.includes("panel.updated"), raccoonFailed.join("\n"));
+    check("raccoon header does not borrow the quota failure message",
+      !raccoonFailed.join("\n").includes("boom"), raccoonFailed.join("\n"));
+    check("raccoon header keeps its own refresh button when the read failed",
+      raccoonFailed.includes("panel.refresh"), raccoonFailed.join("\n"));
   }
 }
 

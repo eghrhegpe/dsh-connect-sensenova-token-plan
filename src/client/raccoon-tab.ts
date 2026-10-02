@@ -69,11 +69,11 @@ export function RaccoonTab({
   onReportStatus?: (status: { updatedAt: number; error: string | null; onRefresh: () => void } | null) => void;
 }): unknown {
   const [state, setState] = useState<RaccoonState | null>(null);
-  // `loading`/`error` are lifted to the header via onReportStatus (see the
-  // props comment above); these local states exist only so the setters called
-  // in load() remain valid, but their values are never rendered here.
-  const [_loading, setLoading] = useState(true);
-  const [_error, setError] = useState<string | null>(null);
+  // There is deliberately NO local `loading`/`error` state here. Both used to
+  // exist as write-only pairs (`const [_error, setError] = …`) — the values
+  // were never read, so a failed read updated nothing the user could see. The
+  // failure now travels to the header through `report` below, which is the only
+  // place with something to render it.
   // The login click's own round-trip: the route issues the scan and answers
   // straight away, so this is SHORT. The wait the user actually experiences is
   // the scan, which the route reports as `loginStatus:"scanning"`.
@@ -94,13 +94,35 @@ export function RaccoonTab({
    * because the two loops answer to the same problem.
    */
   const generation = useRef(0);
+  /**
+   * The time of the last SUCCESSFUL read — what the header's "更新于" shows.
+   *
+   * A failed read keeps it (the data is stale, not gone) but must still forward
+   * the failure, so the header says so instead of presenting a stale timestamp
+   * as if nothing were wrong.
+   */
+  const lastGoodAt = useRef(0);
+  /**
+   * The latest `load`, for the header's refresh button.
+   *
+   * `report` is memoized on `onReportStatus` alone — it has to be, or every
+   * render would rebuild the poll loop below — so reading `load` inside it
+   * directly would capture the FIRST render's copy (and that render's `tt`)
+   * forever.
+   */
+  const loadRef = useRef<() => void>(() => {});
 
-  // Stamp the header's refresh channel with the time of the last successful
-  // GET. A failed read keeps the previous timestamp (the data is only stale,
-  // not gone) but still forwards the error so the header can surface it.
-  const report = useCallback((updatedAt: number, err: string | null) => {
+  // Stamp the header's freshness channel: `updatedAt` is the last GOOD read,
+  // `err` the current failure (`null` when the last read worked).
+  //
+  // This used to be called only as `report(at, null)`; the failure paths wrote
+  // to a local state that nothing rendered. An unreachable Host therefore left
+  // the previous timestamp AND the previous roster on screen indefinitely while
+  // the poll kept running — the "silently shows old data" outcome
+  // `docs/AUTH.md` forbids for the token path, which applied here too.
+  const report = useCallback((err: string | null) => {
     if (onReportStatus !== undefined && alive.current) {
-      onReportStatus({ updatedAt, error: err, onRefresh: () => void load() });
+      onReportStatus({ updatedAt: lastGoodAt.current, error: err, onRefresh: () => void loadRef.current() });
     }
   }, [onReportStatus]);
 
@@ -108,14 +130,28 @@ export function RaccoonTab({
     const at = Date.now();
     const mine = (generation.current += 1);
     const isCurrent = () => alive.current && generation.current === mine;
+    /** Record a failed read: forward it to the header, the only place that renders it. */
+    const fail = (message: string) => {
+      if (!isCurrent()) return;
+      report(message);
+    };
     try {
       const response = await fetch(RACCOON_PATH, { headers: { accept: "application/json" }, cache: "no-store" });
-      if (!response.ok || !isCurrent()) return;
+      // A superseded read says nothing; a CURRENT non-OK answer is a failure.
+      // This used to `return` silently on any non-OK status, so a 401/500 left
+      // the tab in its previous state forever while the poll continued. The
+      // quota path maps 401/403 to `jwt_expired`; this is a separate upstream,
+      // so the status itself is the honest report.
+      if (!isCurrent()) return;
+      if (!response.ok) {
+        fail(`HTTP ${response.status}`);
+        return;
+      }
       const body = (await response.json().catch(() => null)) as RaccoonState | null;
       if (!isCurrent()) return;
       if (body === null || body.ok === false) {
-        setError(typeof body?.error === "string" && body.error !== "" ? body.error : "no answer");
         // A failed read does not reset the timestamp we already reported.
+        fail(typeof body?.error === "string" && body.error !== "" ? body.error : "no answer");
         return;
       }
       setState(body);
@@ -132,14 +168,18 @@ export function RaccoonTab({
           error: typeof body.loginError === "string" && body.loginError !== "" ? body.loginError : "unknown"
         }));
       } else if (outcome === "logged_in") setLoginNote(null);
-      setError(null);
-      report(at, null);
+      // Only a SUCCESS moves the timestamp the header shows, and it clears any
+      // error the previous read reported.
+      lastGoodAt.current = at;
+      report(null);
     } catch {
-      if (isCurrent()) setError("unable to reach the Host");
-    } finally {
-      if (isCurrent()) setLoading(false);
+      fail("unable to reach the Host");
     }
   }, [report, tt]);
+
+  // The header's refresh button must reach the CURRENT `load`, not the first
+  // render's — see `loadRef`.
+  loadRef.current = () => void load();
 
   // A scan is waiting on the phone. The ROUTE owns that fact (and the walk's
   // deadline), so the tab has no timer of its own to leak: it simply polls
@@ -175,11 +215,23 @@ export function RaccoonTab({
       // pass the liveness test and overwrite the new loop's fresher answer.
       generation.current += 1;
       if (timer !== null) clearInterval(timer);
-      // The tab is closing: drop its freshness from the header (the quota/api
-      // tabs own their own clusters, so nothing else should show this one's).
-      if (onReportStatus !== undefined) onReportStatus(null);
+      // NOTE: the header is deliberately NOT cleared here. This cleanup also
+      // runs on every cadence rebuild (entering/leaving a scan), where the tab
+      // is still mounted — clearing wiped the header's raccoon cluster until
+      // the next successful GET, which the unmount-only effect below avoids.
     };
   }, [load, onReportStatus, scanning, pollMs, scanPollMs]);
+
+  // Unmount ONLY: drop this tab's freshness from the header (the quota/api tabs
+  // own their own clusters, so nothing else should show this one's). Split from
+  // the polling effect because that one's cleanup also fires on a cadence
+  // rebuild. Held in a ref so the effect can have an empty dependency list and
+  // therefore run its cleanup exactly once, on unmount.
+  const onReportStatusRef = useRef(onReportStatus);
+  onReportStatusRef.current = onReportStatus;
+  useEffect(() => () => {
+    if (onReportStatusRef.current !== undefined) onReportStatusRef.current(null);
+  }, []);
 
   const toggle = useCallback(async (enabled: boolean) => {
     setLoginNote(null);

@@ -389,6 +389,14 @@ export function HeaderStatus({
       status.updatedAt > 0
         ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: clock(status.updatedAt / 1000) }))
         : null,
+      // The raccoon upstream's own failure. It used to be reported by the tab
+      // and rendered by NOBODY, so an unreachable Host left the last timestamp
+      // and the last roster on screen with no hint that the read had failed.
+      // `updatedAt` deliberately keeps its last good value above, so the pair
+      // reads as "stale, and here is why" rather than as fresh data.
+      status.error !== null
+        ? h("span", { style: S.error, role: "status", title: status.error }, format(tt("panel.error"), { error: status.error }))
+        : null,
       h("button", { type: "button", style: S.button, onClick: () => status.onRefresh() }, tt("panel.refresh"))
     );
   }
