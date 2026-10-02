@@ -51,15 +51,10 @@ const DRAW_PATH = `/api/${name}/draw`;
 const RACCOON_PATH = `/api/${name}/raccoon`;
 /** Ceiling on a Raccoon action body: the login POST only needs the scan code. */
 const MAX_RACCOON_BODY_BYTES = 2048;
-// The QR walk's deadline and poll cadence are GATEWAY wire facts, so they live
-// in the protocol layer (`raccoon.ts`) and are imported — never re-declared
-// here. `RACCOON_LOGIN_TIMEOUT_MS` and `RACCOON_QR_POLL_INTERVAL_MS` are the
-// walk's two timing constants; since the scan lifecycle moved to
-// `raccoon-walk.ts` (which imports both from `raccoon.ts`), nothing here
-// imports them directly — only the walk does. They used to be declared twice
-// with identical values, which is the one shape that drifts in silence: two
-// literals, no runtime assertion able to tell them apart (see ROADMAP §6.1.4
-// and `test/raccoon.test.mjs`'s single-source check).
+// The QR walk's two timing constants (`RACCOON_LOGIN_TIMEOUT_MS`,
+// `RACCOON_QR_POLL_INTERVAL_MS`) are gateway wire facts owned by `raccoon.ts`;
+// `raccoon-walk.ts` is the only importer, so they must never be re-declared
+// here (ROADMAP §6.1.4; single-source check in `test/raccoon.test.mjs`).
 /** Ceiling on a submitted account, so a hostile page cannot stream a body. */
 const MAX_ACCOUNT_BODY_BYTES = 4096;
 /** Ceiling on the curated allow-list: a catalogue this large is a posting accident. */
@@ -126,11 +121,8 @@ function refuseOrigin(response: any) {
 }
 
 /**
- * Refuse a disallowed method with the family's 405 shape.
- *
- * The 405 carries no `cache-control`: unlike a snapshot, a method refusal is
- * not a fresh answer anyone would want to keep, so there is nothing to tell a
- * cache not to store.
+ * Refuse a disallowed method with the family's 405 shape. A method refusal is
+ * not a fresh answer, so it carries no `cache-control` (unlike a snapshot).
  * @param response - the outgoing HTTP response.
  * @returns {void}
  */
@@ -141,13 +133,11 @@ function refuseMethod(response: any) {
 /**
  * Whether a request opted into the Raccoon 401-triage diagnostics (`?debug=1`).
  *
- * Those diagnostics are a retirable scaffold: they were the instrumentation for
- * the 401 root-cause fix (`Bearer` dual-shape + the pre-read renewal gate +
- * `/refresh`), the fix landed, and nothing in the client has ever rendered
- * them — so an ordinary poll must not carry them, least of all `hostProxyEnv`,
- * which reports environment VALUES. A query flag keeps the triage capability
- * without a config field (a patch change needs a Host restart) and without
- * widening every response.
+ * A retired scaffold: the 401 root-cause fix (Bearer dual-shape + pre-read
+ * renewal gate + `/refresh`) has landed and no client renders the triage
+ * fields, so an ordinary poll must not carry them. A query flag keeps the
+ * capability without a config field (a patch change needs a restart) and
+ * without widening every response.
  *
  * Only `1` / `true` opt in: `?debug=0` must stay quiet, and a malformed URL is
  * treated as "no".
@@ -168,10 +158,9 @@ function wantsDiagnostics(request: any) {
 /**
  * Read and validate a JSON body, or answer 400 and signal the caller to stop.
  *
- * Collapses the "read body -> not ok ? write 400 and return" block every POST
- * route repeats. Returns the `readJsonBody` result on success (so callers keep
- * reading the parsed object through `body.value`, exactly as before), or `null`
- * after it has already written the 400 — a `null` is the caller's cue to return.
+ * Collapses the read-then-400 block every POST route repeats. Returns the
+ * `readJsonBody` result on success (callers keep reading `body.value`), or
+ * `null` after the 400 was written — a `null` is the caller's cue to return.
  * @param request - the incoming HTTP request.
  * @param response - the outgoing HTTP response (written on failure).
  * @returns {Promise<object|null>} the read result, or null if a 400 was sent.
@@ -188,14 +177,13 @@ async function readJsonBodyOr400(request: any, response: any, limit = MAX_ACCOUN
 /**
  * Wrap a route handler with the trust fence every route opens with.
  *
- * The seven handlers each used to repeat the identical
- * `if (!isAdmitted(...))` block; this folds it into one seam so a forgotten
- * fence is impossible and the 403 wording stays in {@link refuseOrigin}. A
- * handler wrapped here must NOT repeat the fence — doing so is only a second,
- * dead guard.
- * @param {(request: object, response: object) => Promise<void>} handler - the route logic.
- * @param {unknown} allowedHosts - the settings' allowed-hosts list the fence checks against.
- * @returns {(request: object, response: object) => Promise<void>} the fenced handler.
+ * The seven handlers each repeated the identical `isAdmitted` block; this folds
+ * it into one seam so a forgotten fence is impossible and the 403 wording
+ * stays in {@link refuseOrigin}. A handler wrapped here must NOT repeat the
+ * fence — doing so is only a second, dead guard.
+ * @param handler - the route logic.
+ * @param allowedHosts - the settings' allowed-hosts list the fence checks against.
+ * @returns the fenced handler.
  */
 function withOrigin(handler: (request: any, response: any) => Promise<void>, allowedHosts: unknown) {
   return async (request: any, response: any) => {
@@ -661,22 +649,18 @@ function drawRoute(ctx: any, wiring: Wiring) {
   });
 }
 
-// The Raccoon route (ROADMAP §6.1 "second upstream provider"). One route,
-// one GET + one POST: the GET reports the secret-free state a tab renders
-// (switch value, login state, balance, offered roster, registration status);
-// the POST carries `{ action }` for the four panel actions. The QR login is
-// a single server-side walk (no client long-poll): the route generates the
-// scan code, blocks up to the login deadline polling the gateway every 2 s,
-// and answers with the scan URL to display the moment it is issued. The
-// credential never touches this plugin's directory, git, or logs — it goes
-// straight to the DSH credentials service through `raccoonStore`.
+// The Raccoon route (ROADMAP §6.1 "second upstream provider"): one GET
+// reporting the secret-free state a tab renders, one POST carrying `{ action }`
+// for the four panel actions. The QR login is a single server-side walk (no
+// client long-poll); the credential never touches this plugin's directory,
+// git, or logs — it goes straight to the DSH credentials service through
+// `raccoonStore`.
 //
 // The walk lifecycle is owned by `raccoon-walk.ts`: one instance for the
 // entire route, so a second click / tab mid-walk sees the SAME scan
 // (concurrency gate via `view.isInFlight()`). The route only drives the
-// side-effects (save credential → invalidate cache → publish) and reads
-// the transient state through `view`. One scan per process; cleared on
-// settle; no handler-local state survives a re-mount.
+// side-effects and reads the transient state through `view`; one scan per
+// process, cleared on settle, no handler-local state survives a re-mount.
 function raccoonRoute(ctx: any, wiring: Wiring) {
   const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache } = wiring;
 

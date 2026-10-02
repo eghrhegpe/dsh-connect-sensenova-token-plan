@@ -151,7 +151,7 @@ export function createTokenStore(options) {
 
   /** One-line delegations to the extracted blocks. */
   const readStored = () => readStoredImpl(wiring, state);
-  const store = (at, rt, exp, replacing) => storeGrant(wiring, state, at, rt, exp, replacing);
+  const store = (accessToken, refreshToken, expiresAt, replacing) => storeGrant(wiring, state, accessToken, refreshToken, expiresAt, replacing);
   const purgeGrant = (accessToken) => purgeGrantImpl(wiring, state, accessToken);
   const isFresh = (token: any, at?: number) => isFreshImpl(wiring, state, token, at);
   const readThrottle = () => readThrottleImpl(wiring, state);
