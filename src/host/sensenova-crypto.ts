@@ -85,6 +85,12 @@ export function readJwtExpiry(token) {
 /** RFC 7636 bounds for a PKCE verifier, in characters. */
 const PKCE_VERIFIER_MIN = 43;
 const PKCE_VERIFIER_MAX = 128;
+/** Random bytes for the verifier: 48 → ~64 base64url chars, mid-range not the 43 floor. */
+const PKCE_VERIFIER_BYTES = 48;
+/** AES-GCM IV length (RFC 7516 §5.1). */
+const GCM_IV_BYTES = 12;
+/** AES-GCM authentication tag length in bytes (128-bit, RFC 7516 §5.1). */
+const GCM_TAG_BYTES = 16;
 
 /**
  * A PKCE verifier/challenge pair (S256).
@@ -101,7 +107,7 @@ const PKCE_VERIFIER_MAX = 128;
  * @returns {Promise<{verifier: string, challenge: string}>}
  */
 export async function pkce() {
-  const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(PKCE_VERIFIER_BYTES)));
   if (verifier.length < PKCE_VERIFIER_MIN || verifier.length > PKCE_VERIFIER_MAX) {
     throw pluginError(
       CODE.CONFIG,
@@ -215,7 +221,7 @@ export async function sealPassword(password: string, options: JwksOptions = {}) 
   // A256GCM content encryption: a fresh CEK and IV per login.
   const contentKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt"]);
   const rawKey = new Uint8Array(await crypto.subtle.exportKey("raw", contentKey));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const iv = crypto.getRandomValues(new Uint8Array(GCM_IV_BYTES));
   const protectedHeader = b64url(
     new TextEncoder().encode(JSON.stringify({ alg: "RSA-OAEP", enc: "A256GCM" }))
   );
@@ -229,8 +235,8 @@ export async function sealPassword(password: string, options: JwksOptions = {}) 
       plaintext
     )
   );
-  const ciphertext = sealedGcm.subarray(0, sealedGcm.length - 16);
-  const gcmTag = sealedGcm.subarray(sealedGcm.length - 16);
+  const ciphertext = sealedGcm.subarray(0, sealedGcm.length - GCM_TAG_BYTES);
+  const gcmTag = sealedGcm.subarray(sealedGcm.length - GCM_TAG_BYTES);
 
   // The encrypted-key segment carries the CEK wrapped to the platform's public
   // key — not the password, which belongs in the ciphertext alone.

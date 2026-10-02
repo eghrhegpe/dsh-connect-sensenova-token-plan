@@ -658,27 +658,20 @@ export async function loginWith(cfg, credentials, options: { timeoutMs?: number;
  * The login flow proper. Throws with `error.trace` attached on every exit;
  * `login` wraps this so even out-of-band failures carry the trace.
  */
-async function performLogin({ username, password }, options, trace, cfg) {
-  // The username is trimmed (an identifier), the password is not (a secret).
-  const user = str(username, "");
-  const secret = verbatim(password, "");
-  if (user === "" || secret.trim() === "") throw pluginError(CODE.MISSING_CREDENTIALS, "username and password are required");
-
-  const fail = (code, message, extra = {}) => {
-    const error = pluginError(code, message, extra);
-    error.trace = trace.done();
-    return error;
-  };
-
-  const jar = new Map();
-  const { verifier, challenge } = await pkce(); // pure, from sensenova-cryptots
-  // Uint8Array, not Uint32Array: see sensenova-cryptots `b64url` — a wider
-  // element type is encoded one byte per element, which quietly produced an
-  // 8-character state.
-  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
-
-  // 1) Start on the console origin so the CSRF cookie lands where the
-  //    callback can read it.
+/**
+ * Step 1 — start the OIDC walk on the console origin and follow it to the
+ * Hydra `login_challenge`. Returns the challenge URL (or `""` when the walk
+ * ends without one). The CSRF cookie is bound to the entry host, so the walk
+ * MUST begin on `consoleOrigin` (see the module header for the failure mode
+ * when it does not).
+ * @param {object} cfg - resolved auth config.
+ * @param {Map<string,string>} jar - cookie jar, mutated with every `set-cookie`.
+ * @param {{ step: (name: string, info?: object) => void }} [trace]
+ * @param {string} challenge - the PKCE S256 challenge from step 0.
+ * @param {string} nonce - the state nonce issued for this flow.
+ * @returns {Promise<string>} the challenge URL, or `""`.
+ */
+async function obtainLoginChallenge(cfg, jar, trace, challenge, nonce) {
   const authUrl = new URL(cfg.authEndpoint);
   authUrl.search = new URLSearchParams({
     client_id: cfg.clientId,
@@ -687,33 +680,39 @@ async function performLogin({ username, password }, options, trace, cfg) {
     redirect_uri: cfg.redirectUri,
     response_type: "code",
     scope: cfg.scope,
-    state
+    state: nonce
   }).toString();
-
   const first = await httpGet(authUrl.href, {}, cfg);
   collectCookies(first, jar);
   trace.step("authorize", {
     url: authUrl.href,
     status: first.status,
     location: first.headers.get("location"),
-    note: `GET the authorization endpoint (starting on the console origin: the CSRF cookie is bound to this host)`
+    note: "GET the authorization endpoint (starting on the console origin: the CSRF cookie is bound to this host)"
   });
-  const challengeUrl = await followUntil(
+  return followUntil(
     str(first.headers.get("location"), authUrl.href),
     /[?&]login_challenge=/,
     jar,
     cfg,
     trace
   );
-  const loginChallenge = paramOf(challengeUrl, "login_challenge");
-  if (loginChallenge === "") {
-    trace.step("challenge", { note: "walk ended without a login_challenge" });
-    throw fail(CODE.LOGIN_FLOW,"could not obtain a login challenge from the authorization endpoint");
-  }
+}
 
-  // 2) Seal the password (RSA-OAEP + A256GCM under the platform JWKS key) and
-  //    hand it to IAM with the challenge. The crypto primitive lives in
-  //    sensenova-crypto.js; we only hand it the current endpoint and key id.
+/**
+ * Step 2 — seal the password (RSA-OAEP + A256GCM under the platform JWKS key)
+ * and POST it to IAM with the challenge. Returns the callback redirect URL, or
+ * throws a classified refusal carrying the platform's own retry window.
+ * @param {object} cfg - resolved auth config.
+ * @param {Map<string,string>} jar - cookie jar (carries the CSRF cookie).
+ * @param {{ step: (name: string, info?: object) => void }} [trace]
+ * @param {string} loginChallenge - the Hydra challenge from step 1.
+ * @param {string} secret - the verbatim password (never trimmed).
+ * @param {(code: string, message: string, extra?: object) => Error} fail - trace-tagged error factory.
+ * @param {number} [deadline] - request deadline override (ms).
+ * @returns {Promise<string>} the IAM callback redirect.
+ */
+async function postIamLogin(cfg, jar, trace, loginChallenge, user, secret, fail, deadline) {
   const encrypted = await sealPassword(secret, { jwksEndpoint: cfg.jwksEndpoint, encKeyId: cfg.encKeyId, cache: cfg.jwksCache });
   const iamUrl = `${cfg.iamOrigin}/iam/authn/v1/auth/nova/login`;
   const iamResponse = await fetch(iamUrl, {
@@ -732,7 +731,7 @@ async function performLogin({ username, password }, options, trace, cfg) {
       challenge: loginChallenge,
       is_encrypt: true
     }),
-    signal: AbortSignal.timeout(options.timeoutMs ?? cfg.requestTimeoutMs)
+    signal: AbortSignal.timeout(deadline ?? cfg.requestTimeoutMs)
   });
   const iamText = await iamResponse.text();
   const iamBody = obj((() => { try { return JSON.parse(iamText); } catch { return {}; } })());
@@ -755,25 +754,49 @@ async function performLogin({ username, password }, options, trace, cfg) {
       detail
     });
   }
+  return redirect;
+}
 
-  // 3) Walk the callback to the authorization code.
+/**
+ * Step 3 — walk the IAM callback to the authorization `code` and verify the
+ * round-tripped `state` nonce. Throws `LOGIN_FLOW` on a missing code or a
+ * state mismatch (the latter is the second half of the PKCE binding — a code
+ * from a flow this process did not start must not be exchanged).
+ * @param {object} cfg - resolved auth config.
+ * @param {Map<string,string>} jar - cookie jar.
+ * @param {{ step: (name: string, info?: object) => void }} [trace]
+ * @param {string} redirect - the IAM callback URL from step 2.
+ * @param {string} expectedState - the nonce issued in step 1.
+ * @param {(code: string, message: string, extra?: object) => Error} fail - trace-tagged error factory.
+ * @returns {Promise<string>} the authorization code.
+ */
+async function obtainAuthCode(cfg, jar, trace, redirect, expectedState, fail) {
   const codeUrl = await followUntil(redirect, /[?&]code=/, jar, cfg, trace);
   const code = paramOf(codeUrl, "code");
   if (code === "") {
     trace.step("callback", { url: redirect, note: "walk ended without an authorization code" });
-    throw fail(CODE.LOGIN_FLOW,"could not obtain an authorization code from the callback");
+    throw fail(CODE.LOGIN_FLOW, "could not obtain an authorization code from the callback");
   }
-  // The state nonce round-trips: it protects the callback against a code from a
-  // flow this process did not start (a CSRF'd auth request whose response a
-  // stranger replays here). PKCE already binds the CODE to this process via the
-  // verifier; the state check is the second half of that binding.
   const callbackState = paramOf(codeUrl, "state");
-  if (callbackState !== state) {
-    trace.step("callback-state", { url: codeUrl, note: `state mismatch (expected ${state.slice(0, 8)}…, got ${callbackState.slice(0, 8)}…)` });
+  if (callbackState !== expectedState) {
+    trace.step("callback-state", { url: codeUrl, note: `state mismatch (expected ${expectedState.slice(0, 8)}…, got ${callbackState.slice(0, 8)}…)` });
     throw fail(CODE.LOGIN_FLOW, "callback state did not match the issued nonce");
   }
+  return code;
+}
 
-  // 4) Trade code + verifier for the token pair.
+/**
+ * Step 4 — trade code + verifier for the token pair. Throws `TOKEN_REJECTED`
+ * when the endpoint refuses, else returns the parsed grant.
+ * @param {object} cfg - resolved auth config.
+ * @param {{ step: (name: string, info?: object) => void }} [trace]
+ * @param {string} code - the authorization code from step 3.
+ * @param {string} verifier - the PKCE verifier matching step 1's challenge.
+ * @param {(code: string, message: string, extra?: object) => Error} fail - trace-tagged error factory.
+ * @param {number} [deadline] - request deadline override (ms).
+ * @returns {Promise<{accessToken: string, refreshToken: string, expiresIn: number, scope: string}>}
+ */
+async function exchangeCodeForToken(cfg, trace, code, verifier, fail, deadline) {
   const tokenResponse = await fetch(cfg.tokenEndpoint, {
     method: "POST",
     headers: {
@@ -789,7 +812,7 @@ async function performLogin({ username, password }, options, trace, cfg) {
       redirect_uri: cfg.redirectUri,
       scope: cfg.scope
     }).toString(),
-    signal: AbortSignal.timeout(options.timeoutMs ?? cfg.requestTimeoutMs)
+    signal: AbortSignal.timeout(deadline ?? cfg.requestTimeoutMs)
   });
   const tokenText = await tokenResponse.text();
   trace.step("token-exchange", {
@@ -804,6 +827,42 @@ async function performLogin({ username, password }, options, trace, cfg) {
     throw fail(CODE.TOKEN_REJECTED, `token exchange failed: ${detail}`);
   }
   return readTokenResponse({ status: tokenResponse.status, jsonText: tokenText }, cfg);
+}
+
+/**
+ * The login flow proper. Throws with `error.trace` attached on every exit;
+ * `login` wraps this so even out-of-band failures carry the trace.
+ */
+async function performLogin({ username, password }, options, trace, cfg) {
+  const deadline = options.timeoutMs ?? cfg.requestTimeoutMs;
+  // The username is trimmed (an identifier), the password is not (a secret).
+  const user = str(username, "");
+  const secret = verbatim(password, "");
+  if (user === "" || secret.trim() === "") throw pluginError(CODE.MISSING_CREDENTIALS, "username and password are required");
+
+  const fail = (code, message, extra = {}) => {
+    const error = pluginError(code, message, extra);
+    error.trace = trace.done();
+    return error;
+  };
+
+  const jar = new Map();
+  const pkcePair = await pkce();
+  // Uint8Array, not Uint32Array: see sensenova-crypto.ts `b64url` — a wider
+  // element type is encoded one byte per element, which quietly produced an
+  // 8-character state.
+  const nonce = b64url(crypto.getRandomValues(new Uint8Array(16)));
+
+  const challengeUrl = await obtainLoginChallenge(cfg, jar, trace, pkcePair.challenge, nonce);
+  const loginChallenge = paramOf(challengeUrl, "login_challenge");
+  if (loginChallenge === "") {
+    trace.step("challenge", { note: "walk ended without a login_challenge" });
+    throw fail(CODE.LOGIN_FLOW, "could not obtain a login challenge from the authorization endpoint");
+  }
+
+  const redirect = await postIamLogin(cfg, jar, trace, loginChallenge, user, secret, fail, deadline);
+  const code = await obtainAuthCode(cfg, jar, trace, redirect, nonce, fail);
+  return exchangeCodeForToken(cfg, trace, code, pkcePair.verifier, fail, deadline);
 }
 
 export { AUTH_DEFAULTS };
