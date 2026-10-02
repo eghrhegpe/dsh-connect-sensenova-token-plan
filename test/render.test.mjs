@@ -909,6 +909,184 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
   }
 }
 
+// === Raccoon card frames ==================================================
+// The tab's own frame is unreachable from this suite BY CONSTRUCTION: its data
+// is internal `useState`, so mounting `RaccoonTab` always renders the
+// logged-out view. `RaccoonCard` takes that state as a PROP, which is what
+// makes the frames below assertable — and every one of them was previously
+// unasserted, which is the whole reason the card was split out of the tab.
+{
+  const card = (state, extra = {}) => treeOf(render.RaccoonCard, {
+    state,
+    tt,
+    loginBusy: false,
+    loginNote: null,
+    modelsNote: null,
+    idsBusy: false,
+    onLogin: () => {},
+    onLogout: () => {},
+    onSwitch: () => {},
+    onIds: () => {},
+    ...extra
+  });
+  // The first role="status"/"alert" element in tree order is the login card's
+  // own status line (it is the root's first child).
+  const loginLineOf = (tree) => texts(findElement(tree, (props) => props.role === "status" || props.role === "alert")).join("");
+  const alertsOf = (tree) => findAll(tree, (props) => props.role === "alert");
+  // Whether some text node on screen is EXACTLY `key`. Exact, not a substring:
+  // `raccoon.unregistered` is a prefix of the roster chip's
+  // `raccoon.unregisteredChip`, so an `includes` on the joined screen would
+  // report the wording as present in a frame that does not use it.
+  const lineHas = (tree, key) => texts(tree).includes(key);
+
+  // The signed-out frame: the status says so, the button offers the scan, and
+  // nothing from a previous session's state leaks in.
+  {
+    const tree = card({ ok: true, enabled: false, loggedIn: false });
+    check("the signed-out frame names the state and offers the scan",
+      loginLineOf(tree) === "raccoon.notLogged" && lineHas(tree, "raccoon.login"),
+      loginLineOf(tree));
+    check("a signed-out frame with the switch off draws no roster, no balance line",
+      lineHas(tree, "raccoon.unregistered") && !lineHas(tree, "raccoon.pushHint")
+        && !texts(tree).join("").includes("raccoon.balance"),
+      texts(tree).join(" | "));
+  }
+
+  // A scan in flight: the QR is the point, and the button must not offer a
+  // SECOND scan while the first one is still on screen.
+  {
+    const tree = card({
+      ok: true, loggedIn: false, loginStatus: "scanning",
+      scanUrl: "https://xiaohuanxiong.com/login/mp?code=" + "a".repeat(32)
+    });
+    const qr = findElement(tree, (props) => props.alt === "WeChat QR");
+    check("a waiting scan puts the QR on screen",
+      qr !== null && typeof qr.props.src === "string" && qr.props.src.startsWith("data:image/"),
+      String(qr?.props?.src).slice(0, 24));
+    const loginButton = findElement(tree, (props) => props.type === "button" && props.disabled === true);
+    check("the login button stays disabled while its own scan waits",
+      loginButton !== null && texts(loginButton).join("") === "raccoon.loggingIn",
+      texts(loginButton ?? {}).join(""));
+  }
+
+  // The signed-in frame's whole bookkeeping is ONE line: balance, the split the
+  // gateway declared, and BOTH credential clocks. Three stacked lines read as
+  // clutter — but the facts must survive the fold, not be dropped by it, and a
+  // zero part is a declared fact rather than a gap.
+  {
+    const tree = card({
+      ok: true, enabled: true, loggedIn: true, nickname: "小浣熊用户",
+      balance: 12345.678, balanceBreakdown: { daily: 100, reward: 0, monthly: 50 },
+      expiresAtMs: 1_800_000_000_000, refreshExpiresAtMs: Date.now() + 20 * 86_400_000,
+      models: [{ id: "sn-glm-5-3", name: "GLM-5.3" }], providerRegistered: true
+    });
+    const statusLines = findAll(tree, (props) => props.role === "status").map((el) => texts(el).join(""));
+    const meta = statusLines.filter((line) => line.includes("raccoon.balance"));
+    check("the signed-in bookkeeping folds into exactly one line",
+      meta.length === 1, JSON.stringify(statusLines));
+    const line = meta[0] ?? "";
+    check("that line keeps the split the gateway declared, zero part included",
+      line.includes("raccoon.partDaily") && line.includes("raccoon.partReward")
+        && line.includes("raccoon.partMonthly") && !line.includes("raccoon.partTopup"),
+      line);
+    check("that line keeps both credential clocks",
+      line.includes("raccoon.expiresAt") && line.includes("raccoon.refreshUntil"), line);
+    check("a healthy signed-in session raises no alert",
+      alertsOf(tree).length === 0, JSON.stringify(alertsOf(tree).map((el) => texts(el).join(""))));
+    check("a visible roster stands the old unregistered wording down",
+      lineHas(tree, "raccoon.pushHint") && !lineHas(tree, "raccoon.unregistered"),
+      texts(tree).join(" | "));
+    check("a login line with a nickname quotes it",
+      loginLineOf(tree) === "raccoon.loggedIn", loginLineOf(tree));
+  }
+
+  // The nickname is absent on some gateway responses: the suffix must go, not
+  // render as "已登录：" with nothing after the colon. `tt` is identity here, so
+  // this is exact — `raccoon.loggedIn` is a SUBSTRING of `raccoon.loggedInPlain`
+  // and a `includes` check would pass on both.
+  {
+    const blank = card({ ok: true, loggedIn: true, nickname: "", balance: 1 });
+    check("a blank nickname drops the suffix instead of a dangling colon",
+      loginLineOf(blank) === "raccoon.loggedInPlain", loginLineOf(blank));
+  }
+
+  // An expired access token is a DIFFERENT fact from "not logged in": the
+  // credential row still exists and the registration may well be up, so a plain
+  // status line would read as healthy while every request 401s. It must alert,
+  // and the button must offer the RE-scan.
+  {
+    const tree = card({ ok: true, loggedIn: true, credentialExpired: true, nickname: "小浣熊用户", balance: 1 });
+    check("an expired credential renders as an alert, not a status line",
+      alertsOf(tree).length === 1 && loginLineOf(tree) === "raccoon.expired",
+      `${alertsOf(tree).length} alert(s) / ${loginLineOf(tree)}`);
+    check("an expired credential offers a re-scan rather than a logout",
+      lineHas(tree, "raccoon.reLogin"), texts(tree).join(" | "));
+
+    const blank = card({ ok: true, loggedIn: true, credentialExpired: true, nickname: "" });
+    check("an expired credential with no nickname also drops the suffix",
+      loginLineOf(blank) === "raccoon.expiredPlain", loginLineOf(blank));
+  }
+
+  // The two "switch on but nothing registered" wordings are the ONLY place those
+  // states are named once the roster is off screen, so they must stay distinct:
+  // "signed in, not yet published" is a different instruction from "not signed
+  // in yet".
+  {
+    const awaiting = card({ ok: true, enabled: true, loggedIn: false });
+    check("switch on + signed out says to sign in first",
+      lineHas(awaiting, "raccoon.awaitingLogin") && !lineHas(awaiting, "raccoon.unregistered"),
+      texts(awaiting).join(" | "));
+    const off = card({ ok: true, enabled: false, loggedIn: false });
+    check("switch off says to tick it, not to log in",
+      lineHas(off, "raccoon.unregistered") && !lineHas(off, "raccoon.awaitingLogin"),
+      texts(off).join(" | "));
+    // Signed in but the gateway listed nothing: the roster cannot draw, so the
+    // wording is what tells the reader the switch has not landed yet.
+    const quiet = card({ ok: true, enabled: true, loggedIn: true, models: [] });
+    check("signed in with an empty roster falls back to the wording, not to silence",
+      lineHas(quiet, "raccoon.unregistered"), texts(quiet).join(" | "));
+  }
+
+  // A registration failure must stay visible while the switch is OFF: hiding it
+  // behind `enabled` is a failed state with no visible affordance to act on.
+  {
+    const tree = card({ ok: true, enabled: false, loggedIn: false, providerError: "peer missing" });
+    const box = findElement(tree, (props) => props.type === "checkbox");
+    check("a registration failure is shown even with the switch off",
+      box?.props?.checked === false && alertsOf(tree).length === 1
+        && texts(alertsOf(tree)[0]).join("") === "peer missing",
+      `checked=${String(box?.props?.checked)} alerts=${alertsOf(tree).length}`);
+  }
+
+  // The two transient notes ride in their own lines; `loginNote` is what carries
+  // a walk that ended without a sign-in (the outcome is delivered once, so the
+  // note is the tab's whole account of it).
+  {
+    const tree = card({ ok: true, enabled: false, loggedIn: false }, {
+      loginNote: "scan timed out", modelsNote: "saved: 3 models", idsBusy: true
+    });
+    check("a walk outcome and a save result each get their own line",
+      lineHas(tree, "scan timed out") && lineHas(tree, "saved: 3 models"),
+      texts(tree).join(" | "));
+  }
+
+  // The card passes the curation straight through, so the roster's two Raccoon
+  // defaults hold here too — an uncurated list (`null`) reads as every model
+  // pushed, and a save in flight freezes the row checkboxes rather than letting
+  // a second toggle race the first.
+  {
+    const tree = card(
+      { ok: true, enabled: true, loggedIn: true, models: [{ id: "m", name: "M" }], enabledModelIds: null },
+      { idsBusy: true }
+    );
+    const boxes = findAll(tree, (props) => props.type === "checkbox");
+    check("an uncurated roster reads as every model pushed, not as none",
+      boxes.length === 2 && boxes[1].props.checked === true, `boxes=${boxes.length}`);
+    check("a save in flight freezes the roster's own checkboxes",
+      boxes.length === 2 && boxes[1].props.disabled === true, `disabled=${String(boxes[1]?.props?.disabled)}`);
+  }
+}
+
 console.log(JSON.stringify(results, null, 2));
 const failed = results.filter((r) => !r.pass);
 if (failed.length > 0) {

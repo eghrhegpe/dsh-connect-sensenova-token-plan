@@ -362,3 +362,23 @@
 - **修法**（2026-10-02 已做）：`optional(value)` 进 `util.ts` —— `Promise.resolve(value).catch(() => null)`，把「不是 promise」和「rejected promise」统一读成"没有答案"，守卫就落在**调用点**而不是调用结果上。全仓**四处**一并换掉：新模块的 `raccoonSwitch.enabled()` / `enabledIds()`，以及 `routes.ts` 里同形状的 `drawStore.enabled()` / `drawStore.modelId()`（画图路由的 `answer()`，每请求都跑）——抽公共原语而不是只修自己这一处，理由与 PITFALLS §32 同：**同类 bug 会漂移，收在一处才不再有第二份可漂移的副本**。
 - **验证**：`test/raccoon-status.test.mjs` F 组用 `switchStore: null` 直接驱动，断言是「off + 降级」而不是抛错；修前同一输入会把**整组**检查一起带走（异常逃出组内 try，后续断言全部不执行）。新套件 46 项，`package.test.mjs` 的三方名册钉子（磁盘 ↔ `npm test` ↔ CI）同时钉住它的注册。
 - **教训**：**判断一个表达式是否真有防护，要看哪一条分支会走到那层防护，再用一个真的走那条分支的测试证明它**。`a ? a.b() : null` 这类形状正是"看起来有防护"的重灾区。顺带一个正面收获：把闭包抽成注入式模块的额外收益，不是行数变少，而是**缺席变成了可表达、可达的状态**——在路由里它被 wire 保证为非空，这个 bug 本可以永久潜伏。抽模块（`routes.ts` 1243 → 990 行，读模型 387 行、可脱开路由单测）真正的价值在此。
+
+---
+
+## 34. 同一份 UI 契约画两遍：测试把它们钉在一起，代码却留了两份
+
+- **现象**：`ModelRoster`（`model-picker.ts`，Token Plan 目录）与 `RaccoonRoster`（第二上游网关目录）各画一遍同一套行骨架——`li` + `modelRowHead` + `label`（checkbox / 名称 / `×N`）/ badges / 参数行。`test/render.test.mjs` 里甚至已经有一个循环**同时**驱动两者、断言同一份契约，注释白纸黑字写着「下一个改行形状的人不能改一个忘另一个」——那是对「这两份必须逐字一致」的书面承认，却只用测试兜着。而漂移已经发生，三处，没人发现：head 内 label 的间距一边 10px 一边 8px；rate chip 一边在 label **内**、一边在 label **外**；一处靠 label 的 `flex: "1 1 auto"` 把 badge 顶到右边缘，另一处硬塞了一个 `spacer`。
+- **根因**：判定「该不该有第二份」时看的是**「两个组件像不像」**。它们确实不像——一个绑定 allow-list + 思考阶梯 + 配额耗尽 badge，另一个绑定网关费率 + `null` 读成全员 + 无阶梯。于是各写一遍。该问的是另一个问题：**这些行能不能被同一个测试同时钉住？**能，而且当时就已经那么钉了。**能同时钉住的东西，就是同一份规格；规格只有一份，实现就不该有两份。**
+- **修法**（2026-10-02 已做）：新建 `src/client/model-row.ts`，两个 roster 共用。关键是**只收骨架，不收领域**：primitive 吃**渲染好的内容**（`rateText` / `rateTitle` / `badges` / `meta`），不吃模式开关——一个 `raccoon: true` 的布尔会把两份措辞重新塞回同一个文件，那正是要分开的东西。三处漂移随之收敛（统一 10px、rate chip 进 label、去掉 `spacer` 靠 label 撑开）。
+- **验证**：`test/render.test.mjs` 165 项在抽取前后逐项零漂移（那条同时驱动两者的循环就是验收器）；行原语自身的契约另由该循环钉住。
+- **教训**：**一条测试同时驱动两个组件时，它同时是两个组件的规格。** 反过来也成立且更有用：如果两个组件只能用两套输入分别钉，那才是真差异，才允许分开。这是 PITFALLS §32（复制最脆的回滚路径）的同一条道理换了层皮——那里是「隔离靠实例不靠副本」，这里是「规格靠测试不靠自觉」。
+
+---
+
+## 35. 把「随状态变化的帧」关进 hook 组件，等于把帧从测试面上锁掉
+
+- **现象**：`raccoon-tab.ts` 的整棵渲染树由内部 `useState` 决定。而 `test/client-surface.js` 的 React 替身里，`useState` 只返回初值、`useEffect` 是空操作——所以**挂载 tab 永远只看到登出帧**（旧文件头自己承认了这点，并把 `RaccoonRoster` 拆出去当作补救）。于是这些一条断言都没有：余额 + 网关拆解 + **两个**凭据时钟并进同一行的折叠、过期凭据渲染成 `alert` 而非状态行、nickname 为空时不留悬空冒号、`已启用未登录` 与 `未注册` 两种措辞的分野、注册失败在开关**关闭**时仍可见。这些不是边角——过期告警和那两种措辞，恰恰是用户在出故障时唯一能读到的东西。
+- **根因**：把「数据从哪来」和「画成什么样」绑进了同一个函数。hook 是取数与生命周期的工具，不是渲染的必需品；state 一旦关进 hook 的闭包，测试要够到那些帧就只能自己重实现一遍 hook 契约——**那是在测假货**（`client-surface.js` 的注释把这条线划得很清楚：宁可留一个写明了的缺口，也不假装）。
+- **修法**（2026-10-02 已做）：新建 `src/client/raccoon-card.ts`，**无 hook**，`state` 走 props；`RaccoonState` 接口、`qrImageOf`、以及「对整份 roster 取反」的 id 推导一并迁入。`raccoon-tab.ts` 只留生命周期：轮询与两档 cadence、四个 mutation、unmount 清理、向 header 上报新鲜度（616 → 235 行）。`tt` 在套件里是 identity，所以断言钉的是**哪个键渲染出来了**，不是译文。
+- **验证**：`test/render.test.mjs` 新增 20 条（165 → 186）。其中 8 条第一版是红的，根因是我自己写错了：`lineHas` 去读 `props.children`，而测试替身的 `h` 把 `children` 挂在**元素**上而不是 `props` 上——改用现成的 `texts()` 做**精确节点比对**（顺带避开 `raccoon.unregistered` 是 `raccoon.unregisteredChip` 前缀这个子串陷阱，`includes` 会在错误的帧上报"有"）。
+- **教训**：**「这个组件的状态测不到」通常不是测试能力不够，是组件把状态私有了。** 判据很直接：把 state 提成 props 会让组件变差吗？不会——那它本来就不该私有。同一条规则在本仓库已经落地三次：host 侧 `raccoon-status.ts`、`snapshot-aggregate.ts`，client 侧 `RaccoonRoster`；这次只是把同一件事做完。附带一个可复用的判据：**只要某段逻辑是 `state` + `tt` 的纯函数，它就没有理由待在 hook 里。**

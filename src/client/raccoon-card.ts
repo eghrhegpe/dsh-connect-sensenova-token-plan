@@ -1,0 +1,311 @@
+/**
+ * The Raccoon tab's frame, as a hook-free component.
+ *
+ * `raccoon-tab.ts` owns the tab's lifecycle — the poll loop, the cadence, the
+ * four mutations — and this module owns what that lifecycle DRAWS. The split
+ * is not cosmetic: the tab's state is internal `useState`, so the Node render
+ * suite can mount the tab itself but only ever reach its logged-out frame
+ * (that is what the old header comment admitted). Everything the reader sees
+ * once signed in — the balance line and its declared split, both credential
+ * clocks folded into that one line, the expired-credential ALERT, the
+ * "已启用，登录后即可注册" wording, a registration failure that stays visible
+ * while the switch is off — was therefore unasserted. Taking `state` as a prop
+ * puts every one of those frames within reach of the same suite that already
+ * pins the roster.
+ *
+ * All derivations stay HERE rather than in the tab, because they are pure
+ * functions of `state` and `tt`: the tab keeps only what needs a hook.
+ * @module dsh-connect-sensenova-token-plan/raccoon-card
+ */
+
+import { count, format, when } from "./format.ts";
+import { h } from "./runtime.ts";
+import type { Tt } from "./runtime.ts";
+import { qrDataUrl } from "./qr.ts";
+import { RaccoonRoster } from "./raccoon-roster.ts";
+import { RACCOON_SITE_URL } from "./const.ts";
+import { S } from "./styles.ts";
+
+/** The secret-free state the /raccoon route answers. */
+export interface RaccoonState {
+  ok?: boolean;
+  enabled?: boolean;
+  switchSource?: string;
+  loggedIn?: boolean;
+  nickname?: string;
+  /** The stored access token's JWT `exp`, in ms (absent when unknowable). */
+  expiresAtMs?: number | null;
+  /** Whether that token has lapsed — `loggedIn` can be true while this is true. */
+  credentialExpired?: boolean;
+  /** The refresh token's own window (≈30 days): how long until a re-scan. */
+  refreshExpiresAtMs?: number | null;
+  balance?: number | null;
+  /** The gateway's split of the total — only parts it declared. */
+  balanceBreakdown?: { daily?: number; reward?: number; monthly?: number; topup?: number } | null;
+  /** The concrete reason a balance read came back empty (absent when fine). */
+  balanceDetail?: string;
+  /** Which roster the tab is drawing: the gateway catalogue ("live"), a read
+   *  that succeeded but listed no visible model ("empty"), or a read that
+   *  failed outright ("unreadable") — the last two both fall back to the
+   *  built-in table, but they must be worded differently. */
+  modelsSource?: "live" | "empty" | "unreadable";
+  models?: import("./raccoon-roster.ts").RaccoonModel[];
+  /** The saved pushed-model curation (`null`/absent = the whole roster). */
+  enabledModelIds?: string[] | null;
+  providerRegistered?: boolean;
+  providerError?: string;
+  error?: string;
+  /** The in-flight QR scan the route last issued (cleared when it settles). */
+  scanUrl?: string;
+  scanCode?: string;
+  /**
+   * The QR walk's outcome: `"scanning"` while one waits, otherwise a terminal
+   * `logged_in` / `timeout` / `canceled` / `failed`.
+   *
+   * It is an EVENT, not a state: the route hands a terminal outcome over once
+   * and clears it, so only the poll that catches it sees it. The durable
+   * "signed in" fact is `loggedIn`. What this drives is the poll CADENCE — a
+   * waiting scan is the only time the tab needs to poll faster than a minute.
+   */
+  loginStatus?: string;
+  /** The reason a `failed` walk gave; only ever present beside that status. */
+  loginError?: string;
+}
+
+/**
+ * The QR image the login code encodes. The payload is the gateway's own
+ * public login page URL (~144 bytes), which fits the v1–10/M capacity the
+ * local encoder supports; `buildQrMatrix` throwing is the out-of-range
+ * signal, and the tab then falls back to the plain URL text.
+ * @param {string|null|undefined} scanUrl - the URL the route is waiting on.
+ * @returns {unknown} an `<img>`, the URL as text, or null when there is none.
+ */
+function qrImageOf(scanUrl: string | null | undefined): unknown {
+  if (typeof scanUrl !== "string" || scanUrl === "") return null;
+  try {
+    return h("img", {
+      src: qrDataUrl(scanUrl, { size: 208 }),
+      alt: "WeChat QR",
+      width: 208,
+      height: 208,
+      style: { display: "block", margin: "8px 0", borderRadius: 4 }
+    });
+  } catch {
+    // Out of the supported capacity: the URL itself is still scannable by
+    // opening it, so show it as text.
+    return h("code", { style: { ...S.muted, fontSize: 12, wordBreak: "break-all" } }, scanUrl);
+  }
+}
+
+/**
+ * The Raccoon tab's card tree.
+ * @param {object} props
+ * @param {RaccoonState|null} props.state - the route's last answer, or null
+ *   before the first one lands.
+ * @param {Tt} props.tt - the dictionary.
+ * @param {boolean} props.loginBusy - the login POST is in flight (short: the
+ *   route answers as soon as it has issued a scan).
+ * @param {string|null} props.loginNote - a login/switch error or walk outcome.
+ * @param {string|null} props.modelsNote - the pushed-model save's result.
+ * @param {boolean} props.idsBusy - a pushed-model save is in flight.
+ * @param {() => void} props.onLogin - start a scan.
+ * @param {() => void} props.onLogout - forget the credential.
+ * @param {(enabled: boolean) => void} props.onSwitch - flip the opt-in switch.
+ * @param {(ids: string[]) => void} props.onIds - save the pushed-model list.
+ * @returns {unknown} the tab's card tree.
+ */
+export function RaccoonCard({
+  state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds
+}: {
+  state: RaccoonState | null;
+  tt: Tt;
+  loginBusy: boolean;
+  loginNote: string | null;
+  modelsNote: string | null;
+  idsBusy: boolean;
+  onLogin: () => void;
+  onLogout: () => void;
+  onSwitch: (enabled: boolean) => void;
+  onIds: (ids: string[]) => void;
+}): unknown {
+  const enabled = state?.enabled === true;
+  const loggedIn = state?.loggedIn === true;
+  // A scan is waiting on the phone. The ROUTE owns that fact (and the walk's
+  // deadline), so nothing here holds a timer.
+  const scanning = state?.loginStatus === "scanning";
+  // What disables the login controls. The POST itself returns at once, so the
+  // WAIT is the scan, not the request: without it in the condition the button
+  // would re-enable while its own QR is still on screen.
+  const waiting = loginBusy || scanning;
+  // The gateway's login response does not always carry a nickname; rendering
+  // "已登录：" with an empty tail reads as broken, so a blank nick drops the
+  // suffix rather than showing a dangling colon.
+  const nick = String(state?.nickname ?? "");
+  const models = Array.isArray(state?.models) ? state.models : [];
+  // The credential's own clock (the JWT `exp` the route re-reads after any
+  // in-flight rotation): rendered next to the balance it guards.
+  const expiresAt = typeof state?.expiresAtMs === "number" ? state.expiresAtMs : null;
+  // The refresh token's window: the deadline after which ONLY a re-scan gets
+  // back in. `when()` carries the day across midnight.
+  const refreshAt = typeof state?.refreshExpiresAtMs === "number" ? state.refreshExpiresAtMs : null;
+  // The gateway's split of the total, as parts it actually declared. A zero
+  // part is still a figure worth showing (it is a fact, not a gap).
+  const breakdown = state?.balanceBreakdown;
+  const breakdownParts = [
+    breakdown?.daily !== undefined ? format(tt("raccoon.partDaily"), { n: count(breakdown.daily) }) : null,
+    breakdown?.reward !== undefined ? format(tt("raccoon.partReward"), { n: count(breakdown.reward) }) : null,
+    breakdown?.monthly !== undefined ? format(tt("raccoon.partMonthly"), { n: count(breakdown.monthly) }) : null,
+    breakdown?.topup !== undefined ? format(tt("raccoon.partTopup"), { n: count(breakdown.topup) }) : null
+  ].filter(Boolean).join(" · ");
+
+  // The logged-in frame's whole bookkeeping folds into ONE quiet meta line:
+  // balance, its declared split, and both credential clocks. These are facts
+  // the user glances at, not a form — three stacked lines of secondary text
+  // read as clutter, not as diligence (the same lesson the quota tab's
+  // "构成并入余额行" pass taught).
+  const balanceText = typeof state?.balance === "number"
+    ? format(tt("raccoon.balance"), { balance: count(state.balance) })
+    : state?.balanceDetail !== undefined && state?.balanceDetail !== ""
+      ? format(tt("raccoon.balanceUnknownDetail"), { detail: state.balanceDetail })
+      : tt("raccoon.balanceUnknown");
+  const metaLine: unknown[] = [];
+  if (loggedIn) {
+    metaLine.push(h("span", { key: "balance" }, balanceText));
+    if (breakdownParts !== "") {
+      metaLine.push(h("span", { key: "breakdown", style: { fontSize: 11 } }, `（${breakdownParts}）`));
+    }
+    if (expiresAt !== null) {
+      metaLine.push(h("span", { key: "exp" }, ` · ${format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })}`));
+    }
+    if (refreshAt !== null) {
+      const days = Math.max(1, Math.round((refreshAt - Date.now()) / 86_400_000));
+      metaLine.push(h("span", {
+        key: "refresh",
+        title: format(tt("raccoon.refreshTip"), { days })
+      }, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
+    }
+  }
+
+  // The login row's status text: an expired access token is a DIFFERENT fact
+  // from "not logged in" — the credential row still exists (and the
+  // registration may well be up), so `loggedIn` alone reads as healthy while
+  // every request 401s. The expiry renders as an alert, not plain status.
+  const loginStatus = loggedIn
+    ? (state?.credentialExpired === true
+        ? { alert: true, text: nick === "" ? tt("raccoon.expiredPlain") : format(tt("raccoon.expired"), { nick }) }
+        : { alert: false, text: nick === "" ? tt("raccoon.loggedInPlain") : format(tt("raccoon.loggedIn"), { nick }) })
+    : { alert: false, text: tt("raccoon.notLogged") };
+
+  // The roster header carries the registration chip, so the standalone
+  // "已注册 raccoon 提供方：N 个模型。" line — a fact the chip + the model
+  // count already state — stops spending a line of its own. When the roster
+  // is NOT on screen (logged out, or the gateway offered nothing), the old
+  // wording keeps its job: it is the only place those states are named.
+  const rosterVisible = loggedIn && models.length > 0;
+
+  // The tab reads in the order the user acts: sign in first (nothing works
+  // without a credential), then the opt-in switch that publishes the models,
+  // then the account facts and the roster. The "what is this" paragraph is a
+  // footer — a reader who got this far no longer needs it, and up top it only
+  // pushed the actionable controls below the fold.
+  return h(
+    "div",
+    null,
+    // The login half: one compact card — the status text and its button share
+    // a row (a one-line status never earned a full-width block), with the QR
+    // riding below only while a scan is in flight.
+    h(
+      "div",
+      { style: { ...S.card, padding: "10px 14px" } },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: 12 } },
+        h("div", {
+          style: loginStatus.alert ? { ...S.formError, margin: 0, fontSize: 13 } : { fontSize: 13 },
+          role: loginStatus.alert ? "alert" : "status"
+        }, loginStatus.text),
+        h("span", { style: S.spacer }),
+        loggedIn
+          ? (state?.credentialExpired === true
+              ? h("button", {
+                  type: "button",
+                  style: S.button,
+                  onClick: onLogin,
+                  disabled: waiting
+                }, waiting ? tt("raccoon.loggingIn") : tt("raccoon.reLogin"))
+              : h("button", { type: "button", style: S.button, onClick: onLogout }, tt("raccoon.logout")))
+          : h("button", {
+              type: "button",
+              style: S.button,
+              onClick: onLogin,
+              disabled: waiting
+            }, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login"))
+      ),
+      // The QR encodes the scan URL the route is CURRENTLY waiting on (it
+      // re-issues one per login; the tab's poll picks it up in `state.scanUrl`).
+      !loggedIn && state?.scanUrl !== undefined && state?.scanUrl !== ""
+        ? qrImageOf(state.scanUrl)
+        : null
+    ),
+    loginNote !== null
+      ? h("div", { style: { ...S.formNote, fontSize: 12, marginTop: 8 }, role: "status" }, loginNote)
+      : null,
+    // The provider switch (opt-in, default off). It decides whether the Raccoon
+    // models are registered with DSH at all — the second step, after signing in.
+    h(
+      "label",
+      { style: { display: "flex", gap: 8, alignItems: "center", margin: "12px 0 0", cursor: waiting ? "wait" : "pointer" } },
+      h("input", { type: "checkbox", checked: enabled, disabled: waiting, onChange: () => onSwitch(!enabled) }),
+      h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" } }, tt("raccoon.switch"))
+    ),
+    // A registration failure stays visible even while the switch is OFF —
+    // hiding it behind `enabled` is the same dead-end as the account editor
+    // used to be: a failed state with no visible affordance to act on it.
+    state !== null && state.providerError !== undefined && state.providerError !== ""
+      ? h("div", { style: S.formError, role: "alert" }, state.providerError)
+      : null,
+    // The one meta line, then the roster the adapter offers.
+    metaLine.length > 0
+      ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 10 }, role: "status" }, ...metaLine)
+      : null,
+    modelsNote !== null
+      ? h("div", { style: { ...S.formNote, fontSize: 12, marginTop: 6 }, role: "status" }, modelsNote)
+      : null,
+    models.length > 0
+      ? h(RaccoonRoster, {
+          models,
+          tt,
+          source: state?.modelsSource,
+          enabledIds: Array.isArray(state?.enabledModelIds) ? state.enabledModelIds : null,
+          busy: idsBusy || waiting,
+          registered: state?.providerRegistered === true,
+          onToggle: (id: string) => {
+            // Toggle against the WHOLE roster: an uncurated list (`null`) reads
+            // as "every model on", so the first uncheck materialises the list
+            // from the roster minus that one id.
+            const current = Array.isArray(state?.enabledModelIds) ? state.enabledModelIds : models.map((row) => String(row?.id ?? ""));
+            onIds(current.filter((entry) => entry !== id));
+          }
+        })
+      : // Without the roster the old status wording is the only place the
+        // "switch on but not yet registered" states are named — keep it.
+        state !== null && !rosterVisible
+          ? enabled && !loggedIn
+            ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 10 } }, tt("raccoon.awaitingLogin"))
+            : h("div", { style: { ...S.muted, fontSize: 12, marginTop: 10 } }, tt("raccoon.unregistered"))
+          : null,
+    // The "what is this" explanation is the tab's footer, not its lead: a
+    // reader working top-down hits the actionable controls first, and the
+    // background ("independent of the credit pools") lands once it can be
+    // understood. The client download rides in the same footer — resident,
+    // state-independent (the credits offer holds whether or not the panel
+    // session is signed in), and the same visual contract as the API-key
+    // form's official-site link.
+    h(
+      "div",
+      { style: { ...S.muted, fontSize: 12, marginTop: 14 } },
+      tt("raccoon.desc")
+    ),
+    h("a", { href: RACCOON_SITE_URL, target: "_blank", rel: "noreferrer", style: { color: "var(--dsw-alias-label-primary)", fontSize: 12, marginTop: 10, display: "inline-block", textDecoration: "underline", cursor: "pointer" } }, tt("raccoon.clientLink"))
+  );
+}

@@ -63,7 +63,9 @@
 - `raccoon.ts`：第二上游协议层——微信扫码登录走查、信封解析、refresh 轮换、余额与目录读取。
 - `raccoon-status.ts`：小浣熊面板的**读模型**（peer-free）——把 switch / 凭据 / 余额 / roster / 注册态 / `?debug=1` 脚手架组装成一次 GET 的答案。余额 60 s、目录 300 s，按**凭据指纹**走 `coalesced-fetch`；终态登录事件在**首个 await 之前**读取（PITFALLS §31 的 T3 修复）。吃 `store` / `switchStore` / `publisher` / `read` / `login` 五个注入项，因此可脱开路由单测（`test/raccoon-status.test.mjs`）；walk 本身仍归 `routes.ts`。
 - `raccoon-store.ts`：小浣熊凭据（DSH 凭据服务引用）；`raccoon-switch-store.ts`：小浣熊开关（按 profile 分段）；`raccoon-models.ts`：小浣熊模型目录归一化与描述符映射；`raccoon-publish.ts` + `raccoon-llm-adapter.ts`：小浣熊独立 provider 注册与 adapter（与 Token Plan 注册完全隔离——**隔离的是状态与凭据，不是代码**：两个 publisher 实例的 `state`、开关、凭据引用互不相干，而两者的发布状态机与 adapter 装配共用 `publish-core.ts` / `llm-adapter-core.ts`，理由见 §5.5）。
-- `client.js`：Plugins 页内的配置卡与三个 tab（积分额度 / 接入 API / 小浣熊）+ 账号表单（React，纯主题令牌样式）。内部 `interpretSnapshot` 把 Host 的响应读成 `(data, error)` 对，再交给决策块。
+- `client.js`：Plugins 页内的配置卡与三个 tab（积分额度 / 接入 API / 小浣熊）+ 账号表单（React，纯主题令牌样式）。内部 `interpretSnapshot` 把 Host 的响应读成 `(data, error)` 对，再交给决策块。客户端也按「能否脱离 hook 被挂载」分层：`cards.ts` / `provider-controls.ts`（状态行）/ `model-picker.ts` / `model-row.ts` / `raccoon-roster.ts` / `raccoon-card.ts` 全部是**无 hook 组件**，因此渲染套件挂的就是浏览器画的同一棵树；`panel-page.ts` / `raccoon-tab.ts` / 各表单持有 hook，是各 tab 的**生命周期**层（轮询、cadence、四个 mutation、向 header 上报新鲜度），渲染委托给上面那层。
+- `model-row.ts`：两个模型列表共用的**行骨架**（`li` + `modelRowHead` + label/checkbox/name/rate + badges + 参数行）。领域事实留在调用方——`on` 怎么判（Token Plan 读 allow-list、小浣熊把 `null` 读成"整份 roster"）、费率为 0 怎么措辞（`×0` 是运营侧伪系数、小浣熊的 0 真是免费）、tooltip 用哪个键、哪些 badge 值得报、参数行有没有思考阶梯——所以它吃的是**渲染好的内容**，不是模式开关（理由见 PITFALLS §34）。
+- `raccoon-card.ts`：小浣熊 tab 的**帧**，无 hook，`state` 走 props。这一层存在的唯一理由是**可断言性**：`RaccoonTab` 的数据是内部 `useState`，无论怎么挂载都只渲染登出帧，于是余额行/拆解/两个凭据时钟/过期告警/两种未注册措辞在抽出前没有任何断言（理由见 PITFALLS §35）。
 - 测试基建：`client-surface.js` / `panel-decision.js` / `panel-render.js` —— 把 `client.js` 作为模块加载后物化 `panel` 测试面。不进运行时、不进 `files` 打包清单。
 
 ---

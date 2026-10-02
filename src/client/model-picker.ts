@@ -5,6 +5,7 @@
 import { MODELS_PATH } from "./const.ts";
 import { format, tokenSize } from "./format.ts";
 import { postJsonOrThrow } from "./http.ts";
+import { ModelRow } from "./model-row.ts";
 import { bulkModelsIn, modelIsOn, toggleModelIn } from "./models.ts";
 import { h, useCallback, useEffect, useMemo, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
@@ -15,18 +16,22 @@ import type { LlmData, ModelData } from "./wire.ts";
  * The model picker's row list - hook-free, so the Node render suite
  * drives the very rows the browser draws.
  *
- * Each row is two lines in the WorkBuddy shape: a head line (checkbox, the
- * model name, an optional `×N` pseudo rate, badges for NOTABLE states only)
- * and an indented parameter line quoting the figures the platform declares -
+ * This component owns only what is SPECIFIC to the Token Plan catalogue; the
+ * two-line row itself is drawn by {@link ModelRow}, shared with the Raccoon
+ * roster (see that module for why the skeleton has one definition). What is
+ * specific here: the allow-list decides `on` (`modelIsOn` — an id absent from
+ * the list is OFF), the pseudo rate is always rendered `×N` because the Host
+ * matched it through the operator's own config, and the parameter line quotes
  * window, output ceiling, and the thinking levels DSH's selector will really
- * offer for THIS model. A provider-wide constant (the default effort) never
- * repeats per row - it is stated once in the header, because a fact that
- * never varies between rows is noise, not information.
- * The rows come only from the Host's roster, so a curated id that no longer
- * exists can never become a checkbox: curation is a filter over the catalogue,
- * never a catalogue of its own. A default ("text only") earns no badge, and a
- * figure the catalogue does not declare draws no segment - the list quotes
- * facts, never guesses.
+ * offer for THIS model.
+ *
+ * A provider-wide constant (the default effort) never repeats per row - it is
+ * stated once in the header, because a fact that never varies between rows is
+ * noise, not information. The rows come only from the Host's roster, so a
+ * curated id that no longer exists can never become a checkbox: curation is a
+ * filter over the catalogue, never a catalogue of its own. A default ("text
+ * only") earns no badge, and a figure the catalogue does not declare draws no
+ * segment - the list quotes facts, never guesses.
  */
 export function ModelRoster({ models, enabledIds, busy, tt, onToggle }: {
   models: ModelData[];
@@ -59,49 +64,31 @@ export function ModelRoster({ models, enabledIds, busy, tt, onToggle }: {
         : null;
       const meta = [ctx, out, levels].filter(Boolean).join(" · ");
       const rate = typeof model?.multiplier === "number" ? model.multiplier : null;
-      return h(
-        "li",
-        { key: id, style: { ...S.modelRow, ...(on ? {} : S.modelRowOff) } },
-        h("div", { style: S.modelRowHead },
-          h(
-            "label",
-            {
-              style: {
-                display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto",
-                minWidth: 0, cursor: busy ? "default" : "pointer"
-              }
-            },
-            h("input", {
-              type: "checkbox",
-              checked: on,
-              disabled: busy === true,
-              style: S.modelCheck,
-              "aria-label": label,
-              // The roster is hook-free, so the handler is handed in from the
-              // picker. Without it this box is display-only and the allow-list
-              // cannot be edited by a single row at all.
-              onChange: onToggle ? () => onToggle(id) : undefined
-            }),
-            h("span", { style: S.modelName, title: id }, label),
-            // The pseudo rate rides directly after the name like WorkBuddy's
-            // `(0.29x)`: the Host matched it through the same operator config
-            // that labels the trend chart, so badge and chart cannot diverge.
-            rate !== null
-              ? h("span", { style: S.modelRate, title: tt("llm.rosterRateTitle") }, `×${rate}`)
-              : null
-          ),
-          // A badge marks a NOTABLE state: image input is the exception worth
-          // quoting, and `quota exhausted` says why a ticked row still will
-          // not show up in the DSH picker (the buildDescriptors parity rule).
-          model?.vision === true ? h("span", { style: S.modelBadge }, tt("llm.rosterVision")) : null,
+      return h(ModelRow, {
+        key: id,
+        id,
+        label,
+        on,
+        busy,
+        // The pseudo rate rides directly after the name like WorkBuddy's
+        // `(0.29x)`: the Host matched it through the same operator config
+        // that labels the trend chart, so badge and chart cannot diverge.
+        // `×0` stays `×0` here — the operator's pseudo figure is exactly what
+        // configured it, and the tooltip below says so.
+        rateText: rate === null ? null : `×${rate}`,
+        rateTitle: tt("llm.rosterRateTitle"),
+        // A badge marks a NOTABLE state: image input is the exception worth
+        // quoting, and `quota exhausted` says why a ticked row still will
+        // not show up in the DSH picker (the buildDescriptors parity rule).
+        badges: [
+          model?.vision === true ? h("span", { key: "vision", style: S.modelBadge }, tt("llm.rosterVision")) : null,
           model?.quotaExhausted === true
-            ? h("span", { style: { ...S.modelBadge, color: "var(--dsw-alias-state-error-primary)" } }, tt("llm.rosterExhausted"))
+            ? h("span", { key: "exhausted", style: { ...S.modelBadge, color: "var(--dsw-alias-state-error-primary)" } }, tt("llm.rosterExhausted"))
             : null
-        ),
-        // The parameter line carries only what was declared: an unknown
-        // figure draws no segment, and a line with nothing to say vanishes.
-        meta === "" ? null : h("div", { style: S.modelMeta }, meta)
-      );
+        ],
+        meta,
+        onToggle
+      });
     })
   );
 }
