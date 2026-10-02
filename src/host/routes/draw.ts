@@ -4,7 +4,9 @@
  * Part of the routes split (see `../routes.ts` for the family map). GET
  * answers the effective switch and model preference with their sources; POST
  * distinguishes three purposes by body — a saved boolean, a saved model
- * preference (`null` = auto), or a forget that returns to the config default.
+ * preference (`null` = auto), or a forget. `forget` clears the SWITCH and
+ * deliberately keeps the model preference (`drawModelId: null` is the model's
+ * own reset), so the picker choice survives a switch being given back.
  *
  * @module dsh-connect-sensenova-token-plan/routes/draw
  */
@@ -66,8 +68,11 @@ export function registerDrawRoute(ctx: any, wiring: Wiring) {
       if (body === null) return;
       // Three purposes, distinguished by the body — the same shape the
       // account and api-key routes use: a saved boolean, a saved model
-      // preference (`null` = auto), or a forget that returns the saved
-      // values to the config default.
+      // preference (`null` = auto), or a forget. `forget` clears the SWITCH
+      // only and deliberately keeps the model preference — `drawStore.forget`
+      // rewrites the row with the existing `modelId` intact, and `saveModel`
+      // is the path that resets it. Do not read "a forget" as "reset all":
+      // the panel's picker choice must survive the switch being given back.
       if (body.value.forget === true) {
         if (!drawStore) {
           await answer({ ok: false, error: "draw store is unavailable" });
