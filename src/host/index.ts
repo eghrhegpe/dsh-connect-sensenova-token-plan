@@ -37,12 +37,10 @@ import { createApiKeyStore } from "./api-key-store.ts";
 import { createRaccoonStore } from "./raccoon-store.ts";
 import { createFileRaccoonStore } from "./raccoon-switch-store.ts";
 import { createRaccoonPublisher } from "./raccoon-publish.ts";
-import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
-import { filterRaccoonRows } from "./raccoon-models.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { registerRoutes } from "./routes.ts";
-import { startSideEffects, teardown } from "./lifecycle.ts";
+import { startSideEffects, seedRaccoonOnMount, teardown } from "./lifecycle.ts";
 import { CODE } from "./codes.ts";
 import { writeLoginTrace } from "./trace.ts";
 import {
@@ -54,7 +52,7 @@ import {
   inject,
   name
 } from "./host-config.ts";
-import { str, retryBounded } from "./util.ts";
+import { str } from "./util.ts";
 import type { HostDeps } from "./types.ts";
 
 /**
@@ -245,78 +243,14 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     emit: emitEvent,
     logger: ctx.logger
   });
-  // Mount seed: if the switch is already on and a credential was stored before
-  // this restart, offer the Raccoon models before the first poll. The roster
-  // is rebuilt from the store, NOT from `raccoonPublisher.state.rows`: that
-  // field is in-memory only and empty on a fresh process, so gating on it
-  // meant a restarted Host never re-registered the provider (the panel said
-  // "logged in" and the tab listed models, but the picker saw none). The same
-  // build the switch/login handlers use applies here: the live catalogue when
-  // a (refresh-kept-alive) credential exists, else the static fallback — a
-  // catalog drift merely rebuilds on the next switch/login. With NO credential
-  // there is nothing to offer, so the publisher stays pristine and the tab
-  // keeps its "switch on — scan to log in" state.
-  void (async () => {
-    // The bounded retry window, via the shared `retryBounded` loop. The two
-    // "late to mount" failures this guards against are the credentials service
-    // registering AFTER this plugin, and the `llm` registration service
-    // appearing late — neither surfaces a reason anywhere, so a single-pass
-    // seed left the picker empty for the whole session while the tab said
-    // "logged in". Every attempt re-reads BOTH, and the loop stops when
-    // `state.registered` flips.
-    //
-    // Six attempts, where the service-read window in `lifecycle.ts` uses
-    // three: a seed pass has to wait for two separate services and then fetch
-    // the catalogue, so it needs the longer budget. The extra time is only
-    // spent when something really is late — an early success returns at once.
-    const seedAttempts = 6;
-    const seedDelayMs = 300;
-    try {
-      await retryBounded({
-        attempts: seedAttempts,
-        delayMs: seedDelayMs,
-        run: async () => {
-          if (raccoonPublisher.isDisposed()) return true;
-          const switchState = await raccoonSwitch.enabled().catch(() => null);
-          // Opt-in default OFF: a deployment that never touched the tab stays
-          // pristine. Re-checked each attempt so a concurrent panel flip to OFF
-          // is honoured instead of being raced.
-          if (switchState !== true) return true;
-          const { credential } = await raccoonStore.resolve().catch(() => ({ credential: null }));
-          // No credential yet — most likely the credentials service has not
-          // registered at this point in the mount. Keep trying inside the
-          // window rather than giving up on the first read.
-          if (!credential?.accessToken) return false;
-          // Keep the credential inside its expiry window before the catalogue
-          // call — the same eager refresh the request path uses.
-          if (await raccoonStore.isExpired().catch(() => false)) {
-            await raccoonStore.refresh().catch(() => {});
-          }
-          const { credential: live } = await raccoonStore.resolve().catch(() => ({ credential: null }));
-          let rows = RACCOON_FALLBACK_MODELS;
-          if (live?.accessToken) {
-            const catalog = await fetchRaccoonCatalog(live).catch(() => null);
-            if (catalog !== null && catalog.length > 0) rows = catalog;
-          }
-          // The seed honours the panel's pushed-model curation too: a restart
-          // must not widen the offer back to the whole roster behind the tab's
-          // back (the switch/login/models handlers all publish filtered).
-          const curated = await raccoonSwitch.enabledIds().catch(() => null);
-          await raccoonPublisher.publish(filterRaccoonRows(rows, curated), live?.officeIdentity ?? "").catch(() => {});
-          if (raccoonPublisher.state.registered === true) return true;
-          if (raccoonPublisher.isDisposed()) return true;
-          // Still unregistered: the `llm` service may not be resolvable yet, or
-          // a peer module is still loading. Back off and try the whole build
-          // again (a fresh roster read is harmless — publish is idempotent). A
-          // permanent failure fails fast after the bounded window and stays
-          // visible on the tab.
-          return false;
-        }
-      });
-    } catch {
-      // No seed: the first switch/login publishes.
-    }
-  })();
+  // The Raccoon mount seed (ROADMAP §6.1): if the switch is already on and a
+  // credential was stored before this restart, offer the Raccoon models before
+  // the first poll. It is now the named side effect `seedRaccoonOnMount` in
+  // `lifecycle.ts` (shared backoff, bounded retry, curation-aware publish)
+  // rather than an inline IIFE — fire-and-forget, so a service that arrives a
+  // moment late is picked up without blocking the mount.
+  void seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublisher });
+
 
   // The credentials service is how the console token and account are held and
   // renewed. It is optional: a Host without one still gets a working panel,
