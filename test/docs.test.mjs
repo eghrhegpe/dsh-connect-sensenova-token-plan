@@ -184,6 +184,47 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
   }
 }
 
+// 5b) client 声明的快照字段必须与 host 构造的返回体逐名一致
+// 上面的 5 只钉「文档示例的键 == 契约」和「契约键出现在 host 源码里」——都
+// 是弱检查：字段名作为子串出现就过，且它从不看 client 那一半。client 不能
+// import host（bundle 只解析包名），所以 `wire.ts` 的 `SnapshotData` 是
+// 手写的镜像，而这个镜像此前只有注释在担保。这里把两端源码各提一次字段名
+// 做集合相等：任一边加/删/改名而不同步，就红。host 侧锚定构造快照的那一个
+// `return {`（它设 `ok: true`），避免抓到别的内层返回块。
+{
+  const clientSrc = readFileSync(join(ROOT, "src", "client", "wire.ts"), "utf8");
+  const aggregateSrc = existsSync(join(ROOT, "src", "host", "snapshot-aggregate.ts"))
+    ? readFileSync(join(ROOT, "src", "host", "snapshot-aggregate.ts"), "utf8")
+    : "";
+  const okAt = aggregateSrc.indexOf("ok: true,");
+  const retAt = aggregateSrc.lastIndexOf("return {", okAt);
+  const endAt = aggregateSrc.indexOf("};", okAt);
+  const hostBlock = okAt < 0 || retAt < 0 || endAt < 0 ? "" : aggregateSrc.slice(retAt, endAt);
+  if (hostBlock.length === 0) bad("找不到 host 构造快照的返回块，检查 5b 本身可能已失效");
+  else {
+    const hostFields = new Set();
+    for (const m of hostBlock.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)) hostFields.add(m[1]);       // `key:`
+    for (const m of hostBlock.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*,?\s*$/gm)) hostFields.add(m[1]);  // `key,` 简写
+    for (const m of hostBlock.matchAll(/\{\s*([A-Za-z_$][\w$]*)\s*\}/g)) hostFields.add(m[1]);      // 条件展开 `{ key }`
+    const iface = clientSrc.match(/interface SnapshotData \{([\s\S]*?)\n\}/);
+    if (!iface) bad("找不到 client 的 SnapshotData 接口，检查 5b 本身可能已失效");
+    else {
+      const clientFields = new Set();
+      for (const m of iface[1].matchAll(/^\s*([A-Za-z_$][\w$]*)\??\s*:/gm)) clientFields.add(m[1]);
+      const hostOnly = [...hostFields].filter((f) => !clientFields.has(f));
+      const clientOnly = [...clientFields].filter((f) => !hostFields.has(f));
+      if (hostOnly.length || clientOnly.length || clientFields.size !== hostFields.size) {
+        bad(`client 快照字段与 host 构造的字段不一致（client ${clientFields.size} / host ${hostFields.size}）：` +
+          `${hostOnly.length ? `host-only ${hostOnly.join(", ")}` : ""}` +
+          `${hostOnly.length && clientOnly.length ? " | " : ""}` +
+          `${clientOnly.length ? `client-only ${clientOnly.join(", ")}` : ""}`);
+      } else {
+        note(`client 快照字段与 host 构造的字段一致（${clientFields.size} 项）`);
+      }
+    }
+  }
+}
+
 // 6) docs/ 顶层每个文件都必须被 docs/README.md 索引表引用（README.md 本身除外）
 // 防止「粘贴一段文档进来但谁都不引用」的孤儿文件：非 .md（如 .txt）与未被索引的 .md 都红。
 // 索引表里指向其它目录（如 ../CHANGELOG.md）的链接不属于 docs/，不算。
