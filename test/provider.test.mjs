@@ -47,6 +47,10 @@ import { redactSecrets } from "../src/host/util.ts";
 import { profileSegment, profileStateDir } from "../src/host/state-store.ts";
 import { syncSignaturesAfterPublish, catalogSignature } from "../src/host/provider-publish.ts";
 import { surface as clientSurface } from "./client-surface.js";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+
+const HOST_SRC = join(dirname(dirname(fileURLToPath(import.meta.url))), "src", "host");
 
 const results = [];
 function check(name, condition, detail = "") {
@@ -1028,6 +1032,54 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       blank.signature === catalogSignature([], []) && blank.quotaSignature === "");
   } catch (error) {
     fail("syncSignaturesAfterPublish keeps the offer in lock-step", error);
+  }
+}
+
+// === the shared control plane: one copy, or§5.5 quietly stops holding =====
+// `publish-core.ts` exists for exactly one reason: the publish queue, the
+// `disposed` gate and the single-point register-that-doubles-as-rollback must
+// NOT differ between the two upstreams (ARCHITECTURE.md §5.5). The module
+// header says so in prose, and both publishers' headers point at it — but a
+// comment cannot fail, so the day someone re-inlines a queue in
+// `raccoon-publish.ts` to "fix" something locally, every suite stays green while
+// the rollback path quietly becomes upstream-specific. Rollback is the worst
+// place to discover that: it only runs after something has already failed.
+//
+// So this asserts the sharing structurally — both publishers must CALL the
+// shared factories, and neither may hold its own copy of the three.
+{
+  const read = (name) => readFileSync(join(HOST_SRC, name), "utf8");
+  const core = read("publish-core.ts");
+  const tokenPlan = read("provider-publish.ts");
+  const raccoon = read("raccoon-publish.ts");
+  const shared = ["createPublishQueue", "createPairReleaser", "registerProviderPair"];
+  try {
+    check("publish-core.ts declares the three load-bearing pieces",
+      shared.every((fn) => new RegExp(`export function ${fn}\\b`).test(core)),
+      shared.filter((fn) => !new RegExp(`export function ${fn}\\b`).test(core)).join(", "));
+    // Both upstreams must import AND call each one. The detail names WHICH
+    // publisher stopped, because "it drifted" alone sends the reader hunting.
+    const drift = [tokenPlan, raccoon]
+      .map((src, i) => ({ side: i === 0 ? "Token Plan" : "Raccoon", src }))
+      .flatMap(({ side, src }) => shared
+        .filter((fn) => !(new RegExp(`import[\\s\\S]{0,400}?\\b${fn}\\b`).test(src) && new RegExp(`${fn}\\s*\\(`).test(src)))
+        .map((fn) => `${side}: ${fn}`));
+    check("both publishers call the shared queue / releaser / register",
+      drift.length === 0, drift.join(", ") || "both use all three");
+    // …and neither may define its own. A local `function createPublishQueue`
+    // shadowing the import is the exact shape of the drift this guards.
+    const local = [tokenPlan, raccoon].flatMap((src, i) => shared
+      .filter((fn) => new RegExp(`(?:function|const)\\s+${fn}\\b`).test(src))
+      .map((fn) => `${i === 0 ? "Token Plan" : "Raccoon"}: ${fn}`));
+    check("neither publisher defines a local copy of a shared piece",
+      local.length === 0, local.join(", "));
+    // The gate itself: `disposed` must live in the queue (so both get it), not
+    // in either publisher.
+    check("the disposed gate lives in the shared queue, not in a publisher",
+      /disposed/.test(core) && !/let disposed\s*=\s*false/.test(tokenPlan) && !/let disposed\s*=\s*false/.test(raccoon),
+      "a publisher grew its own disposed flag — the gate is shared or it is not");
+  } catch (error) {
+    fail("the publish control plane is shared by both upstreams", error);
   }
 }
 
