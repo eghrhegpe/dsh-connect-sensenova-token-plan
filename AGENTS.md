@@ -92,6 +92,17 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 - 提交后 `git status --short` 复核：没带走别人的东西。
 - 看到非自己改动的文件处于 modified，**不要**替它做对照实验（stash 出基线），
   用 targeted 复跑（改前后各跑一次同一小组文件）定性。
+- **同一个文件被两个会话改着**（2026-10-02 撞过一次：另一会话在做 `.js`→`.ts` 文档清扫，
+  9 个文档同时处于「他改一半 + 我改一半」）：这时整文件 `git add` **一定会捎带对方的改动**。
+  两条路，选一条：
+  1. **等对方先提交**，再动那个文件（最省事，优先）；
+  2. **只提交自己的 hunk**：`git diff -U3 -- <文件> > tmp/mixed.patch`，只保留自己的 hunk
+     （留一个只在你这侧出现的标记行做筛子），`git apply --cached --check` 过了再 `git apply --cached`，
+     最后 **不带路径** `git commit`。
+- ⚠️ 上面第 2 条的坑：**`git commit -- <路径>` 提交的是工作树版本，不是索引**——带路径写会把
+  对方那半一起写进提交，hunk 级暂存就白做了。要么 `git add <文件>` + `git commit`（提交索引），
+  要么 `git commit -- <文件>`（提交整个工作树版本）。提交前用 `git diff --cached --stat` 核对，
+  提交后用 `git status --short` 确认留下的只剩对方的改动。
 
 ## 去哪查（docs/ 地图）
 

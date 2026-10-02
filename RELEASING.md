@@ -191,7 +191,35 @@ npm publish --registry=https://registry.npmjs.org
 - **为什么要等**：CI 在**发布提交**上绿，才算「发出去的这一版被真验过」。本仓库刚经历过门禁连续一整天恒红（`docs/PITFALLS.md` §30）——恒红的门禁与没有门禁等价，绿的那一次才有信息量。
 - `gh run watch --exit-status` 失败时返回非零，可以直接当门禁用；跑完再 tag，就不存在「tag 指向 CI 红的提交」。
 - **CI 红了怎么办**：该版本**尚未 publish** 时移动 tag 合法（第 2 节的前提）——修完再 tag；**已经 publish** 就只补 tag/Release（S3 / S2′），把红当成下一版的输入，不要试图覆盖已发版本。
+- **扫的不只是本次提交，还要看最近的趋势**：`gh run list --limit 5`。若最近几条连着 `failure`，说明**门禁本身已经失效**——此时「本地全绿」是唯一证据，而这恰好是 `docs/PITFALLS.md` §30 那次事故里唯一为真的东西。先修门禁，再发版。
 - 不想等也可以：正序（4 → 5 → 6）本身就是合法路径，只是少一道确认。
+
+### 4.6 人机 handoff 契约（AI 做仓库侧、人做不可逆侧时必读）
+
+发版天然跨一条边界：**仓库侧**（版本文件、tag、Release、核验）AI 能全程做；**不可逆侧**（`npm login`、按下 `publish`）只有人能做。`v0.4.7` 的故障不在任何一步做错，而在**两边各自只看到自己那一半**——人看到「npm 上能查到了」当作完成，AI 看到「本地还有未推的提交」当作未完成，中间没有交接检查。
+
+所以交接必须显式、以**命令输出为证**，不靠记忆。三段，顺序不许换：
+
+**① AI → 人：请求 publish 之前，下面五条必须已经成立，并逐条报出**
+
+```bash
+git status -sb                    # 工作树干净、没有 ahead
+git log --oneline -1 origin/main  # 版本提交已在远端
+git rev-list -n1 vX.Y.Z           # 与 git rev-parse HEAD 一致
+gh run list --limit 1             # 该提交的 CI 结论 success
+npm test                          # 本地全量门禁绿（含 typecheck / build / e2e 各档）
+```
+
+**② 人：publish，然后回报一行**
+
+```bash
+npm view dsh-connect-sensenova-token-plan@X.Y.Z version --registry=https://registry.npmjs.org
+```
+
+**③ AI：拿到那一行之后才做 §5.5 内容核验，再走第 6 步建 Release。**
+
+- 这三段里，**人是唯一能按 publish 的一方，因此也是唯一能保证顺序的一方**：AI 没交齐 ① 的五条时，**不要 publish**。已经发生过的顺序颠倒按 §1 的 **S2′** 收口，别试图覆盖已发版本。
+- AI 侧的职责到「判定状态 + 交齐证据 + 收口」为止，不是「执行到你叫我做的那一步为止」——`v0.4.7` 真正值钱的产出是认出表外状态 S2′ 并补齐哈希证据，而不是敲那条 `npm publish`。
 
 ### 5. 发布到 npm
 
