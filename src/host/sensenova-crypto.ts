@@ -205,7 +205,7 @@ export async function sealPassword(password: string, options: JwksOptions = {}) 
   const { jwksEndpoint, encKeyId, timeoutMs, cache = createJwksCache() } = options;
   if (str(jwksEndpoint, "") === "") throw pluginError(CODE.CONFIG, "no JWKS endpoint is configured");
   if (str(encKeyId, "") === "") throw pluginError(CODE.CONFIG, "no encryption key id is configured");
-  const keys = await fetchJwks({ jwksEndpoint: str(jwksEndpoint, ""), timeoutMs, cache });
+  const keys = await fetchJwks({ jwksEndpoint: str(jwksEndpoint, ""), ...(timeoutMs !== undefined ? { timeoutMs } : {}), cache });
   const entry = keys.find((key: object) => obj(key).kid === encKeyId);
   if (entry === undefined) throw pluginError(CODE.JWKS, `JWKS has no key ${encKeyId}`);
   const source = obj(entry);

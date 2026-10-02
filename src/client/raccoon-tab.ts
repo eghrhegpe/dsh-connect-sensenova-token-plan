@@ -301,7 +301,12 @@ export function RaccoonTab({
       }
       if (alive.current) {
         setState((current) => (current
-          ? { ...current, enabledModelIds: ids, providerRegistered: body?.providerRegistered === true, providerError: typeof body?.providerError === "string" ? body.providerError : undefined }
+          ? {
+              ...current,
+              enabledModelIds: ids,
+              providerRegistered: body?.providerRegistered === true,
+              ...(typeof body?.providerError === "string" ? { providerError: body.providerError } : {})
+            }
           : current));
         setModelsNote(tt("raccoon.modelsSaved"));
       }

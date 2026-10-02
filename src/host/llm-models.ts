@@ -454,7 +454,7 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
       seen.set(id, out.length);
       out.push(undefined);
     }
-    out[seen.get(id)] = toPiDescriptor({ ...catalogEntry, id }, { providerId, baseUrl });
+    out[seen.get(id)] = toPiDescriptor({ ...catalogEntry, id }, { providerId, ...(baseUrl !== undefined ? { baseUrl } : {}) });
   }
   // Every `undefined` pushed above is overwritten at that same index before the
   // loop advances (see the comment on `out`), so no hole survives to here. The

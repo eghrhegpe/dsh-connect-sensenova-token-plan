@@ -356,8 +356,9 @@ export async function buildSnapshotBody({
     ...(Array.isArray(catalog)
       ? (() => {
           const candidates = imageGenModelIds(catalog);
+          const drawModel = pickDrawModel(catalog, "", effectiveDrawModelId);
           return {
-            drawModel: pickDrawModel(catalog, "", effectiveDrawModelId) ?? undefined,
+            ...(drawModel !== null ? { drawModel } : {}),
             drawCandidateCount: candidates.length,
             drawCandidateIds: candidates,
             // Presence of a preference (panel or config) is what the panel

@@ -398,10 +398,10 @@ export function defineDrawTool({
       const body = buildDrawBody({
         model,
         prompt,
-        n: typeof params?.n === "number" ? params.n : undefined,
+        ...(typeof params?.n === "number" ? { n: params.n } : {}),
         size: str(params?.size, ""),
         outputFormat: str(params?.outputFormat, ""),
-        watermark: typeof params?.watermark === "boolean" ? params.watermark : undefined
+        ...(typeof params?.watermark === "boolean" ? { watermark: params.watermark } : {})
       });
       let result;
       try {

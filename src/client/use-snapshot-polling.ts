@@ -65,7 +65,7 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
       const response = await fetch(SNAPSHOT_PATH, {
         headers: { accept: "application/json" },
         cache: "no-store",
-        signal: controller ? controller.signal : undefined
+        ...(controller ? { signal: controller.signal } : {})
       });
       if (!isCurrent()) return;
       if (!response.ok) {

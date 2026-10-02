@@ -232,14 +232,14 @@ export function createStoreContext({
   /** True while nothing written through the store would survive a restart. */
   const ephemeral = () => resolveService() === null;
 
-  const wiring = {
+  const wiring: StoreContextWiring = {
     credentials,
     auth,
     env,
     skewMs,
     throttleStore,
     now,
-    onTrace,
+    ...(onTrace !== undefined ? { onTrace } : {}),
     credentialKey,
     key,
     THROTTLE_KEY,

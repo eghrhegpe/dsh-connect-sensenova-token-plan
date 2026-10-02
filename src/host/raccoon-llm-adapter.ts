@@ -61,7 +61,7 @@ export function createRaccoonAdapter({
     apiKeyName: "Raccoon access token",
     models,
     resolveCredential: resolveToken,
-    get,
+    ...(get !== undefined ? { get } : {}),
     requestImagePixelBudget: RACCOON_REQUEST_IMAGE_PIXEL_BUDGET
   });
 }

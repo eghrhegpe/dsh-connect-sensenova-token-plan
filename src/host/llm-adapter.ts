@@ -67,7 +67,7 @@ export function createSensenovaAdapter({ entries, enabledIds = [], baseUrl, reso
     // The stored API-key reference is the only credential this route presents;
     // it is read per request, so rotating the key needs no re-registration.
     resolveCredential: resolveApiKey,
-    get,
+    ...(get !== undefined ? { get } : {}),
     // The picker's "Default" pins to DEFAULT_REASONING_EFFORT (high).
     // SenseNova thinks by default (reasoning_effort default high), and the
     // descriptor's thinkingLevelMap spells off as `none`, so an unselected
