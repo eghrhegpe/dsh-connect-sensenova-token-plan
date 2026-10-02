@@ -23,7 +23,7 @@ import { CODE, isAuthFailure } from "./codes.ts";
 import { fetchConsole, fetchModelCatalog } from "./console-client.ts";
 import { parsePools, parseTrend, checkShape, identifyVisionModel } from "./parsers.ts";
 import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
-import { catalogSignature } from "./provider-publish.ts";
+import { catalogSignature, syncSignaturesAfterPublish } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
 import { str, errMsg } from "./util.ts";
 
@@ -268,9 +268,12 @@ export async function buildSnapshotBody({
     const freshSignature = catalogSignature(catalog, enabledIds);
     if (freshSignature !== providerState.signature) {
       catalogChanged = true;
-      providerState.signature = freshSignature;
       await catalogStore.replace(catalog, enabledIds).catch(() => {});
       await publisher.publish(catalog, enabledIds, unavailableModelIds);
+      // Keep the signatures in lock-step with what was just published — the SAME
+      // formulas the route path uses, so the "did the offer change?" signal has a
+      // single source and cannot drift between the two publish paths.
+      syncSignaturesAfterPublish(providerState);
     }
     offered = catalog;
   }
@@ -282,10 +285,12 @@ export async function buildSnapshotBody({
   // published this exact set a moment ago.
   const quotaSig = [...unavailableModelIds].sort().join(",");
   if (quotaSig !== providerState.quotaSignature) {
-    providerState.quotaSignature = quotaSig;
     if (!catalogChanged) {
       await publisher.publish(providerState.entries, providerState.enabledIds, unavailableModelIds);
     }
+    // Same single-source sync as the catalogue branch above; sets both signatures
+    // from the published offer so the next poll sees a stable signal.
+    syncSignaturesAfterPublish(providerState);
   }
   // The counts describe the OFFER, not the catalogue: the adapter is built
   // from the allow-list-filtered entries, so a panel line that quoted the raw
