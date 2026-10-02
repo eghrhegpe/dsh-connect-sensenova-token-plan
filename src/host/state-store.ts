@@ -47,7 +47,7 @@ export function dshHome() {
  *   (`host-config.ts`'s `name`).
  * @returns {string} the directory.
  */
-export function stateDir(name) {
+export function stateDir(name: string) {
   return join(dshHome(), "state", name);
 }
 
@@ -71,7 +71,7 @@ const PROFILE_SEGMENT_RE = /^(?!\.)[A-Za-z0-9._-]+$/;
  * @param {unknown} value - candidate profile name.
  * @returns {boolean} true when it survives {@link PROFILE_SEGMENT_RE}.
  */
-export function isProfileSegment(value) {
+export function isProfileSegment(value: unknown) {
   if (typeof value !== "string") return false;
   const name = value.trim();
   if (name === "" || name.length > PROFILE_SEGMENT_MAX) return false;
@@ -105,12 +105,12 @@ export function isProfileSegment(value) {
  * @param {object} [ctx] - the Cordis context the Host handed `apply()`.
  * @returns {string|null} the profile name, or `null` when unavailable/unsafe.
  */
-export function profileSegment(ctx) {
+export function profileSegment(ctx: { get?: (n: string) => unknown; reflect?: { get?: (n: string, strict?: boolean) => unknown }; [key: string]: unknown } | null | undefined) {
   if (ctx === null || typeof ctx !== "object") return null;
   const raw = readOptionalService(ctx, "profileContext");
   if (raw === null || typeof raw !== "object") return null;
-  const name = /** @type {{name?: unknown}} */ (raw).name;
-  return isProfileSegment(name) ? /** @type {string} */ (name).trim() : null;
+  const name = (raw as { name?: unknown }).name;
+  return isProfileSegment(name) ? String(name).trim() : null;
 }
 
 /**
@@ -128,7 +128,7 @@ export function profileSegment(ctx) {
  * @param {string} name - the service name.
  * @returns {unknown} the service value, or `undefined`.
  */
-export function readOptionalService(ctx, name) {
+export function readOptionalService(ctx: { get?: (n: string) => unknown; reflect?: { get?: (n: string, strict?: boolean) => unknown }; [key: string]: unknown }, name: string): unknown {
   // `ctx.get` is Cordis's own "read a service without the inject requirement"
   // mixin (ReflectService.get) — the same entry `startSideEffects` already uses
   // for the optional `settings` service. It answers `undefined` for a service
@@ -140,7 +140,7 @@ export function readOptionalService(ctx, name) {
       // Not every host publishes the mixin; fall through.
     }
   }
-  const reflect = /** @type {{reflect?: {get?: (n: string, strict?: boolean) => unknown}}} */ (ctx).reflect;
+  const reflect = (ctx as { reflect?: { get?: (n: string, strict?: boolean) => unknown } }).reflect;
   if (reflect && typeof reflect.get === "function") {
     try {
       return reflect.get(name, false);
@@ -152,7 +152,7 @@ export function readOptionalService(ctx, name) {
   // off a REAL Cordis context throws for undeclared services, which is why this
   // entry is last and guarded.
   try {
-    return /** @type {Record<string, unknown>} */ (ctx)[name];
+    return (ctx as Record<string, unknown>)[name];
   } catch {
     return undefined;
   }
@@ -174,7 +174,7 @@ export function readOptionalService(ctx, name) {
  * @param {string|null} [profile] - the profile name; `null` means shared.
  * @returns {string} the directory.
  */
-export function profileStateDir(name, profile) {
+export function profileStateDir(name: string, profile: string | null) {
   return profile ? join(dshHome(), "state", profile, name) : stateDir(name);
 }
 
@@ -186,7 +186,7 @@ export function profileStateDir(name, profile) {
  * @param {string} dir - the state directory.
  * @returns {Promise<void>}
  */
-export async function ensureStateDir(dir) {
+export async function ensureStateDir(dir: string) {
   await mkdir(dir, { recursive: true, mode: 0o700 });
 }
 
@@ -206,7 +206,7 @@ export async function ensureStateDir(dir) {
  * @param {() => number} [now] - clock source; injected by the tests.
  * @returns {string} `dir/<base>.<pid>.<now>.<uuid>.tmp`.
  */
-export function temporaryOf(dir, base, now = Date.now) {
+export function temporaryOf(dir: string, base: string, now = Date.now) {
   return join(dir, `${base}.${process.pid}.${now()}.${randomUUID()}.tmp`);
 }
 
@@ -221,7 +221,7 @@ export function temporaryOf(dir, base, now = Date.now) {
  * @param {{temporary: string}} options - the temp path to write first.
  * @returns {Promise<void>}
  */
-export async function writeStateFile(file, payload, { temporary }) {
+export async function writeStateFile(file: string, payload: string, { temporary }: { temporary: string }) {
   await writeFile(temporary, `${payload}\n`, { encoding: "utf8", mode: 0o600 });
   await rename(temporary, file);
 }
@@ -320,7 +320,7 @@ export function createStateReadCache<T>(readThrough: () => Promise<T | null>, op
      * @param {T|null} value - 刚写入并解析后的值。
      * @returns {void}
      */
-    remember(value) {
+    remember(value: T | null) {
       cached = value;
       cachedAt = now();
     }
@@ -335,7 +335,7 @@ export function createStateReadCache<T>(readThrough: () => Promise<T | null>, op
  * @param {string} file - the file path.
  * @returns {Promise<unknown>} the parsed value, or `null`.
  */
-export async function readStateJson(file) {
+export async function readStateJson(file: string) {
   try {
     return JSON.parse(await readFile(file, "utf8"));
   } catch {

@@ -23,7 +23,7 @@ export const RACCOON_SWITCH_VERSION = 1;
  * @param {string|null} [profile] - the profile name; `null` means shared.
  * @returns {string} the directory.
  */
-export function raccoonSwitchDir(profile) {
+export function raccoonSwitchDir(profile: string | null) {
   return profileStateDir(name, profile);
 }
 
@@ -32,7 +32,7 @@ export function raccoonSwitchDir(profile) {
  * @param {unknown} raw - the persisted or posted value.
  * @returns {boolean|null} `true`/`false`, or `null` when nothing usable.
  */
-export function normalizeRaccoonEnabled(raw) {
+export function normalizeRaccoonEnabled(raw: unknown): boolean | null {
   return typeof raw === "boolean" ? raw : null;
 }
 
@@ -44,9 +44,9 @@ export function normalizeRaccoonEnabled(raw) {
  * @param {unknown} raw - the persisted or posted value.
  * @returns {string[]|null} the curated ids, or `null` when the roster pushes whole.
  */
-export function normalizeRaccoonIds(raw) {
+export function normalizeRaccoonIds(raw: unknown): string[] | null {
   if (!Array.isArray(raw)) return null;
-  const seen = new Set();
+  const seen = new Set<string>();
   for (const entry of raw) {
     if (typeof entry === "string" && entry !== "") seen.add(entry);
   }
@@ -66,14 +66,14 @@ export function createFileRaccoonStore(options: StoreOptions = {}) {
   const stateDir = dir ?? raccoonSwitchDir(profile);
   const filePath = join(stateDir, "raccoon-provider.json");
 
-  const writePayload = async (body) => {
+  const writePayload = async (body: object) => {
     const temporary = temporaryOf(stateDir, "raccoon-provider.json");
     await ensureStateDir(stateDir);
     await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
   };
 
   const legacyFile = dir === undefined && profile ? join(sharedStateDir(name), "raccoon-provider.json") : null;
-  const parseSwitch = (raw) => {
+  const parseSwitch = (raw: unknown) => {
     const source = obj(raw);
     if (source.version !== RACCOON_SWITCH_VERSION) return null;
     // The ids ride beside the switch: a v1 file written before the picker
@@ -110,7 +110,7 @@ export function createFileRaccoonStore(options: StoreOptions = {}) {
       return (await read()) !== null;
     },
     /** Persist a switch value (atomic), preserving the saved id list. */
-    async save(value) {
+    async save(value: boolean) {
       const enabled = normalizeRaccoonEnabled(value);
       if (enabled === null) throw new TypeError("the raccoon switch expects a boolean");
       const current = (await read())?.enabledModelIds ?? null;
@@ -118,7 +118,7 @@ export function createFileRaccoonStore(options: StoreOptions = {}) {
       cache.remember({ enabled, enabledModelIds: current });
     },
     /** Persist the pushed-model list (atomic), preserving the saved switch. */
-    async saveIds(value) {
+    async saveIds(value: string[]) {
       const ids = normalizeRaccoonIds(value);
       if (ids === null) throw new TypeError("the raccoon id list expects an array of strings");
       const enabled = (await read())?.enabled ?? null;

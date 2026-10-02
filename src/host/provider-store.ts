@@ -40,7 +40,7 @@ export const PROVIDER_VERSION = 1;
  * @param {string|null} [profile] - the profile name; `null` means shared.
  * @returns {string} the directory.
  */
-export function providerDir(profile) {
+export function providerDir(profile: string | null) {
   return profileStateDir(name, profile);
 }
 
@@ -49,7 +49,7 @@ export function providerDir(profile) {
  * @param {unknown} raw - the persisted or posted value.
  * @returns {boolean|null} `true`/`false`, or `null` when nothing usable.
  */
-export function normalizeEnabled(raw) {
+export function normalizeEnabled(raw: unknown): boolean | null {
   return typeof raw === "boolean" ? raw : null;
 }
 
@@ -76,7 +76,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * @param {object} body - the JSON body to persist.
    * @returns {Promise<void>}
    */
-  const writePayload = async (body) => {
+  const writePayload = async (body: object) => {
     const temporary = temporaryOf(stateDir, "provider.json");
     await ensureStateDir(stateDir);
     await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
@@ -87,7 +87,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
   // `createStateReadCache` (`state-store.ts`). An explicit `dir` (the tests)
   // never inherits: it was never part of the shared layout.
   const legacyFile = dir === undefined && profile ? join(sharedStateDir(name), "provider.json") : null;
-  const parseSwitch = (raw) => {
+  const parseSwitch = (raw: unknown) => {
     const source = obj(raw);
     return source.version === PROVIDER_VERSION ? normalizeEnabled(source.enabled) : null;
   };
@@ -133,7 +133,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
      * @param {boolean} value - the new switch state.
      * @returns {Promise<void>}
      */
-    async save(value) {
+    async save(value: boolean) {
       const enabled = normalizeEnabled(value);
       if (enabled === null) throw new TypeError("provider switch expects a boolean");
       // Write failures PROPAGATE on purpose: a switch the panel ordered must

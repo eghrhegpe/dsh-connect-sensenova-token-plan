@@ -28,6 +28,14 @@ import type { StoreOptions } from "./types.ts";
 /** Shape version, bumped when the persisted form changes incompatibly. */
 export const CATALOG_VERSION = 1;
 
+/** The persisted record shape `parse` accepts and the writers produce. */
+export interface CatalogRecord {
+  version: number;
+  fetchedAt: number;
+  entries: object[];
+  enabledModelIds: string[];
+}
+
 /**
  * Normalize a model-id allow-list.
  *
@@ -37,7 +45,7 @@ export const CATALOG_VERSION = 1;
  * @param {unknown} raw - the persisted or posted list.
  * @returns {string[]} unique string ids in first-seen order.
  */
-export function normalizeEnabledIds(raw) {
+export function normalizeEnabledIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set();
   const out: string[] = [];
@@ -56,7 +64,7 @@ export function normalizeEnabledIds(raw) {
  * @param {string|null} [profile] - the profile name; `null` means shared.
  * @returns {string} the directory.
  */
-export function catalogDir(profile) {
+export function catalogDir(profile: string | null) {
   return profileStateDir(name, profile);
 }
 
@@ -70,7 +78,7 @@ export function catalogDir(profile) {
  * @param {unknown} raw - the raw `body.data` array or persisted entries.
  * @returns {object[]} normalized entries.
  */
-export function normalizeEntries(raw) {
+export function normalizeEntries(raw: unknown): object[] {
   if (!Array.isArray(raw)) return [];
   const byId = new Map();
   for (const item of raw) {
@@ -96,9 +104,9 @@ export function normalizeEntries(raw) {
  * @param {unknown} raw - the parsed file contents.
  * @returns {{version: number, fetchedAt: number, entries: object[], enabledModelIds: string[]}|null}
  */
-function parse(raw) {
+function parse(raw: unknown): CatalogRecord | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const body = /** @type {{ version?: unknown, fetchedAt?: unknown, entries?: unknown, enabledModelIds?: unknown }} */ (raw);
+  const body = raw as { version?: unknown; fetchedAt?: unknown; entries?: unknown; enabledModelIds?: unknown };
   if (num(body.version, 0) !== CATALOG_VERSION) return null;
   const fetchedAt = num(body.fetchedAt, 0);
   if (fetchedAt <= 0) return null;
@@ -143,7 +151,7 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
    * disk", `null` means "synced, nothing usable stored".
    * @type {{version: number, fetchedAt: number, entries: object[], enabledModelIds: string[]}|null|undefined}
    */
-  let held;
+  let held: CatalogRecord | null | undefined;
   // Read-through with a short TTL, NOT a once-per-process cache: this state
   // directory is shared with every other Host process (another profile included,
   // see PITFALLS §22), so a cache that never expires means another process's
@@ -223,7 +231,7 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
      * @param {string[]} [enabledModelIds] - an optional replacement allow-list.
      * @returns {Promise<void>}
      */
-    async replace(entries, enabledModelIds) {
+    async replace(entries: object[], enabledModelIds?: string[]) {
       // Sync first, so the allow-list being preserved is the one ACTUALLY
       // stored — including a list another process wrote since this one last
       // looked. Reading it lazily used to silently reset it to `[]` whenever a
@@ -241,7 +249,7 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
     },
 
     /** Replace ONLY the curated allow-list, keeping the cached catalog. */
-    async setEnabledIds(ids) {
+    async setEnabledIds(ids: string[]) {
       const current = await seen();
       const entries = current === null ? [] : current.entries;
       const fetchedAt = current === null ? now() : current.fetchedAt;
@@ -283,7 +291,7 @@ export function createMemoryCatalogStore(now = Date.now) {
     async listEnabledIds() {
       return held === null ? [] : held.enabledModelIds;
     },
-    async replace(entries, enabledModelIds) {
+    async replace(entries: object[], enabledModelIds?: string[]) {
       const kept = held === null ? [] : held.enabledModelIds;
       held = {
         version: CATALOG_VERSION,
@@ -292,7 +300,7 @@ export function createMemoryCatalogStore(now = Date.now) {
         enabledModelIds: enabledModelIds === undefined ? kept : normalizeEnabledIds(enabledModelIds)
       };
     },
-    async setEnabledIds(ids) {
+    async setEnabledIds(ids: string[]) {
       const entries = held === null ? [] : held.entries;
       const fetchedAt = held === null ? now() : held.fetchedAt;
       held = { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds: normalizeEnabledIds(ids) };
