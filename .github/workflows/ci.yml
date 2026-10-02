@@ -164,12 +164,18 @@ jobs:
       - name: Build the artifacts the bundle ships
         run: npm run build
       # The e2e gate spawns `dsh web`; without the CLI it prints a loud SKIP and
-      # exits 0, so an environment that cannot host dsh never turns this job red.
-      # The CLI install mirrors the offline job's — which must succeed there, or
-      # its peer suites fail loudly — so when the offline job is green this gate
-      # really runs and really gates.
-      - name: Provide the dsh CLI
-        run: npm install -g @deepseek-ai/dsh || echo "dsh CLI not installable here; the e2e gate will SKIP (exit 0)"
+      # exits 0. That SKIP is legitimate on a machine that genuinely cannot host
+      # dsh, but this job is the "hard gate": the CLI install failing must NOT
+      # silently degrade it into a SKIP-green run — the gate exists precisely to
+      # fail when the Host assembly is broken, and a run that never boots a Host
+      # proved nothing. So the install and the executable are verified HERE, and
+      # the job goes red when either fails; only a dsh that runs reaches the gate.
+      - name: Provide the dsh CLI (fail loudly if it cannot run)
+        run: |
+          npm install -g @deepseek-ai/dsh || { echo "dsh CLI install failed — the e2e gate cannot run; failing loudly"; exit 1; }
+          # Proof of a RUNNABLE CLI, not just a successful install: a broken shim
+          # must also fail this job instead of letting e2e-gate SKIP green.
+          dsh --version >/dev/null || { echo "dsh CLI does not run — the e2e gate cannot run; failing loudly"; exit 1; }
       - name: Run the end-to-end suite (hard gate)
         run: node test/e2e-gate.mjs
 
