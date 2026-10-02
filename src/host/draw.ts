@@ -26,7 +26,7 @@
  * @module dsh-connect-sensenova-token-plan/draw
  */
 
-import { str, num } from "./util.ts";
+import { str, num, redactSecrets } from "./util.ts";
 import { isImageGenModel } from "./modality.ts";
 import type { DrawRequest } from "./types.ts";
 
@@ -205,7 +205,10 @@ export function parseDrawResponse(data) {
  * @returns {string} the panel/agent-facing message.
  */
 export function describeDrawFailure(status, bodyText) {
-  const text = str(bodyText, "").slice(0, 300);
+  // A 4xx body may echo the `sk-` key back (the failure `redactSecrets` in
+  // util.ts exists for): the message reaches the agent tool result AND the
+  // panel. Scrub BEFORE the slice so a credential cannot ride the tail.
+  const text = redactSecrets(str(bodyText, "")).slice(0, 300);
   if (status === 401 || status === 403) {
     return `draw failed: HTTP ${status} — the SENSENOVA_API_KEY is missing, invalid or not authorized for this model. Set it in the panel's 模型接入 area${text === "" ? "" : `; body: ${text}`}`;
   }

@@ -16,9 +16,11 @@
  *   - 写：临时文件（0600，owner-only）→ `rename` 原子落位。**失败抛错**，
  *     是否吞错是各 store 的语义（throttle/catalog 面对只读 Home 选择吞、
  *     provider 面板开关交给调用方的错误路径），原语不做决定。
- *   - 临时名：进程 + 时间戳后缀。固定临时名会让两个 Host 进程的写落到同一
- *     路径、互相 `rename` 掉对方写了一半的文件（catalog-store 早已用此策略，
- *     本次顺手把 throttle/provider 的固定名/各自实现一并统一）。
+ *   - 临时名：进程 + 时间戳 + 随机 UUID 后缀。固定临时名会让两个 Host 进程的
+ *     写落到同一路径、互相 `rename` 掉对方写了一半的文件；同一进程同一毫秒的
+ *     两次异步写也会撞名（`writeFile` 截断覆盖后一次 `rename` 静默丢写），
+ *     随机后缀让每个 temp 路径唯一，`rename` 原子性借此成立（见 `temporaryOf`）。
+ *     此前的写法曾只有进程 + 时间戳，同毫秒并发写会静默丢一条。
  *   - 读：缺失、不可读、非 JSON 一律返回 `null`——"损坏即忽略"的方向。是否
  *     缓存、缓存多久由 {@link createStateReadCache} 决定，不是每个 store 各自的
  *     即兴实现。
@@ -26,6 +28,7 @@
  * @module dsh-connect-sensenova-token-plan/state-store
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { str } from "./util.ts";
@@ -193,14 +196,18 @@ export async function ensureStateDir(dir) {
  * Two Host processes can share one state directory, so a fixed temp name would
  * let both writes land on the same path and each `rename` could move the
  * other's half-written file. A process-plus-clock suffix keeps concurrent
- * writers off each other; the rename itself stays atomic per path.
+ * writers off each other; the RANDOM suffix then makes two writes from the
+ * SAME process inside one millisecond distinct too — clock+pid alone collides
+ * when two async state writes land in the same tick, and the second `writeFile`
+ * truncates the first's half-written temp before its `rename`, silently losing
+ * one write. The rename itself stays atomic per path.
  * @param {string} dir - the state directory.
  * @param {string} base - the final file name, e.g. `"throttle.json"`.
  * @param {() => number} [now] - clock source; injected by the tests.
- * @returns {string} `dir/<base>.<pid>.<now>.tmp`.
+ * @returns {string} `dir/<base>.<pid>.<now>.<uuid>.tmp`.
  */
 export function temporaryOf(dir, base, now = Date.now) {
-  return join(dir, `${base}.${process.pid}.${now()}.tmp`);
+  return join(dir, `${base}.${process.pid}.${now()}.${randomUUID()}.tmp`);
 }
 
 /**
