@@ -111,3 +111,35 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 | 面板提示需要重新登录 | refresh_token 被吊销且环境已无密码 | 面板表单填一次账号密码即可 |
 | 面板「可看图」一行缺失，但 `/v1/models` 有模型 | 没有 API key，模型目录没拉（`catalogAvailable: false`），视觉清单随之不显示 | 在面板「模型接入（API Key）」区粘贴 `sk-` Key 保存（写入 DSH 凭据服务引用），或在用户级 env 变量层配 `SENSENOVA_API_KEY`；下一轮 poll 自动亮起来，无需重启 |
 | 「可看图」清单为空但 catalog 有模型 | 平台当前没有一个模型声明 `input_modalities` 含 `image`（或平台该字段缺失） | 对照 `catalogModels` 里各模型的 `input_modalities` 实际值；商汤 2026-09 起每个条目都带此字段，空清单应是真的没有可看图模型 |
+
+---
+
+## 7. 报错去哪儿看：Host 侧日志 vs 浏览器控制台
+
+排查报错的第一步不是按 F12，而是确认**报错在哪个进程**。本插件是两半（见 [ARCHITECTURE.md](./ARCHITECTURE.md)），两半的日志去向不同：
+
+| 要查什么 | 跑在哪 | 日志去哪 |
+|---|---|---|
+| 登录 / 重登 / 令牌续期 / 节流 / provider 注册 / 出图工具注册失败 | Host（Node 进程，即启动 `dsh web` 的那个终端 / 桌面版主进程） | **服务器 stdout/stderr**，永远不进浏览器控制台；登录链路另见下方落盘 trace |
+| 面板渲染决策（哪个区显示什么、降级文案） | 浏览器里的 React bundle | 理论上进 F12，但多数错误被当**数据**下发渲染进面板文本区（见下），不在控制台 |
+
+### Host 侧：翻落盘 trace，别在 F12 里找
+
+DSH 与插件都**没有内存环形日志（ring buffer）**；插件用**落盘 trace** 顶这个位——每一次登录尝试（**成功也算**，AGENTS.md 红线 5）都写一个文件：
+
+- 位置与命名：`$DSH_HOME/logs/sensenova-login-<ISO时间戳>-<结果>.json`（`DSH_HOME` 默认 `~/.dsh`；`<结果>` 为 `ok` 或错误码）。
+- 保留策略：同目录只留**最近 20 个**（有界轮转，等价一个磁盘环形日志）；权限 `0600`。
+- 内容：只记脱敏形状，密码 / token / cookie / 授权码一律 `[REDACTED]`（脱敏在 `sensenova-auth.ts` 内做，见 [PITFALLS.md](./PITFALLS.md) §15）——凭据永不进 trace。
+
+想实时看：tail 这个目录里最新的文件，或把启动 `dsh web` 的 stdout 重定向到文件再 `tail -f`。
+
+> ⚠️ **文件名前缀是 `sensenova-login-`，不是 `agnes-login-`**（那是姊妹插件 `dsh-connect-agnes-token-plan` 的前缀）。按错前缀去 `tail` 会一条都找不到。
+
+### 为什么面板报错只在文本框、不进浏览器控制台
+
+不是 bug，是设计：快照路由 **HTTP 永远 200**，成败靠 body 里的 `ok` 与 `code` 区分（见 [ARCHITECTURE.md](./ARCHITECTURE.md) §3、[API.md](./API.md)）。错误被当**数据**（`quotaError.code`、`shapeWarnings`）下发、渲染成面板一行中性文案，而**不抛异常**——一旦抛出，一次读取失败会顺着 React 渲染树炸穿，把一个模块的缺席放大成整页失效。所以「控制台安静」是这套降级策略的表象，不是错误丢了。
+
+因此：
+
+- 排 **Host 侧**（登录 / 节流 / 注册）→ 看 `dsh web` 终端 stdout 或 `logs/sensenova-login-*.json`。
+- 排 **面板渲染决策** → 对照 `decidePanelView` / `test/panel.test.mjs` 那套决策函数，比翻控制台快。

@@ -12,7 +12,7 @@ AI 协作会话从根目录 [AGENTS.md](../AGENTS.md) 进入：验证怎么跑�
 | [ROADMAP.md](./ROADMAP.md) | 战略执行路线图（2026-09-29 起）：P0 解耦与契约回归（§2，`index.js` 控制面拆模块 + 商汤契约自动化回归）、429 全局自愈、§5「多 Key 池」纠偏、文档精炼、小浣熊网关契约复测与接入面盘点（§6.1），明确不做的边界 | 定吸收顺序 / 优先级、拍板侵入性、防范围漂移 |
 | [DSH-PLUGIN.md](./DSH-PLUGIN.md) | DSH 插件机制总览（bundle 结构、Loader 条目、cordis.patch.yml、安装重启、peer 依赖、与兄弟插件关系） | 理解「这是一个 DSH 插件」、对照 dsh-connect-qoder 范本 |
 | [QODER-GAP.md](./QODER-GAP.md) | 与 `dsh-connect-qoder` 的 client 侧差距对照（可测边界 / 分层线 / JSX / 测试基建），事实带行号、双向可借鉴 | 想对照相邻插件、决定要不要抄它的 JSX 或让它抄本插件的分层 |
-| [SETUP.md](./SETUP.md) | 安装、配置字段表、改动后必须重启 Host、首次使用、常见信号处置 | 装环境、改配置、排「跑的是旧代码」、查面板报错信号 |
+| [SETUP.md](./SETUP.md) | 安装、配置字段表、改动后必须重启 Host、首次使用、常见信号处置、报错去哪儿看（Host 日志 vs 浏览器控制台） | 装环境、改配置、排「跑的是旧代码」、查面板报错信号、找不到报错该看哪个进程 |
 | [AUTH.md](./AUTH.md) | OIDC+PKCE、密码 JWE 加密、凭据存储、静默续期、防锁号节流 | 改登录/续期、排查登录失败 |
 | [API.md](./API.md) | 本地路由（`snapshot`/`account`）、控制台端点、配置端点清单 | 对接路由、看返回结构、调端点 |
 | [PROVIDER-HOT-RELOAD.md](./PROVIDER-HOT-RELOAD.md) | 提供方注册开关：从「配置字段 + 重启」到「面板开关 + 立即生效」的设计决策与同类插件调研 | 改 provider 注册、理解开关语义 |

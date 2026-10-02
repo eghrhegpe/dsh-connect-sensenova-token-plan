@@ -50,7 +50,7 @@
 - `sensenova-crypto.ts`：密码 JWE 封包（RSA-OAEP(SHA-1) + A256GCM）、PKCE 派生、JWT 解析、JWKS 缓存（由调用方持有、非模块级单例）。
 - `console-client.ts`：控制台与模型目录的网络请求，带短生命周期缓存与 single-flight。
 - `parsers.ts`：响应解析层——字符串数值 / epoch 归一、`checkShape` 漂移检测、`parseTrend` 对 points 求和、`identifyVisionModel` 视觉模型识别。
-- `trace.ts`：登录 trace 落盘（成功/失败，值级脱敏，仅留最近 20 个，权限 0600）。
+- `trace.ts`：登录 trace 落盘到 `$DSH_HOME/logs/sensenova-login-<时间戳>-<结果>.json`（成功/失败，值级脱敏，仅留最近 20 个，权限 0600；排障入口见 [SETUP.md](./SETUP.md) §7）。
 - `util.ts`：共享工具函数（`str` / `num` / `obj` 等类型安全读取器）+ 两个共享原语：`retryBounded`（有界重试窗口，PITFALLS §31 的重试收敛）与 `optional`（可选 store 调用的守卫，PITFALLS §33）。
 - `types.ts`：Host 侧共享类型定义。
 - `state-store.ts`：状态文件公共原语——版本载荷 + 原子写 + 0600 + `createStateReadCache`（TTL 读缓存）+ `profileSegment` / `profileStateDir`（profile 分段，见 PITFALLS §23）。
