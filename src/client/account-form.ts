@@ -136,13 +136,19 @@ export function AccountForm({ auth, onDone, tt, bare, snapshotAt }: {
       // definition not a known refusal — the old `REFUSAL_TEXT[undefined]`
       // read missed and fell through to the same lines the guard takes now.
       if (typeof code === "string" && typeof REFUSAL_TEXT[code] === "string") {
-        setFormError(tt(REFUSAL_TEXT[code]));
+        // The dictionary key is the decision, never the wire code: comparing a
+        // code inline was a third home for the taxonomy, outside these tables
+        // and outside every check that pins them (F2b now fails on any inline
+        // comparison). A key carrying a `{token}` is interpolated (`auth.failed`
+        // wants the platform's own reason); any other refusal is a plain line.
+        const refusalKey = REFUSAL_TEXT[code];
+        setFormError(refusalKey.includes("{")
+          ? format(tt(refusalKey), { reason: body?.error ?? "" })
+          : tt(refusalKey));
         setFormDetail(typeof body?.detail === "string" && body.detail !== "" ? body.detail : null);
         return;
       }
-      setFormError(code === "login_failed"
-        ? format(tt("auth.failed"), { reason: body?.error ?? "" })
-        : (body?.error ?? tt("auth.network")));
+      setFormError(body?.error ?? tt("auth.network"));
     } catch {
       setFormError(tt("auth.network"));
     } finally {

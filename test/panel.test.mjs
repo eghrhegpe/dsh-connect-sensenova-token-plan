@@ -240,11 +240,14 @@ const healthy = {
   const hidden = [...AUTH_FAILURE_CODES].filter((code) => tables.FORM_EXCLUDED_CODES.has(code));
   check("no auth-failure code is hidden from the form", hidden.length === 0, hidden.join(", "));
 
-  // A code compared INLINE in a component (`code === "login_failed"`) is a
-  // third place a wire code can live: outside all three tables, and therefore
-  // outside every check above. `login_failed` was exactly that — a rename in
-  // codes.ts would have turned the branch into dead code and shown the
-  // platform's raw error instead of the form's own line, with nothing red.
+  // A code compared INLINE in a component is a third place a wire code can live:
+  // outside all three tables, and therefore outside every check above.
+  // `login_failed` was exactly that — a rename in codes.ts would have turned the
+  // branch into dead code and shown the platform's raw error instead of the
+  // form's own line, with nothing red. It has since moved into `REFUSAL_TEXT`
+  // (an interpolated value), so this check flipped from "find and pin the
+  // offender" to "a new offender is a failure": the taxonomy now lives only in
+  // the tables, and any inline comparison that reappears goes red on its own.
   // Only the code-shaped literals are collected (dotted strings are dictionary
   // keys, whose existence F6 already covers).
   const components = (await readdir(new URL("../src/client/", import.meta.url)))
@@ -260,11 +263,9 @@ const healthy = {
       if (!PRIMITIVES.has(match[1])) inline.add(match[1]);
     }
   }
-  check("the inline code comparisons were actually found", inline.size >= 1, [...inline].join(", "));
-  const undeclared = [...inline].filter((code) => !declared.has(code));
-  check("every code a component compares inline is declared in codes.js",
-    undeclared.length === 0,
-    undeclared.length > 0 ? undeclared.join(", ") : `checked: ${[...inline].sort().join(", ")}`);
+  check("no wire code is compared inline in a component",
+    inline.size === 0,
+    inline.size > 0 ? `inline: ${[...inline].sort().join(", ")}` : "checked: none");
 }
 
 // === F3. the two dictionaries carry the same keys ========================
@@ -505,9 +506,13 @@ const healthy = {
 
   // F6b: the table-driven arguments. `GUIDANCE_BY_CODE` values and
   // `REFUSAL_TEXT` values are the keys those sites pass to `tt`, and they are
-  // only as good as the dictionary behind them.
+  // only as good as the dictionary behind them. `refusalKey` is the account
+  // form's local for a `REFUSAL_TEXT[code]` lookup (it reads the key into a
+  // name so it can tell an interpolated value from a plain one), so it carries
+  // the same dictionary obligation — a table value is only checked when it is
+  // handed to `tt` directly, which is what this list records.
   check("the table-driven tt sites are the ones expected",
-    [...deferred].sort().join(",") === "REFUSAL_TEXT[code],guidanceKey,open,quotaGuidanceKey",
+    [...deferred].sort().join(",") === "guidanceKey,open,quotaGuidanceKey,refusalKey",
     `identifiers: ${[...deferred].sort().join(",")} | conditions: ${[...conditions].sort().join(", ")}`);
   const tableKeys = [...Object.values(tables.GUIDANCE_BY_CODE ?? {}), ...Object.values(tables.REFUSAL_TEXT ?? {})];
   const tableMissing = [...new Set(tableKeys)].filter((key) => !(key in zh) || !(key in en));

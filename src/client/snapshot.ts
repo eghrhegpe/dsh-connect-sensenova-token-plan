@@ -114,12 +114,22 @@ export const FORM_EXCLUDED_CODES: ReadonlySet<string> = Object.freeze(new Set(["
  * dictionary line the form shows beneath the platform's own detail. The
  * canned text translates; the prose (`body.detail`) carries the lockout
  * policy and anything else the platform wanted to say.
+ *
+ * A VALUE that contains a `{token}` is interpolated, not translated as-is:
+ * `auth.failed` needs the platform's own reason, so the call site fills it.
+ * That one rule is what lets `login_failed` live HERE rather than in a
+ * component branch — comparing a code inline was a third home outside every
+ * table and every check, and a rename in `codes.ts` would have turned that
+ * branch into dead code with nothing red (F2b now fails on any inline
+ * comparison, so the taxonomy stays in these tables).
  */
 export const REFUSAL_TEXT: Readonly<Record<string, keyof typeof zh>> = Object.freeze({
   login_rejected: "auth.badCredentials",
   account_locked: "auth.locked",
   rate_limited: "auth.rateLimited",
-  verification_required: "auth.verification"
+  verification_required: "auth.verification",
+  // Interpolated: the dictionary line is `登录未完成：{reason}`.
+  login_failed: "auth.failed"
 });
 
 /**
