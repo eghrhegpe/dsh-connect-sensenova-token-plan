@@ -173,23 +173,6 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     }
   };
 
-  /**
-   * Announce an adapter update, tolerating a Host that refuses the event.
-   *
-   * One definition, because BOTH publishers need it and the two copies were
-   * already word-for-word identical: a Host that refuses the event still has
-   * the registration, and readers refresh on their own cadence.
-   * @param {string} event - the event name.
-   * @returns {void}
-   */
-  const emitEvent = (event: string) => {
-    try {
-      ctx.emit?.(event);
-    } catch {
-      // See above: a refused event is not a failed registration.
-    }
-  };
-
   // The Raccoon gateway's own read cache (balance + catalogue). Separate from
   // the console route's `cache`/`inflight` pair because they are two upstreams:
   // forgetting the SenseNova key must not drop the Raccoon reads, and a Raccoon
@@ -215,7 +198,13 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     loadAdapterModule,
     getLlm: (service: string) => getService(service),
     resolveApiKey,
-    emit: emitEvent,
+    // The Host's emitter, handed over RAW and unwrapped. Both publishers accept
+    // an absent one and route it to `publish-core`'s `emitAdaptersUpdated`,
+    // which is the single place that tolerates a missing or refusing emitter.
+    // This module used to wrap it in its own `try { ctx.emit?.(event) } catch {}`
+    // — one of three layers doing one job, and the two upstream of it could
+    // never reach their fallback once it had swallowed the throw.
+    emit: ctx.emit,
     logger: ctx.logger
   });
   const providerState = publisher.state;
@@ -254,7 +243,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     },
     getLlm: (service: string) => getService(service),
     loadAdapterModule: deps.loadRaccoonAdapterModule ?? (() => import("./raccoon-llm-adapter.ts")),
-    emit: emitEvent,
+    emit: ctx.emit,
     logger: ctx.logger
   });
   // The Raccoon mount seed (ROADMAP §6.1): if the switch is already on and a

@@ -308,7 +308,10 @@ export function unregister({ state, release, error = null }: { state: PublisherS
  * @param {() => void} job.release - the publisher's releaser.
  * @param {(llm: object, built: object, target: object) => void} job.registerPair -
  *   the single-point registrar.
- * @param {(event: string) => void} job.emit - `ctx.emit`.
+ * @param {(event: string) => void | undefined} job.emit - the Host's raw
+ *   `ctx.emit`, if it has one. Optional so the absent case is handled once, in
+ *   {@link emitAdaptersUpdated}, rather than by every call site inventing a
+ *   no-op stand-in before it gets there.
  * @param {() => void} [job.onRollback] - restore the domain snapshot fields
  *   (`entries`/`enabledIds`, or the roster) to what is really serving.
  * @returns {{ok: boolean, error?: unknown}} the publish outcome.
@@ -329,7 +332,13 @@ export function swapRegistration({
   state: PublisherStateBase;
   release: () => void;
   registerPair: (llm: any, built: any, target: PublisherStateBase) => void;
-  emit: (event: string) => void;
+  // `| undefined` inside the optional is deliberate, not a workaround: under
+  // `exactOptionalPropertyTypes` a bare `emit?:` would forbid the caller from
+  // passing a present-but-absent emitter, which is exactly the state a Host
+  // without `ctx.emit` puts this in. A conditional spread would satisfy the
+  // compiler too, but only by making "no emitter" and "emitter that is
+  // undefined" two different things at the call site.
+  emit?: ((event: string) => void) | undefined;
   onRollback?: () => void;
 }) {
   // Build first (it can throw); only then take down the old pair.
@@ -366,16 +375,25 @@ export function swapRegistration({
 }
 
 /**
- * Emit the adapter-update event, tolerating a Host that refuses it.
+ * Emit the adapter-update event, tolerating a Host that has no `emit` and a
+ * Host whose `emit` refuses.
  *
- * A Host that refuses the event still has the registration; readers refresh on
- * their own cadence.
- * @param {(event: string) => void} emit - `ctx.emit`.
+ * This is the ONE place the emit path is defended, and it absorbs both halves
+ * of what used to be three layers. The assembly point (`index.ts`) used to wrap
+ * `ctx.emit` in its own `try { ctx.emit?.(event) } catch {}`, and each
+ * publisher then defaulted a missing `emit` to a no-op
+ * (`emit ?? (() => {})`) before handing it here — where a third `try/catch`
+ * waited. The middle layer could never do anything: the layer above it had
+ * already swallowed every throw, so the no-op fallback was unreachable except
+ * for a literal `undefined`, which the outer `?.` had already covered too.
+ *
+ * @param {((event: string) => void) | undefined} emit - the Host's raw
+ *   `ctx.emit`, or `undefined` on a Host that has none.
  * @returns {void}
  */
-export function emitAdaptersUpdated(emit: (event: string) => void): void {
+export function emitAdaptersUpdated(emit: ((event: string) => void) | undefined): void {
   try {
-    emit(ADAPTERS_UPDATED_EVENT);
+    emit?.(ADAPTERS_UPDATED_EVENT);
   } catch {
     // Deliberately swallowed; see the note above.
   }

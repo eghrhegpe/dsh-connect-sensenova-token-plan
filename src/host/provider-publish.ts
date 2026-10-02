@@ -111,7 +111,10 @@ export function createProviderPublisher(deps: HostDeps = {}) {
   const effectiveLoadAdapterModule = loadAdapterModule ?? (() => import("./llm-adapter.ts"));
   const effectiveGetLlm = getLlm ?? (() => null);
   const effectiveResolveApiKey = resolveApiKey ?? (async () => "");
-  const effectiveEmit = emit ?? (() => {});
+  // `emit` is deliberately NOT defaulted here. The publish path hands the raw
+  // (possibly absent) `ctx.emit` down to `publish-core`, whose
+  // `emitAdaptersUpdated` copes with both a missing and a refusing emitter — a
+  // local no-op stand-in could only ever mask a mistake, never add safety.
   const effectiveLogger = logger ?? { warn: () => {} };
 
   /**
@@ -266,7 +269,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
       state,
       release,
       registerPair,
-      emit: effectiveEmit,
+      emit,
       onRollback: () => {
         state.entries = previousEntries;
         state.enabledIds = previousEnabledIds;

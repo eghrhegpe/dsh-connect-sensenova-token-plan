@@ -94,7 +94,9 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
   const effectiveResolveToken = resolveToken ?? (async () => "");
   const effectiveLoadAdapterModule = loadAdapterModule ?? (() => import("./raccoon-llm-adapter.ts"));
   const effectiveGetLlm = getLlm ?? (() => null);
-  const effectiveEmit = emit ?? (() => {});
+  // `emit` is deliberately NOT defaulted here — see the Token Plan publisher
+  // for why. `publish-core`'s `emitAdaptersUpdated` is the one place that
+  // handles both an absent and a refusing emitter.
   const effectiveLogger = logger ?? { warn: () => {} };
 
   /** The live Raccoon registration state. */
@@ -210,7 +212,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
       state,
       release,
       registerPair,
-      emit: effectiveEmit,
+      emit,
       onRollback: () => {
         state.rows = previousRows;
       }
