@@ -32,10 +32,67 @@
 export const MAX_CACHE_AGE_MS = 3600_000;
 
 /**
+ * The generation state for one shared cache map.
+ *
+ * Keyed by the cache MAP rather than held per instance, and that is load
+ * bearing: a caller may construct a fresh `createCoalescedFetch` on every
+ * request while injecting one long-lived shared map (which is exactly what
+ * `console-client.ts` does, over the `cache`/`inflight` pair created in
+ * `index.ts`). Per-instance counters would reset to 0 on every call, so a
+ * `clear()` bump would be invisible to the very next read and a pre-clear
+ * flight's answer would be served to the account that just signed in.
+ * Hanging the counters off the map makes every instance over that map share
+ * one generation state, so the guard holds no matter how the caller builds it.
+ */
+const GENERATIONS = new WeakMap<object, { global: number; keys: Map<string, number> }>();
+
+/** The (created-on-demand) generation state belonging to one cache map. */
+function generationsOf(cache: object) {
+  let state = GENERATIONS.get(cache);
+  if (state === undefined) {
+    state = { global: 0, keys: new Map<string, number>() };
+    GENERATIONS.set(cache, state);
+  }
+  return state;
+}
+
+/**
+ * Drop one key's cached answer, or the whole cache, bumping generations.
+ *
+ * Exported separately from the instance so a caller that only owns the raw
+ * maps — the account and api-key routes, which must invalidate the console
+ * cache the moment the credential changes — can invalidate WITHOUT having to
+ * construct an instance first. It shares `generationsOf`, so an instance's own
+ * `clear()` and this function are the same operation.
+ * @param {Map<string, unknown>} cache - the cache map to drop from.
+ * @param {Map<string, Promise<unknown>>} inflight - its in-flight companion.
+ * @param {string} [key] - the key to drop; omit to drop everything.
+ * @returns {void}
+ */
+export function clearCoalescedFetch(
+  cache: Map<string, unknown>,
+  inflight: Map<string, Promise<unknown>>,
+  key?: string
+): void {
+  const gens = generationsOf(cache);
+  if (key === undefined) {
+    gens.global += 1;
+    cache.clear();
+    // A pre-clear flight must not be joinable by the next read either.
+    inflight.clear();
+    gens.keys.clear();
+    return;
+  }
+  gens.keys.set(key, (gens.keys.get(key) ?? gens.global) + 1);
+  cache.delete(key);
+  inflight.delete(key);
+}
+
+/**
  * A coalescing read-through cache.
  * @param {object} [options]
- * @param {Map<string, {body: unknown, at: number}>} [options.cache] - an
- *   existing cache map to share; a fresh one is created when omitted.
+ * @param {Map<string, {body: unknown, at: number, gen: number}>} [options.cache] -
+ *   an existing cache map to share; a fresh one is created when omitted.
  * @param {Map<string, Promise<unknown>>} [options.inflight] - an existing
  *   in-flight map to share.
  * @param {number} [options.maxAgeMs] - the sweep ceiling.
@@ -63,9 +120,12 @@ export function createCoalescedFetch(options: {
   // late write from a pre-clear flight is written but immediately invisible,
   // and the next read simply refetches. This is what makes `clear()`'s promise
   // (below) actually hold in the concurrent case.
-  let globalGen = 0;
-  const keyGens = new Map<string, number>();
-  const genOf = (key: string) => keyGens.get(key) ?? globalGen;
+  //
+  // The counters live on the cache map (see `generationsOf`), NOT in this
+  // closure: a fresh instance over an existing map must observe the bumps a
+  // previous instance — or `clearCoalescedFetch` — already made.
+  const gens = generationsOf(cache);
+  const genOf = (key: string) => gens.keys.get(key) ?? gens.global;
 
   /** Drop entries past the sweep ceiling; called after every write. */
   const sweep = () => {
@@ -119,19 +179,7 @@ export function createCoalescedFetch(options: {
    * @param {string} [key] - the key to drop; omit to drop everything.
    * @returns {void}
    */
-  const clear = (key) => {
-    if (key === undefined) {
-      globalGen += 1;
-      cache.clear();
-      // A pre-clear flight must not be joinable by the next read either.
-      inflight.clear();
-      keyGens.clear();
-      return;
-    }
-    keyGens.set(key, genOf(key) + 1);
-    cache.delete(key);
-    inflight.delete(key);
-  };
+  const clear = (key) => clearCoalescedFetch(cache, inflight, key);
 
   return { read, clear };
 }

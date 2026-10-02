@@ -20,7 +20,7 @@ import {
   RACCOON_BALANCE_TTL_MS,
   RACCOON_CATALOG_TTL_MS
 } from "../src/host/raccoon-status.ts";
-import { createCoalescedFetch } from "../src/host/coalesced-fetch.ts";
+import { createCoalescedFetch, clearCoalescedFetch } from "../src/host/coalesced-fetch.ts";
 import { optional } from "../src/host/util.ts";
 import { RACCOON_API_BASE, RACCOON_POINTS_PREFIX, RACCOON_FALLBACK_MODELS, RACCOON_QR_POLL_INTERVAL_MS } from "../src/host/raccoon.ts";
 import { installNetworkGuard } from "./peer-roots.mjs";
@@ -580,7 +580,7 @@ try {
   }
 }
 
-// === F. the coalescing cache's clear() closes the pre-clear race ==========
+// === H. the coalescing cache's clear() closes the pre-clear race ==========
 // `clear()` is the seam that keeps one identity's cached answers from leaking
 // into the next (account switch, forgotten key, fresh login). The race it must
 // close: a producer that started BEFORE the clear and lands AFTER it must not
@@ -589,7 +589,7 @@ try {
 // an evicted in-flight map are what make the promise concurrent-safe.
 try {
   {
-    // F1: a pre-clear in-flight answer is unreachable after the clear.
+    // H1: a pre-clear in-flight answer is unreachable after the clear.
     const coalesced = createCoalescedFetch();
     let releaseOld = null;
     let oldProducers = 0;
@@ -609,33 +609,60 @@ try {
       newProducers += 1;
       return "new-identity";
     }, 60_000);
-    check("F1 clear makes a pre-clear in-flight answer unreachable",
+    check("H1 clear makes a pre-clear in-flight answer unreachable",
       oldValue === "old-identity" && newValue === "new-identity"
         && oldProducers === 1 && newProducers === 1,
       `old=${oldValue} new=${newValue} producers=${oldProducers}/${newProducers}`);
   }
   {
-    // F2: the no-key clear bumps the GLOBAL generation — every key refetches.
+    // H2: the no-key clear bumps the GLOBAL generation — every key refetches.
     const coalesced = createCoalescedFetch();
     let producers = 0;
     await coalesced.read("x", async () => { producers += 1; return "v1"; }, 60_000);
     coalesced.clear();
     const again = await coalesced.read("x", async () => { producers += 1; return "v2"; }, 60_000);
-    check("F2 clear() (no key) invalidates every key",
+    check("H2 clear() (no key) invalidates every key",
       again === "v2" && producers === 2, `value=${again} producers=${producers}`);
   }
   {
-    // F3: the TTL hit still works after a clear — the new generation's entry
+    // H3: the TTL hit still works after a clear — the new generation's entry
     // is served within its window, so clearing is not a cache murder.
     const coalesced = createCoalescedFetch();
     let producers = 0;
     await coalesced.read("k", async () => { producers += 1; return "a"; }, 60_000);
     await coalesced.read("k", async () => { producers += 1; return "never"; }, 60_000);
-    check("F3 a fresh entry after clear still hits within its TTL",
+    check("H3 a fresh entry after clear still hits within its TTL",
       producers === 1, `producers=${producers}`);
   }
+  {
+    // H4: THE PRODUCTION SHAPE. H1-H3 all drive ONE long-lived instance, which
+    // is exactly why the guard could be green here while the shipped wiring
+    // leaked: `console-client.ts` builds a FRESH instance per call over the
+    // shared maps, and the account/api-key routes invalidate through the raw
+    // map. With per-instance generation counters the bump was invisible to the
+    // next read, so a pre-switch console flight was served to the account that
+    // had just signed in. Pin the real shape: shared maps + fresh instance per
+    // read + the routes' exported invalidation helper.
+    const cache = new Map();
+    const inflight = new Map();
+    const readFresh = (key, body) => createCoalescedFetch({ cache, inflight })
+      .read(key, async () => body, 60_000);
+
+    let releaseOld = null;
+    const oldFlight = createCoalescedFetch({ cache, inflight }).read("pool", () =>
+      new Promise((resolve) => { releaseOld = () => resolve("ACCOUNT_A_DATA"); }), 60_000);
+    await Promise.resolve();
+    // What `routes/account.ts` does on an account switch.
+    clearCoalescedFetch(cache, inflight);
+    releaseOld();
+    await oldFlight;
+    const afterSwitch = await readFresh("pool", "ACCOUNT_B_DATA");
+    check("H4 a fresh instance over shared maps sees the route's clear (no cross-account leak)",
+      afterSwitch === "ACCOUNT_B_DATA",
+      `post-switch read=${afterSwitch}`);
+  }
 } catch (error) {
-  fail("F: coalesced clear race", error);
+  fail("H: coalesced clear race", error);
 }
 
 // The two groups that drive the REAL coalescing cache serve their own fetch;

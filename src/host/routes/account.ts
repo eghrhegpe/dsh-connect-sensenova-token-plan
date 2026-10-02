@@ -12,6 +12,7 @@ import { name } from "../host-config.ts";
 import { CODE } from "../codes.ts";
 import { writeLoginTrace } from "../trace.ts";
 import { str, optional, errMsg } from "../util.ts";
+import { clearCoalescedFetch } from "../coalesced-fetch.ts";
 import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin } from "./http.ts";
 import type { PluginError, Wiring } from "../types.ts";
 
@@ -26,7 +27,7 @@ export const ACCOUNT_PATH = `/api/${name}/account`;
  * @returns {Function} the `off()` unregister callback.
  */
 export function registerAccountRoute(ctx: any, wiring: Wiring) {
-  const { settings, tokenStore, cache } = wiring;
+  const { settings, tokenStore, cache, inflight } = wiring;
 
   return ctx.webServer.register({
     kind: "exact",
@@ -66,7 +67,12 @@ export function registerAccountRoute(ctx: any, wiring: Wiring) {
         // The grant that just cleared answers the very next poll, so the cached
         // console responses from the previous account must not survive it.
         // (saveAccount does the same on its success path.)
-        cache.clear();
+        // Routed through `clearCoalescedFetch` rather than `cache.clear()`: the
+        // map must be emptied AND its generation bumped, or a console flight
+        // that started under the previous account and lands after this point
+        // writes back under the still-current generation and is served to the
+        // account that just signed in.
+        clearCoalescedFetch(cache, inflight);
         writeJson(response, 200, { ...(await tokenStore.state()), ok: true }, { "cache-control": "no-store" });
         return;
       }
@@ -101,7 +107,8 @@ export function registerAccountRoute(ctx: any, wiring: Wiring) {
       }
       // The grant that just landed answers the very next poll, so the cached
       // console responses from the previous account must not survive it.
-      cache.clear();
+      // Generation-bumping clear — see the note on the forget branch above.
+      clearCoalescedFetch(cache, inflight);
       writeJson(response, 200, { ...(await tokenStore.state()), ok: true }, { "cache-control": "no-store" });
     }, settings.allowedHosts)
   });

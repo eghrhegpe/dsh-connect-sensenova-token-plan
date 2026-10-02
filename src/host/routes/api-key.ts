@@ -11,6 +11,7 @@
 import { name } from "../host-config.ts";
 import { syncSignaturesAfterPublish } from "../provider-publish.ts";
 import { optional, errMsg } from "../util.ts";
+import { clearCoalescedFetch } from "../coalesced-fetch.ts";
 import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
@@ -25,7 +26,7 @@ export const API_KEY_PATH = `/api/${name}/api-key`;
  * @returns {Function} the `off()` unregister callback.
  */
 export function registerApiKeyRoute(ctx: any, wiring: Wiring) {
-  const { settings, apiKeyStore, catalogStore, providerState, publishProvider, cache, logger } = wiring;
+  const { settings, apiKeyStore, catalogStore, providerState, publishProvider, cache, inflight, logger } = wiring;
 
   return ctx.webServer.register({
     kind: "exact",
@@ -65,7 +66,7 @@ export function registerApiKeyRoute(ctx: any, wiring: Wiring) {
           // "forgot the key but old models still offered" report undebuggable.
           await catalogStore.clear()
             .catch((error) => logger?.warn?.(`${name}: catalog cache clear failed after api-key forget`, error));
-          cache.clear();
+          clearCoalescedFetch(cache, inflight);
           await publishProvider([], [], []);
           // The signatures must not keep claiming a stale offer after the teardown:
           // re-sync them to what was just published, or the next poll re-publishes
@@ -86,7 +87,9 @@ export function registerApiKeyRoute(ctx: any, wiring: Wiring) {
       // The next poll fetches the catalog with the new key; a stale catalog
       // cached under a previous key must not survive it. The key itself is
       // resolved per REQUEST by the adapter, so no provider rebuild is needed.
-      cache.clear();
+      // Generation-bumping clear: a catalog flight from the OLD key that lands
+      // after this point must not be served as the new key's models.
+      clearCoalescedFetch(cache, inflight);
       await answer();
     }, settings.allowedHosts)
   });
