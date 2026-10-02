@@ -44,6 +44,7 @@ import { PROVIDER_VERSION, createFileProviderStore } from "../src/host/provider-
 import { DRAW_STORE_VERSION, createFileDrawStore, normalizeDrawEnabled } from "../src/host/draw-store.ts";
 import { redactSecrets } from "../src/host/util.ts";
 import { profileSegment, profileStateDir } from "../src/host/state-store.ts";
+import { syncSignaturesAfterPublish, catalogSignature } from "../src/host/provider-publish.ts";
 import { surface as clientSurface } from "./client-surface.js";
 
 const results = [];
@@ -978,6 +979,40 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     check("non-string input reads as empty", redactSecrets(undefined) === "" && redactSecrets(null) === "");
   } catch (error) {
     fail("redactSecrets strips credentials", error);
+  }
+}
+
+// --- 12. syncSignaturesAfterPublish: the direct-publish invariant ----------
+// After a route publishes an offer straight to the provider (bypassing the
+// poll's change-detection), the signatures must track what was offered, so the
+// next poll does not see a "change" and rebuild. This locks that contract and
+// keeps the formulas identical to the poll's (a divergence here is a churn bug).
+{
+  const state = {
+    entries: [{ id: "a" }, { id: "b" }],
+    enabledIds: ["a"],
+    unavailableIds: ["b", "a"],
+    signature: "",
+    quotaSignature: ""
+  };
+  try {
+    syncSignaturesAfterPublish(state);
+    check("signature mirrors catalogSignature of the offered set",
+      state.signature === catalogSignature(state.entries, state.enabledIds));
+    check("quotaSignature mirrors the sorted unavailable ids",
+      state.quotaSignature === ["a", "b"].join(","));
+    check("sync never mutates the offer fields",
+      state.entries.length === 2 && state.enabledIds.length === 1
+        && Array.isArray(state.unavailableIds));
+    // Defensive: a half-built state must not throw or claim a bogus signature.
+    // The catalog signature of an empty offer is "|" (catalogSignature's shape),
+    // not "" — matching what the poll would compute, so no churn on empty.
+    const blank = {};
+    syncSignaturesAfterPublish(blank);
+    check("a blank state syncs to empty-offer signatures without throwing",
+      blank.signature === catalogSignature([], []) && blank.quotaSignature === "");
+  } catch (error) {
+    fail("syncSignaturesAfterPublish keeps the offer in lock-step", error);
   }
 }
 

@@ -18,7 +18,7 @@ import { writeLoginTrace } from "./trace.ts";
 import { str, redactSecrets, optional } from "./util.ts";
 import type { PluginError } from "./types.ts";
 import { normalizeEnabledIds } from "./catalog-store.ts";
-import { catalogSignature } from "./provider-publish.ts";
+import { syncSignaturesAfterPublish } from "./provider-publish.ts";
 import {
   generateRaccoonQrCode,
   raccoonQrLoginUrl,
@@ -421,9 +421,11 @@ export function registerRoutes(ctx, wiring) {
           await catalogStore.clear()
             .catch((error) => logger?.warn?.(`${name}: catalog cache clear failed after api-key forget`, error));
           cache.clear();
-          providerState.signature = "";
-          providerState.quotaSignature = "";
           await publishProvider([], [], []);
+          // The signatures must not keep claiming a stale offer after the teardown:
+          // re-sync them to what was just published, or the next poll re-publishes
+          // (churns) an already-empty offer.
+          syncSignaturesAfterPublish(providerState);
           await answer();
         } catch (error) {
           await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -538,13 +540,13 @@ export function registerRoutes(ctx, wiring) {
       };
       try {
         await catalogStore.setEnabledIds(ids);
-        // The next poll must not re-publish the same offer: adopt the signature
-        // of what was just offered, or every poll would churn the registration.
-        providerState.signature = catalogSignature(providerState.entries, ids);
         // Publish immediately with the CURRENT catalogue: the offer must not
         // wait for the next poll. A failed publish rolls back to the previous
         // pair inside publishProvider and surfaces its reason.
         await publishProvider(providerState.entries, ids, providerState.unavailableIds ?? []);
+        // Adopt the signature of what was just offered so the next poll does not
+        // see a "change" and re-publish the same set.
+        syncSignaturesAfterPublish(providerState);
       } catch (error) {
         await answer({ ok: false, error: error instanceof Error ? error.message : String(error) });
         return;

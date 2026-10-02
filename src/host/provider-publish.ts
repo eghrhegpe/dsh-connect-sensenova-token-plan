@@ -315,3 +315,23 @@ export function catalogSignature(entries, enabledIds) {
     .join(",");
   return `${models}|${(Array.isArray(enabledIds) ? enabledIds : []).join(",")}`;
 }
+
+/**
+ * Recompute the state's `signature` and `quotaSignature` from the offer the
+ * publisher just published. Call it after every direct `publishProvider` that
+ * bypasses the poll's change-detection in `snapshot-aggregate`: those two
+ * fields are the poll's "did the offer change?" signal, so they must track what
+ * was actually offered or the next poll needlessly churns (rebuilds) the
+ * registration. The formulas here are the SAME ones the poll uses, so the two
+ * can never drift apart. Only meaningful after a successful publish — on a
+ * failed one the caller's rollback already restored the previous fields.
+ * @param {{entries: object[], enabledIds: string[], unavailableIds: string[],
+ *          signature: string, quotaSignature: string}} state - `publisher.state`.
+ */
+export function syncSignaturesAfterPublish(state) {
+  const entries = Array.isArray(state.entries) ? state.entries : [];
+  const enabledIds = Array.isArray(state.enabledIds) ? state.enabledIds : [];
+  const unavailable = Array.isArray(state.unavailableIds) ? state.unavailableIds : [];
+  state.signature = catalogSignature(entries, enabledIds);
+  state.quotaSignature = [...unavailable].sort().join(",");
+}
