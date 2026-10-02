@@ -23,9 +23,8 @@ export const DRAW_PATH = `/api/${name}/draw`;
  * Register the draw route. Wiring subset: `settings`, `drawStore`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
  * @param {Pick<Wiring, "settings" | "drawStore">} wiring - the subset this
- *   route reads, as assembled by `apply()` in `index.ts`. Two of twenty-two:
- *   the smallest dependency surface in the family, and now the compiler
- *   enforces it.
+ *   route reads, as assembled by `apply()` in `index.ts`. The smallest
+ *   dependency surface in the family, and now the compiler enforces it.
  * @returns {Function} the `off()` unregister callback.
  */
 export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "drawStore">) {

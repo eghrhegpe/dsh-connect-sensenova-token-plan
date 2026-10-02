@@ -128,11 +128,19 @@ type DrawFetchResponse = {
  * The wiring subset {@link registerDrawTool} reads — its own `Pick`, not the
  * whole bag.
  *
- * This function is exported so a test can mount the tool standalone, and the
- * fields it actually touches are eight of the twenty-two. Declaring the
+ * This function is exported so a test can mount the tool standalone, and
+ * {@link DrawToolWiring} names exactly the fields it touches. Declaring the
  * subset as a type (rather than naming it in prose) is what lets the compiler
  * catch a field that stopped being read, or a new one that starts being read
  * without a declaration.
+ *
+ * No count is written here on purpose: this comment used to say "eight of the
+ * twenty-two" while the `@param` below said "the seven fields read below", and
+ * both were stale — `Wiring` had twenty fields, and there are eight here of
+ * which only seven are destructured (`logger` is read straight off the bag by
+ * the `degrade` call, so a count of the destructuring line is not a count of
+ * what the function reads). The list in the type is the contract; a number next
+ * to it is a second source with no compiler behind it.
  */
 export type DrawToolWiring = Pick<Wiring,
   | "settings"
@@ -152,7 +160,7 @@ export type DrawToolWiring = Pick<Wiring,
  * the panel and the provider untouched. Named as a separate export so a test
  * can inject its own `ctx`/`wiring`; `startSideEffects` calls it when enabled.
  * @param ctx - the host root context (reads `ctx.get("tools")` / `ctx.tools`).
- * @param {DrawToolWiring} wiring - the seven fields read below.
+ * @param {DrawToolWiring} wiring - the fields listed in that type.
  * @param {object} side - test seams from `apply`'s `deps`.
  * @param {Function} side.loadToolsModule - lazy `@deepseek-ai/dsh-tools` loader.
  * @param {Function} side.drawFetch - draw request fetch (stubbed in tests).

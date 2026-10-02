@@ -319,6 +319,61 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
   check("a non-numeric trendHours falls back to default", nanFall === CONFIG_DEFAULTS.trendHours, String(nanFall));
 }
 
+// --- 9. hand-written counts must not rot in prose -------------------------
+// The wiring family documents each `Pick<Wiring, …>` in prose too, and those
+// notes carried counts ("eight of the twenty-two", "Twelve of twenty-two",
+// "Two of twenty-two", "the seven fields read below"). Every one of them was a
+// second source of truth with no compiler behind it, and they disagreed with
+// the code: `Wiring` carries TWENTY fields, not twenty-two, and
+// `registerDrawTool` destructures seven of the eight its `Pick` names because
+// `logger` is read straight off the bag. Nothing noticed, because a wrong
+// number in a comment cannot fail anything.
+//
+// The counts are gone from the source (the field list in each `Pick` IS the
+// contract, and it is compiler-checked). This pins the two facts a reader still
+// has to take on trust, so the next edit that invalidates them is caught here
+// rather than in a review three weeks later. It counts declarations, not prose
+// — deliberately: re-introducing a spelled-out count is what this forbids.
+{
+  const typesSrc = readFileSync(join(here, "..", "src", "host", "types.ts"), "utf8");
+  const wiringBody = typesSrc.match(/export interface Wiring \{([\s\S]*?)\n\}/)?.[1] ?? "";
+  const wiringFields = wiringBody.split("\n")
+    .filter((line) => /^\s{2}[A-Za-z_]\w*\??\s*:/.test(line));
+  check("Wiring's field count is the one this suite reasons about",
+    wiringFields.length === 20, `${wiringFields.length} fields`);
+
+  // Every route declares its own subset, and `registerRoutes` calls each exactly
+  // once. A route module added without joining the facade would mount nothing
+  // and every route test would still pass — this is the seam that catches it.
+  const routesDir = join(here, "..", "src", "host", "routes");
+  const routeFiles = readdirSync(routesDir).filter((f) => f.endsWith(".ts") && f !== "http.ts");
+  const facade = readFileSync(join(here, "..", "src", "host", "routes.ts"), "utf8");
+  const assembled = [...facade.matchAll(/register(\w+)Route\(/g)].map((m) => m[1]);
+  // The module file is kebab-case (`api-key.ts`), its function is not
+  // (`registerApiKeyRoute`), so compare on a normalized form rather than
+  // pretending the two naming conventions meet.
+  const folded = (name) => name.replace(/[^A-Za-z]/g, "").toLowerCase();
+  const assembledFolded = new Set(assembled.map(folded));
+  check("http.ts is the primitives module, not a route",
+    !assembledFolded.has("http"), assembled.join(", "));
+  const unmounted = routeFiles.map((f) => f.replace(/\.ts$/, "")).filter((n) => !assembledFolded.has(folded(n)));
+  check("every route module is registered by the facade",
+    unmounted.length === 0, unmounted.join(", "));
+  check("no route module is registered twice",
+    new Set(assembled).size === assembled.length, assembled.join(", "));
+
+  // The one count the source deliberately keeps: `index.ts` names the route
+  // count, and unlike the wiring subsets it cannot be derived from a list —
+  // there is no list of routes in prose to fall out of date. So it is asserted
+  // here instead of trusted.
+  const indexSrc = readFileSync(join(here, "..", "src", "host", "index.ts"), "utf8");
+  const claimed = indexSrc.match(/register the (\w+) routes/)?.[1];
+  const spelled = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+  check("index.ts's prose route count matches what the facade registers",
+    spelled[claimed ?? ""] === assembled.length,
+    `claims "${claimed}", facade registers ${assembled.length}`);
+}
+
 console.log(JSON.stringify(results, null, 2));
 const failed = results.filter((r) => !r.pass);
 if (failed.length > 0) {
