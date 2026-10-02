@@ -829,6 +829,24 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       typeof surface.dictionaries.zh["draw.off"] === "string",
     JSON.stringify(Object.keys(surface.dictionaries.zh).filter((k) => k.startsWith("draw."))));
 
+  // The normal-absence case: switch on, no tools service registered the tool.
+  // The status lead-in must say the tool is silently absent rather than "on —
+  // model list", which would read as "drawing works".
+  {
+    const absentTree = treeOf(render.DrawSwitch, {
+      llm: { ...drawLlm, drawToolAbsent: true },
+      tt
+    });
+    const absentText = texts(absentTree).join("\n");
+    check("a tool absent for want of a tools service says so",
+      absentText.includes("draw.noTools") && !absentText.includes("draw.onList"),
+      absentText);
+    check("the absence line's dictionary keys exist in zh and en",
+      typeof surface.dictionaries.zh["draw.noTools"] === "string" &&
+        typeof surface.dictionaries.en["draw.noTools"] === "string",
+      `${surface.dictionaries.zh["draw.noTools"]} / ${surface.dictionaries.en["draw.noTools"]}`);
+  }
+
   // The row SHAPE is a contract, not a detail: `modelRow` is a column (a head
   // line over an optional parameter line), so the name and its badge must be
   // wrapped in `modelRowHead`. Left as bare siblings they stack, `modelName`'s

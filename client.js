@@ -1484,7 +1484,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const candidates = Array.isArray(llm?.drawCandidateIds) ? llm.drawCandidateIds.map((id) => String(id)) : [];
 		const preferred = llm?.drawPreferredModel != null ? String(llm.drawPreferredModel) : null;
 		const effective = String(llm?.drawModel ?? "");
-		const statusText = enabled ? hasKey ? tt("draw.onList") : tt("draw.needsKey") : tt("draw.off");
+		const toolAbsent = llm?.drawToolAbsent === true;
+		const statusText = enabled ? toolAbsent ? tt("draw.noTools") : hasKey ? tt("draw.onList") : tt("draw.needsKey") : tt("draw.off");
 		const saveModel = useCallback(async (id) => {
 			setBusy(true);
 			setSwitchError(null);

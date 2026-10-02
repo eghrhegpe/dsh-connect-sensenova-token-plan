@@ -23,6 +23,7 @@
 import { defineDrawTool } from "./draw.ts";
 import { seedPublisherFromCatalog, catalogSignature } from "./provider-publish.ts";
 import { retryBounded, errMsg, degrade } from "./util.ts";
+import { resetDrawToolState, markDrawToolAbsent } from "./draw-tool-state.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
@@ -160,6 +161,9 @@ export type DrawToolWiring = Pick<Wiring,
 export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: DrawToolWiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
   const { settings, configError, providerState, catalogStore, resolveApiKey, publisher, drawStore } = wiring;
   const { loadToolsModule, drawFetch } = side;
+  // Recompute the absence note on every attempt: a late tools service that
+  // finally registers must CLEAR it, not leave a stale "absent" on the panel.
+  resetDrawToolState();
   if (configError !== null) return;
   // The panel's saved switch beats the patch default — resolved by the one
   // adjudicator (`switch-precedence.ts`), not a hand-copied `?? settings.x`
@@ -182,7 +186,14 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
   const tools = await resolveServiceWithRetry<{ register: (definition: unknown) => void }>(ctx, "tools", {
     isDisposed: () => publisher.isDisposed()
   });
-  if (tools === null || typeof tools.register !== "function") return;
+  // The ONE normal absence the panel should state: the switch is on but this
+  // Host exposes no tools service, so nothing is broken and no log line is due
+  // — the copy (`draw.noTools`) is. The other two bails below (peer failed to
+  // load, registry refused) are Host bugs and keep their traces in the log.
+  if (tools === null || typeof tools.register !== "function") {
+    markDrawToolAbsent();
+    return;
+  }
   let defineTool;
   try {
     const mod = await Promise.resolve(loadToolsModule());

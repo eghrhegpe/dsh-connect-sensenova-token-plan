@@ -17,6 +17,7 @@
  * Nothing here imports a Host peer or opens a socket.
  */
 import { readFileSync } from "node:fs";
+import { drawToolAbsent } from "../src/host/draw-tool-state.ts";
 import {
   DRAW_TOOL_NAME,
   DRAW_COOLDOWN_MS,
@@ -424,6 +425,28 @@ async function rejects(fn) {
         `registered=${registered.length} reads=${reads}`);
       check("the draw tool is registered exactly once despite the retry",
         registered.length === 1 && reads === 2, `registered=${registered.length} reads=${reads}`);
+      check("a successful registration does NOT mark the tool absent",
+        drawToolAbsent() === false, `drawToolAbsent=${drawToolAbsent()}`);
+    }
+    // The one normal absence the panel states: the switch is on but the tools
+    // service carries no `register` function, so the tool never registered.
+    // `register: null` is returned on the FIRST read, so the retry loop stops
+    // at once — this is the no-tools-service case, not the peer/registry one.
+    {
+      const ctx = { get: () => ({ register: null }) };
+      const wiring = {
+        settings: { drawEnabled: true, drawModelId: "" },
+        configError: null,
+        providerState: { entries: [] },
+        catalogStore: { list: async () => [] },
+        resolveApiKey: async () => "sk-live",
+        publisher: { isDisposed: () => false },
+        drawStore: { enabled: async () => null, modelId: async () => null }
+      };
+      const side = { loadToolsModule: async () => ({}), drawFetch: async () => ({}) };
+      await registerDrawTool(ctx, wiring, side);
+      check("no tools service marks the tool absent for the panel copy",
+        drawToolAbsent() === true, `drawToolAbsent=${drawToolAbsent()}`);
     }
     // startSideEffects: vision step two's writer is only filled once the
     // settings service can actually be reached. A poll after the late fill

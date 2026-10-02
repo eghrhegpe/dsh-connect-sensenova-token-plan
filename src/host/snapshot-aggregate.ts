@@ -25,6 +25,7 @@ import { parsePools, parseTrend, checkShape, identifyVisionModel } from "./parse
 import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
 import { catalogSignature, syncSignaturesAfterPublish } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
+import { drawToolAbsent } from "./draw-tool-state.ts";
 import { str, errMsg } from "./util.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
 import type { SnapshotData } from "../shared/wire.ts";
@@ -351,6 +352,11 @@ export async function buildSnapshotBody({
     quotaBlockedModelIds: unavailableModelIds,
     drawEnabled: resolveSwitchEnabled(effectiveDrawPanelSwitch, settings.drawEnabled),
     drawSource: switchSource(effectiveDrawPanelSwitch),
+    // Emitted ONLY when the switch is on and the tool never registered because
+    // this Host exposes no tools service — the one normal absence the copy
+    // (`draw.noTools`) already names. Present, never false, so the client
+    // treats it as "show the note" rather than "check a boolean's polarity".
+    ...(drawToolAbsent() ? { drawToolAbsent: true } : {}),
     // A draw call's actual target model, picked by the same precedence the
     // tool itself uses (`pickDrawModel`) over the same normalized catalog —
     // so the panel's line and the tool's behavior cannot disagree. Emitted

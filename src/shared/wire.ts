@@ -132,6 +132,8 @@ export interface LlmData {
   providerError?: string;
   drawEnabled?: boolean;
   drawSource?: string;
+  /** Present only when the switch is on but no tools service registered it. */
+  drawToolAbsent?: boolean;
   drawModel?: string;
   drawCandidateCount?: number;
   drawCandidateIds?: string[];

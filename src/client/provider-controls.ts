@@ -155,8 +155,15 @@ export function DrawSwitch({ llm, onDone, tt }: {
   const candidates = Array.isArray(llm?.drawCandidateIds) ? llm.drawCandidateIds.map((id: unknown) => String(id)) : [];
   const preferred = llm?.drawPreferredModel != null ? String(llm.drawPreferredModel) : null;
   const effective = String(llm?.drawModel ?? "");
+  // The one normal absence the panel states: the switch is on but this Host
+  // exposes no tools service, so the tool never registered. Rendered instead
+  // of "on — model list" because the latter reads as "drawing works", which
+  // is not the case. Only the no-tools-service absence is stated here; a peer
+  // that failed to load or a registry that refused is a Host bug, and its
+  // trace belongs in the log (`degrade`), not in the copy.
+  const toolAbsent = llm?.drawToolAbsent === true;
   const statusText = enabled
-    ? (hasKey ? tt("draw.onList") : tt("draw.needsKey"))
+    ? (toolAbsent ? tt("draw.noTools") : hasKey ? tt("draw.onList") : tt("draw.needsKey"))
     : tt("draw.off");
   // Pick a draw model from the panel: `null` returns to auto-pick. The Host
   // validates the id against the same catalog precedence the tool uses, so a
