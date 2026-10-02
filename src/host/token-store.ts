@@ -53,6 +53,7 @@ import { CODE } from "./codes.ts";
 import { str, obj, verbatim, pluginError } from "./util.ts";
 import { name as RECORD_SCOPE } from "./host-config.ts";
 import { createStoreContext } from "./token-store/state.ts";
+import type { AuthLike, ThrottleStore, StoredGrant } from "./token-store/state.ts";
 import {
   readStored as readStoredImpl,
   storeGrant,
@@ -103,7 +104,7 @@ const LEGACY_SCOPE = "dsh-llm-rate-panel";
  * @param {string} name - the variable name.
  * @returns {string} the reference.
  */
-const credentialRef = (name) => name;
+const credentialRef = (name: string) => name;
 
 /**
  * Where the throttle used to live, as a record in the credentials service.
@@ -144,25 +145,34 @@ const THROTTLE_ID = "sensenova-console-throttle";
  * @returns the store: `getToken`, `invalidate`, `saveAccount`,
  *   `forgetAccount`, and `state`.
  */
-export function createTokenStore(options) {
+export function createTokenStore(options: {
+  credentials?: unknown;
+  auth?: AuthLike;
+  env?: Record<string, string | undefined>;
+  skewMs?: number;
+  throttleStore?: ThrottleStore;
+  now?: () => number;
+  onTrace?: (hops: unknown[], error: unknown) => void;
+  credentialKey: (scope: string, id: string) => string;
+}) {
   const { wiring, state } = createStoreContext(options);
   const { env, backend, ephemeral } = wiring;
   const { rejected } = state;
 
   /** One-line delegations to the extracted blocks. */
   const readStored = () => readStoredImpl(wiring, state);
-  const store = (accessToken, refreshToken, expiresAt, replacing) => storeGrant(wiring, state, accessToken, refreshToken, expiresAt, replacing);
-  const purgeGrant = (accessToken) => purgeGrantImpl(wiring, state, accessToken);
-  const isFresh = (token: any, at?: number) => isFreshImpl(wiring, state, token, at);
+  const store = (accessToken: string, refreshToken: string, expiresAt: number, replacing?: string) => storeGrant(wiring, state, accessToken, refreshToken, expiresAt, replacing);
+  const purgeGrant = (accessToken?: string) => purgeGrantImpl(wiring, state, accessToken);
+  const isFresh = (token: StoredGrant | null | undefined, at?: number) => isFreshImpl(wiring, state, token, at);
   const readThrottle = () => readThrottleImpl(wiring, state);
   const clearThrottle = () => clearThrottleImpl(wiring, state);
-  const writeThrottle = (error: any, previousAttempt?: any) => writeThrottleImpl(wiring, state, error, previousAttempt);
-  const throttleError = (held, cause) => throttleErrorImpl(held, cause);
-  const inForceWaitMs = (held) => inForceWaitMsImpl(wiring, held);
+  const writeThrottle = (error: unknown, previousAttempt?: number) => writeThrottleImpl(wiring, state, error, previousAttempt);
+  const throttleError = (held: import("./token-store/state.ts").HeldThrottle, cause?: Error) => throttleErrorImpl(held, cause);
+  const inForceWaitMs = (held: import("./token-store/state.ts").HeldThrottle | null) => inForceWaitMsImpl(wiring, held);
   const readUsername = () => readUsernameImpl(wiring, state);
   const readAccount = () => readAccountImpl(wiring, state);
-  const loginFromAccount = (explicit) => loginFromAccountImpl(wiring, state, explicit, readStored, store);
-  const renewWithRefresh = (stored) => renewWithRefreshImpl(wiring, state, stored, store);
+  const loginFromAccount = (explicit?: { username: string; password: string }) => loginFromAccountImpl(wiring, state, explicit, readStored, store);
+  const renewWithRefresh = (stored: StoredGrant | undefined) => renewWithRefreshImpl(wiring, state, stored, store);
   const acquire = () => acquireImpl(wiring, state, {
     readThrottle, clearThrottle,
     readStored, isFresh,
@@ -201,7 +211,7 @@ export function createTokenStore(options) {
      * @param {string} [token] - the token that was refused; defaults to the
      *   cached one.
      */
-    invalidate(token) {
+    invalidate(token?: string) {
       const refused = str(token, state.cached?.accessToken ?? "");
       if (refused !== "") {
         rejected.add(refused);
@@ -223,7 +233,7 @@ export function createTokenStore(options) {
      * @param {{username: string, password: string}} account - the credentials.
      * @returns {Promise<void>}
      */
-    async saveAccount(account) {
+    async saveAccount(account: { username: string; password: string }) {
       const username = str(account?.username, "");
       const password = verbatim(account?.password, "");
       if (username === "" || password.trim() === "") {

@@ -11,6 +11,7 @@
 
 import { CODE } from "../codes.ts";
 import { pluginError } from "../util.ts";
+import type { StoreContextWiring, TokenStoreState, StoredGrant } from "./state.ts";
 
 /**
  * Renew with the stored refresh token.
@@ -19,7 +20,12 @@ import { pluginError } from "../util.ts";
  * token so a concurrent rotation is detected instead of silently overwritten.
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresAt: number|null}>}
  */
-export async function renewWithRefresh(wiring, _state, stored, store) {
+export async function renewWithRefresh(
+  wiring: StoreContextWiring,
+  _state: TokenStoreState,
+  stored: StoredGrant | undefined,
+  store: (accessToken: string, refreshToken: string, expiresIn: number, replacing?: string) => Promise<StoredGrant>
+): Promise<StoredGrant> {
   const { auth } = wiring;
   if (stored?.refreshToken === undefined || stored.refreshToken === "") {
     throw pluginError(CODE.NO_REFRESH_TOKEN, "stored grant has no refresh token");

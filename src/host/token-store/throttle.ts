@@ -17,6 +17,7 @@
 
 import { isCredentialRefusal, CODE } from "../codes.ts";
 import { str, obj, num, numOrNull } from "../util.ts";
+import type { StoreContextWiring, TokenStoreState, HeldThrottle } from "./state.ts";
 
 /**
  * The first wait imposed on a refusal the platform gave no window for.
@@ -59,7 +60,7 @@ const THROTTLE_VERSION = 1;
  * @param {Error} [cause] - the original refusal, when it is still current.
  * @returns {Error} the error to throw.
  */
-export function throttleError(held, cause) {
+export function throttleError(held: HeldThrottle, cause?: Error): Error {
   if (cause !== undefined) return cause;
   const error = new Error(
     held.parked
@@ -79,7 +80,7 @@ export function throttleError(held, cause) {
  * @param {number} attempt - how many self-imposed waits have been served.
  * @returns {number} milliseconds to wait.
  */
-export function localBackoffMs(attempt) {
+export function localBackoffMs(attempt: number): number {
   const doubled = DEFAULT_LOGIN_BACKOFF_MS * 2 ** Math.max(0, attempt - 1);
   return Math.min(doubled, MAX_LOGIN_BACKOFF_MS);
 }
@@ -92,7 +93,7 @@ export function localBackoffMs(attempt) {
  * legitimately absent.
  * @returns {Promise<{code: string, parked: boolean, until: number|null, attempt: number}|null>}
  */
-export async function readThrottle(wiring, state) {
+export async function readThrottle(wiring: StoreContextWiring, state: TokenStoreState): Promise<HeldThrottle | null> {
   const { throttleStore } = wiring;
   const held = await throttleStore.read().catch(() => null);
   if (held !== null) return held;
@@ -110,7 +111,7 @@ export async function readThrottle(wiring, state) {
  * state left under either name survives.
  * @returns {Promise<object|null>} the adopted throttle, or null.
  */
-export async function adoptLegacyThrottle(wiring, _state) {
+export async function adoptLegacyThrottle(wiring: StoreContextWiring, _state: TokenStoreState): Promise<HeldThrottle | null> {
   const { backend, THROTTLE_KEY, credentialKey, throttleStore, now } = wiring;
   const LEGACY_SCOPE = "dsh-llm-rate-panel";
   const THROTTLE_ID = "sensenova-console-throttle";
@@ -155,13 +156,13 @@ export async function adoptLegacyThrottle(wiring, _state) {
  * @returns {Promise<{code: string, parked: boolean, until: number|null, attempt: number}>}
  *   the throttle now in force.
  */
-export async function writeThrottle(wiring, state, error, previousAttempt) {
+export async function writeThrottle(wiring: StoreContextWiring, state: TokenStoreState, error: unknown, previousAttempt?: number): Promise<HeldThrottle> {
   const { throttleStore, now } = wiring;
-  const code = str(error?.code, CODE.LOGIN_FAILED);
+  const code = str(obj(error).code, CODE.LOGIN_FAILED);
   const parked = isCredentialRefusal(code);
   // A window the platform stated is taken at its word; only a window we
   // invented is capped.
-  const stated = numOrNull(error?.retryAfterMs);
+  const stated = numOrNull(obj(error).retryAfterMs);
   state.consecutiveRefusals = num(previousAttempt, state.consecutiveRefusals) + 1;
   const attempt = state.consecutiveRefusals;
   const until = parked
@@ -181,7 +182,7 @@ export async function writeThrottle(wiring, state, error, previousAttempt) {
  * Drop the throttle, so the next sign-in is allowed to try.
  * @returns {Promise<void>}
  */
-export async function clearThrottle(wiring, state) {
+export async function clearThrottle(wiring: StoreContextWiring, state: TokenStoreState): Promise<void> {
   const { throttleStore, backend, THROTTLE_KEY, credentialKey } = wiring;
   const LEGACY_SCOPE = "dsh-llm-rate-panel";
   const THROTTLE_ID = "sensenova-console-throttle";
@@ -205,8 +206,8 @@ export async function clearThrottle(wiring, state) {
  * @param {{parked: boolean, until: number|null}|null} held - the throttle.
  * @returns {number|null} milliseconds remaining.
  */
-export function inForceWaitMs(wiring, held) {
+export function inForceWaitMs(wiring: StoreContextWiring, held: HeldThrottle | null): number | null {
   const { now } = wiring;
-  if (held === null || held.parked) return null;
+  if (held === null || held.parked || held.until === null) return null;
   return Math.max(0, held.until - now());
 }

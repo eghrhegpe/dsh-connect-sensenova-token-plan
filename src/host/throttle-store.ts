@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { str, num } from "./util.ts";
 import { name } from "./host-config.ts";
 import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, stateDir as pluginStateDir } from "./state-store.ts";
+import type { HeldThrottle } from "./token-store/state.ts";
 
 /** Shape version, bumped when the persisted form changes. */
 const THROTTLE_VERSION = 1;
@@ -67,9 +68,9 @@ function legacyThrottleFile() {
  * @param {() => number} now - clock source.
  * @returns {{code: string, parked: boolean, until: number|null, attempt: number}|null}
  */
-function parse(raw, now) {
+function parse(raw: unknown, now: () => number): HeldThrottle | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const body = /** @type {{ version?: unknown, code?: unknown, parked?: unknown, until?: unknown, attempt?: unknown }} */ (raw);
+  const body = raw as { version?: unknown; code?: unknown; parked?: unknown; until?: unknown; attempt?: unknown };
   if (num(body.version, 0) !== THROTTLE_VERSION) return null;
   const code = str(body.code, "");
   if (code === "") return null;
@@ -131,7 +132,7 @@ export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } 
       // returns null): the safe direction for a time window.
       return parse(await readStateJson(file), now);
     },
-    async write(state) {
+    async write(state: HeldThrottle) {
       await adoptLegacyFile();
       const temporary = temporaryOf(dir, "throttle.json");
       try {
@@ -177,12 +178,14 @@ export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } 
  * @returns {{read: Function, write: Function, clear: Function}} the store.
  */
 export function createMemoryThrottleStore(now = Date.now) {
-  let held = null;
+  // The memory copy carries the version marker alongside the held shape; the
+  // file store writes the same pair, so `parse` can read either back.
+  let held: (HeldThrottle & { version: number }) | null = null;
   return {
     async read() {
       return parse(held, now);
     },
-    async write(state) {
+    async write(state: HeldThrottle) {
       held = { version: THROTTLE_VERSION, ...state };
     },
     async clear() {

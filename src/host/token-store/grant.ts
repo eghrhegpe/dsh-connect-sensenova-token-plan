@@ -14,7 +14,7 @@
 
 import { readJwtExpiry } from "../sensenova-auth.ts";
 import { str, obj, num, numOrNull } from "../util.ts";
-import type { StoredGrant } from "./state.ts";
+import type { StoredGrant, StoreContextWiring, TokenStoreState } from "./state.ts";
 
 /** Bumped if the stored payload shape ever changes incompatibly. */
 const GRANT_VERSION = 1;
@@ -28,7 +28,7 @@ const GRANT_VERSION = 1;
  * @param {unknown} record - a credential record.
  * @returns {{accessToken: string, refreshToken: string, expiresAt: number|null}|undefined}
  */
-export function parseGrant(record) {
+export function parseGrant(record: unknown): StoredGrant | undefined {
   if (record === undefined || record === null || obj(record).kind !== "grant") return undefined;
   const payload = obj(obj(record).payload);
   if (num(payload.version) !== GRANT_VERSION) return undefined;
@@ -49,7 +49,7 @@ export function parseGrant(record) {
  * @param {object} wiring - the store context wiring.
  * @param {object} state - the store context state.
  */
-export async function readStored(wiring, state) {
+export async function readStored(wiring: StoreContextWiring, state: TokenStoreState): Promise<StoredGrant | undefined> {
   const { backend, key } = wiring;
   try {
     const current = parseGrant(await backend().readRecord(key));
@@ -69,7 +69,7 @@ export async function readStored(wiring, state) {
  * "please log in again" path just because this plugin was renamed.
  * @returns {Promise<object|undefined>} the adopted grant, or undefined.
  */
-export async function adoptLegacyGrant(wiring, _state) {
+export async function adoptLegacyGrant(wiring: StoreContextWiring, _state: TokenStoreState): Promise<StoredGrant | undefined> {
   const { backend, key, credentialKey } = wiring;
   const LEGACY_SCOPE = "dsh-llm-rate-panel";
   const RECORD_ID = "sensenova-console";
@@ -111,7 +111,14 @@ export async function adoptLegacyGrant(wiring, _state) {
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresAt: number|null}>}
  *   the grant now in effect — ours, or the newer one we deferred to.
  */
-export async function storeGrant(wiring, state, accessToken, refreshToken, expiresIn, replacing) {
+export async function storeGrant(
+  wiring: StoreContextWiring,
+  state: TokenStoreState,
+  accessToken: string,
+  refreshToken: string,
+  expiresIn: number,
+  replacing: string | undefined
+): Promise<StoredGrant> {
   const { backend, key, now } = wiring;
   const issuedAt = now();
   const payload = {
@@ -170,7 +177,7 @@ export async function storeGrant(wiring, state, accessToken, refreshToken, expir
  * @param {string} [accessToken] - the dead token, also dropped from the
  *   in-memory cache and rejection set.
  */
-export async function purgeGrant(wiring, state, accessToken) {
+export async function purgeGrant(wiring: StoreContextWiring, state: TokenStoreState, accessToken?: string): Promise<void> {
   const { backend, key } = wiring;
   state.cached = null;
   if (accessToken !== undefined) state.rejected.delete(accessToken);
@@ -185,7 +192,7 @@ export async function purgeGrant(wiring, state, accessToken) {
  * @param {number} [at] - the clock reference; defaults to `now()`.
  * @returns {boolean}
  */
-export function isFresh(wiring, state, token, at): token is StoredGrant {
+export function isFresh(wiring: StoreContextWiring, state: TokenStoreState, token: StoredGrant | null | undefined, at?: number): token is StoredGrant {
   const { now, skewMs } = wiring;
   if (at === undefined) at = now();
   if (token === undefined || token === null) return false;

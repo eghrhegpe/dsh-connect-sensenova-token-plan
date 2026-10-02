@@ -19,6 +19,21 @@
 
 import { obj } from "../util.ts";
 import { CODE } from "../codes.ts";
+import type { StoreContextWiring, TokenStoreState, StoredGrant, HeldThrottle } from "./state.ts";
+
+/** The four block functions `acquire` needs, injected by the caller. */
+export interface AcquireBlocks {
+  readThrottle: () => Promise<HeldThrottle | null>;
+  clearThrottle: () => Promise<void>;
+  readStored: () => Promise<StoredGrant | undefined>;
+  isFresh: (token: StoredGrant | null | undefined, at?: number) => boolean;
+  renewWithRefresh: (stored: StoredGrant | undefined) => Promise<StoredGrant>;
+  readAccount: () => Promise<{ username: string; password: string; source: string } | undefined>;
+  loginFromAccount: () => Promise<StoredGrant>;
+  writeThrottle: (error: unknown, previousAttempt?: number) => Promise<HeldThrottle>;
+  throttleError: (held: HeldThrottle, cause?: Error) => Error;
+  purgeGrant: (accessToken?: string) => Promise<void>;
+}
 
 /**
  * Acquire a usable token, logging in or refreshing as needed.
@@ -28,7 +43,7 @@ import { CODE } from "../codes.ts";
  * @param {object} blocks - the four block functions, injected by the caller.
  * @returns {Promise<string>} the access token now in effect.
  */
-export async function acquire(wiring, state, blocks) {
+export async function acquire(wiring: StoreContextWiring, state: TokenStoreState, blocks: AcquireBlocks): Promise<string> {
   const { now } = wiring;
   const {
     readThrottle, clearThrottle,
@@ -43,7 +58,7 @@ export async function acquire(wiring, state, blocks) {
   // turns one mistake into a lockout. Fail fast and say why instead.
   const held = state.throttle ?? await readThrottle();
   state.throttle = held;
-  if (held !== null && (held.parked || held.until > now())) {
+  if (held !== null && (held.parked || (held.until !== null && held.until > now()))) {
     throw throttleError(held);
   }
   if (held !== null) {
@@ -55,14 +70,18 @@ export async function acquire(wiring, state, blocks) {
     await clearThrottle();
   }
 
-  const stored = (await readStored()) ?? state.cached ?? undefined;
-  if (isFresh(stored)) {
+  const stored: StoredGrant | null | undefined = (await readStored()) ?? state.cached ?? undefined;
+  // `isFresh` is declared boolean (not a type predicate) here on purpose: a
+  // stale grant IS still a StoredGrant, so the predicate's false-branch
+  // narrowing would wrongly exclude it. The explicit null/undefined checks do
+  // the narrowing the code actually relies on.
+  if (stored !== null && stored !== undefined && isFresh(stored)) {
     state.cached = stored;
     return stored.accessToken;
   }
   // Prefer renewal: it needs no password, and the password may have been
   // removed from the environment long after the first login.
-  if (stored?.refreshToken !== undefined && stored.refreshToken !== "") {
+  if (stored !== null && stored !== undefined && stored.refreshToken !== "") {
     try {
       const renewed = await renewWithRefresh(stored);
       return renewed.accessToken;
@@ -75,7 +94,7 @@ export async function acquire(wiring, state, blocks) {
       // re-hitting the dead refresh on every poll.
       if (obj(error).code !== CODE.REFRESH_REJECTED && obj(error).code !== CODE.NO_REFRESH_TOKEN) throw error;
       if ((await readAccount()) === undefined) {
-        await purgeGrant(stored?.accessToken);
+        await purgeGrant(stored === null || stored === undefined ? undefined : stored.accessToken);
         throw error;
       }
     }
@@ -97,6 +116,9 @@ export async function acquire(wiring, state, blocks) {
     // carries the reason and any stated window; the throttle only governs
     // when the next attempt may happen.
     const held = await writeThrottle(error, state.throttle?.attempt);
-    throw held.parked ? error : throttleError(held, error);
+    // `error` was thrown by `loginFromAccount` (a pluginError); the throttle
+    // contract takes an Error, so the assertion is the semantic the code
+    // already relies on.
+    throw held.parked ? error : throttleError(held, error as Error);
   }
 }

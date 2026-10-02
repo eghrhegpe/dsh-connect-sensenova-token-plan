@@ -17,6 +17,7 @@
 
 import { CODE } from "../codes.ts";
 import { str, verbatim, pluginError } from "../util.ts";
+import type { StoreContextWiring, TokenStoreState, StoredGrant } from "./state.ts";
 
 /**
  * The reference form of a credential name.
@@ -29,7 +30,7 @@ import { str, verbatim, pluginError } from "../util.ts";
  * @param {string} name - the variable name.
  * @returns {string} the reference.
  */
-const credentialRef = (name) => name;
+const credentialRef = (name: string) => name;
 
 /** Where the account lives. The password is NEVER persisted. */
 export const USERNAME_REF = "SENSENOVA_USERNAME";
@@ -42,9 +43,9 @@ export const PASSWORD_REF = "SENSENOVA_PASSWORD";
  * requiring a password to be available.
  * @returns {Promise<string>} the username, or `""` when none is known.
  */
-export async function readUsername(wiring, _state) {
+export async function readUsername(wiring: StoreContextWiring, _state: TokenStoreState): Promise<string> {
   const { backend, env } = wiring;
-  const fromStore = async (ref) => {
+  const fromStore = async (ref: string) => {
     // `resolve` is per-call by contract: a value written a moment ago is
     // visible to the next read, with no restart in between.
     const resolved = await backend().resolve(credentialRef(ref)).catch(() => undefined);
@@ -62,7 +63,7 @@ export async function readUsername(wiring, _state) {
  * password the panel simply asks again when the refresh token dies.
  * @returns {Promise<{username: string, password: string, source: string}|undefined>}
  */
-export async function readAccount(wiring, state) {
+export async function readAccount(wiring: StoreContextWiring, state: TokenStoreState): Promise<{ username: string; password: string; source: string } | undefined> {
   const { backend, env } = wiring;
   const username = await readUsername(wiring, state);
   // One-time sweep: a previous version stored the password in the
@@ -100,7 +101,13 @@ export async function readAccount(wiring, state) {
  *   `undefined` is tolerated and falls back to `readAccount`.
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresAt: number|null}>}
  */
-export async function loginFromAccount(wiring, state, explicit, readStored, store) {
+export async function loginFromAccount(
+  wiring: StoreContextWiring,
+  state: TokenStoreState,
+  explicit: { username: string; password: string } | undefined,
+  readStored: () => Promise<StoredGrant | undefined>,
+  store: (accessToken: string, refreshToken: string, expiresIn: number, replacing?: string) => Promise<StoredGrant>
+): Promise<StoredGrant> {
   const { auth, onTrace } = wiring;
   const account = explicit ?? await readAccount(wiring, state);
   if (account === undefined) {
@@ -120,7 +127,7 @@ export async function loginFromAccount(wiring, state, explicit, readStored, stor
  * expired grant then, so nothing ownerless is left behind.
  * @returns {Promise<void>}
  */
-export async function forgetAccount(wiring, state) {
+export async function forgetAccount(wiring: StoreContextWiring, state: TokenStoreState): Promise<void> {
   const { backend } = wiring;
   await backend().unset(credentialRef(USERNAME_REF));
   await backend().unset(credentialRef(PASSWORD_REF));

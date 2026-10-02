@@ -291,7 +291,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // debuggable by diffing a working attempt against a failing one. The
     // failure half is named by its code; a success has none, so it says so.
     onTrace: (hops, error) => {
-      void writeLoginTrace(hops, error === null ? "ok" : str(error?.code, CODE.AUTH_ERROR));
+      void writeLoginTrace(hops, error === null ? "ok" : str((error as { code?: unknown } | null | undefined)?.code, CODE.AUTH_ERROR));
     }
   });
   // Vision step two (ARCHITECTURE.md §5.1): the settings-row writer the
