@@ -1,24 +1,14 @@
 /**
  * One taxonomy for every failure this plugin reports.
  *
- * Before this module the same codes were spelled out in three places, and the
- * three copies disagreed:
- *
- * - `sensenova-auth.ts` PRODUCED them (its `IAM_REASON_CODES` table);
- * - `token-store.ts` kept its own list of the ones that describe a bad
- *   credential (`CREDENTIAL_REFUSALS`);
- * - `index.ts` kept a third list of the ones that mean "we never got a token"
- *   (`isAuthFailure`).
- *
- * The third list had fallen behind the first: `account_locked`,
- * `rate_limited`, `verification_required` and `login_failed` were produced but
- * not recognised, so a locked account was reported to the user as a generic
- * console failure. Adding a code means editing three files, and forgetting one
- * of them fails silently — which is exactly what happened.
- *
- * Now a code is declared once here. A new platform reason is one new entry:
- * it is a credential refusal or it is not, and it is an auth failure or it is
- * not, and both are decided in the same place the code is named.
+ * A code is declared ONCE here; the three consumers read it, not their own
+ * copy: `sensenova-auth.ts` PRODUCES them (its `IAM_REASON_CODES` table),
+ * `token-store.ts` names the credential-shaped ones (`CREDENTIAL_REFUSALS`),
+ * and `index.ts` names the "we never got a token" ones (`isAuthFailure`).
+ * Adding a code means one new entry — credential-refusal and auth-failure are
+ * both decided in this one place, so a new platform reason can no longer be
+ * produced but not recognised (the three-list split used to do exactly that,
+ * reporting a locked account as a generic console failure).
  *
  * @module dsh-connect-sensenova-token-plan/codes
  */

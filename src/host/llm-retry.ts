@@ -1,30 +1,28 @@
 /**
- * The directly-registered SenseNova provider's request-retry policy — the
- * peer-FREE half of the 429 self-healing work.
+ * The directly-registered SenseNova provider's 429 retry policy — the peer-FREE
+ * half of the 429 self-healing work.
  *
- * Why a separate, peer-free module: the policy is handed to the Host's
- * `resolveRetryPolicy` (a peer import) inside `llm-adapter.ts`, but the
- * *decision* — which failure classes this shared-pool provider should retry,
- * and how gently — is pure and must stay unit-testable on a clean checkout
- * where the peer is not resolvable. Keeping the config here means
- * `test/retry.test.mjs` can pin its shape without importing `@deepseek-ai/dsh-llm`.
+ * The *decision* (which failure classes this shared-pool provider retries, and
+ * how gently) is pure, so it lives here — importable on a clean checkout where
+ * the `@deepseek-ai/dsh-llm` peer is not resolvable — and is handed to the peer's
+ * `resolveRetryPolicy` from `llm-adapter.ts`. `test/retry.test.mjs` pins its
+ * shape without importing that peer.
  *
- * The peer already classifies a SenseNova 429 into two codes (the classification
- * order `isQuotaExceededError` → `rate.?limit` inside `classifyPiAiError`, pinned
- * against the real peer source by `test/peer-contract.test.mjs`):
+ * The peer classifies a SenseNova 429 into two codes (`isQuotaExceededError` →
+ * `rate.?limit` inside `classifyPiAiError`, pinned against the real source by
+ * `test/peer-contract.test.mjs`):
  *
  *   - `QUOTA` / `ACCOUNT_QUOTA` — the Token Plan pool is depleted. Retrying
- *     cannot refill it, and because the pool is SHARED across every model on
- *     this key, hammering it only extends the cool-down window (the same
- *     lesson `st-rotator` bakes into its AIMD limiter). So we deliberately do
- *     NOT retry quota exhaustion — fast-fail and let the panel say why.
- *   - `RATE_LIMIT` — a transient throttle that clears on its own. The peer
- *     retries this by default, and we keep doing so, with a backoff biased
- *     longer than default so an immediate re-hit against the one shared pool
- *     is less likely. SenseNova's daytime rate ceiling (rpm/tpm) is aggressive
- *     (see `llm-error-fix.ts`: its `quota_exceeded_error` code 8 is actually a
+ *     cannot refill it, and the pool is SHARED across every model on this key,
+ *     so hammering it only extends the cool-down (the same lesson `st-rotator`
+ *     bakes into its AIMD limiter). Deliberately NOT retried: fast-fail and let
+ *     the panel say why.
+ *   - `RATE_LIMIT` — a transient throttle that self-clears. Retried, with a
+ *     backoff biased longer than the peer default so one shared pool is not
+ *     re-hit immediately: SenseNova's daytime rpm/tpm ceiling is aggressive
+ *     (`llm-error-fix.ts`: its `quota_exceeded_error` code 8 is really a
  *     per-minute rate cap), so we ride it out with more attempts and a gentler
- *     initial step than the peer default.
+ *     first step.
  *
  * @module dsh-connect-sensenova-token-plan/llm-retry
  */
