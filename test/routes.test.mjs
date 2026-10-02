@@ -637,6 +637,45 @@ async function withNetwork(stub, body) {
       panelDecision(snapshot.payload).renders === "pools");
   }).catch((error) => fail("L2: shapeWarnings", error));
 
+  // L2b. NESTED drift reaches the panel as a warning ----------------------
+  // The top-level check alone missed the rename that matters most: `window_5h`
+  // renamed inside a pool row leaves `plan`/`pools` present, so the panel drew
+  // 0/0/0 with no warning at all. This drives the real route with such a body
+  // and requires the drift to be reported by name.
+  const DRIFT_NESTED_BODY = {
+    plan: { id: "p1", name: "TokenPlan", type: "token_plan" },
+    pools: [{
+      id: "pool-1", name: "通用池", pool_type: "default",
+      window_5H: { limit: "60000", used: "12345", remaining: "47655", reset_at: "1800000000" },
+      window_7d: { limit: "600000", used: "12345", remaining: "587655", reset_at: "1800600000" }
+    }]
+  };
+  const nestedStub = async (url) => {
+    const target = String(url);
+    if (target.includes("pool-usage")) {
+      return new Response(JSON.stringify(DRIFT_NESTED_BODY), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (target.includes("credit-usage-trend")) {
+      return new Response(JSON.stringify(TREND_BODY), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response("{}", { status: 404 });
+  };
+  await withNetwork(nestedStub, async () => {
+    const call = await mount(makeCredentials(storedGrant(l2Token, "r", 7200)));
+    const snapshot = await call(SNAPSHOT_PATH, makeRequest());
+    const warnKeys = snapshot.payload.shapeWarnings.map((w) => `${w.api}:${w.missing}`).sort();
+    check("a renamed nested window is reported as drift",
+      warnKeys.includes("pool-usage:pools[].window_5h"), JSON.stringify(warnKeys));
+    check("the top-level keys are NOT blamed for a nested rename",
+      !warnKeys.includes("pool-usage:plan") && !warnKeys.includes("pool-usage:pools"), JSON.stringify(warnKeys));
+    // The user-visible consequence: without the warning this payload renders a
+    // real pool row showing zero usage, which reads as "you used nothing".
+    // `payload.pools` is the whole block (plan header + rows), not the array.
+    const pool = snapshot.payload.pools.pools[0];
+    check("the drifted pool really would render as zero usage",
+      pool.window5h.used === 0 && pool.window5h.limit === 0, JSON.stringify(pool.window5h));
+  }).catch((error) => fail("L2b: nested shapeWarnings", error));
+
   // The healthy path: no drift, and no API key means the catalog degrades to
   // `catalogAvailable:false` with an empty uncounted list (never undefined).
   await withNetwork(consoleStub(), async () => {

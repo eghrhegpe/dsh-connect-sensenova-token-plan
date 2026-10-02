@@ -24,6 +24,57 @@ export const EXPECTED_SHAPES = Object.freeze({
   "credit-usage-trend": ["series"]
 });
 
+/**
+ * The NESTED keys the panel actually draws numbers from.
+ *
+ * `EXPECTED_SHAPES` above only looks at the top level, which is not enough: a
+ * platform-side rename of `window_5h` leaves `plan` and `pools` perfectly
+ * present, so the drift detector said `ok` and the panel drew **0 / 0 / 0** —
+ * a serene empty quota where the module's whole purpose is to notice exactly
+ * this. The top-level keys are kept separate (rather than flattened in) so
+ * `EXPECTED_SHAPES` stays the documented top-level contract that callers and
+ * tests read.
+ *
+ * Path syntax: `.` descends into an object, `[]` iterates an array (every
+ * element must satisfy the rest of the path). A path is reported ONLY when its
+ * root is present — when `plan` itself is gone the top-level check already says
+ * so, and reporting `plan.id` too would blame the shape twice for one rename.
+ */
+export const EXPECTED_NESTED = Object.freeze({
+  "pool-usage": [
+    "plan.id",
+    "pools[].window_5h",
+    "pools[].window_7d"
+  ],
+  "credit-usage-trend": []
+});
+
+/**
+ * Collect the full paths under `body` that `path` requires and does not find.
+ * @param {unknown} body - the parsed console response.
+ * @param {string} path - one `EXPECTED_NESTED` entry.
+ * @returns {string[]} `[path]` when the requirement is unmet, else `[]`.
+ */
+function nestedMissing(body, path) {
+  const segments = path.split(".");
+  const walk = (node, index) => {
+    if (index === segments.length) return [];
+    const segment = segments[index];
+    const isList = segment.endsWith("[]");
+    const key = isList ? segment.slice(0, -2) : segment;
+    const value = obj(node)[key];
+    // Absent, or an array where an object was promised: the requirement fails.
+    if (value === undefined) return [path];
+    if (isList) {
+      if (!Array.isArray(value)) return [path];
+      // An empty list is legitimately "no rows yet", not drift.
+      return value.some((element) => walk(element, index + 1).length > 0) ? [path] : [];
+    }
+    return walk(value, index + 1);
+  };
+  return walk(body, 0);
+}
+
 /** Parse one numeric field the console returns as a string. */
 export function credits(value) {
   const parsed = Number(value);
@@ -43,7 +94,11 @@ export function epochSeconds(value) {
 }
 
 /**
- * Report which expected top-level keys a console payload is missing.
+ * Report which expected keys a console payload is missing — top level AND the
+ * nested keys the panel draws from.
+ *
+ * A path whose ROOT is already reported as missing at the top level is not
+ * reported again: one rename must produce one warning, not three.
  * @param {unknown} body - the parsed console response.
  * @param {string} kind - a key of {@link EXPECTED_SHAPES}.
  * @returns {{ok: boolean, missing: string[]}} the drift report.
@@ -52,6 +107,12 @@ export function checkShape(body, kind) {
   const expected = EXPECTED_SHAPES[kind] ?? [];
   const source = obj(body);
   const missing = expected.filter((key) => source[key] === undefined);
+  // Only descend where the top level held: a missing root is already reported.
+  for (const path of EXPECTED_NESTED[kind] ?? []) {
+    const root = path.split(".")[0].replace("[]", "");
+    if (source[root] === undefined) continue;
+    missing.push(...nestedMissing(body, path));
+  }
   return { ok: missing.length === 0, missing };
 }
 

@@ -70,9 +70,18 @@ function fail(name, error) {
   const poolKeys = EXPECTED_SHAPES["pool-usage"];
   check("pool-usage expects plan and pools",
     poolKeys.includes("plan") && poolKeys.includes("pools"), JSON.stringify(poolKeys));
+  // A genuinely complete body: top-level keys AND the nested ones the panel
+  // draws from. `{plan:{}, pools:[]}` used to stand in here, back when only the
+  // top level was inspected — with the nested contract in place that body is a
+  // drift (`plan.id` is gone), so the fixture had to become actually complete.
+  const completePool = {
+    plan: { id: "p1", name: "TokenPlan", type: "token_plan" },
+    pools: [{ id: "pool-1", window_5h: { limit: "1" }, window_7d: { limit: "1" } }]
+  };
   check("a complete pool body has no drift",
-    checkShape({ plan: {}, pools: [] }, "pool-usage").ok === true);
-  const missingPools = checkShape({ plan: {} }, "pool-usage");
+    checkShape(completePool, "pool-usage").ok === true,
+    JSON.stringify(checkShape(completePool, "pool-usage")));
+  const missingPools = checkShape({ plan: { id: "p1" } }, "pool-usage");
   check("a dropped `pools` key is reported", missingPools.ok === false && missingPools.missing.includes("pools"),
     JSON.stringify(missingPools));
   const renamedPlan = checkShape({ pools: [], planX: {} }, "pool-usage");
@@ -86,6 +95,46 @@ function fail(name, error) {
   check("an array body is not a plain object, so keys are missing",
     checkShape([], "pool-usage").ok === false);
   check("an unknown kind flags nothing", checkShape({}, "does-not-exist").ok === true);
+
+  // --- 3b. the NESTED contract: a rename inside a pool row ----------------
+  // The defect this closes: renaming `window_5h` left `plan` and `pools`
+  // perfectly present, so the detector said ok and `parsePools` drew 0/0/0 —
+  // a serene empty quota instead of "the upstream shape changed".
+  const renamedWindow = {
+    plan: { id: "p1" },
+    pools: [{ id: "pool-1", window_5H: { limit: "1" }, window_7d: { limit: "1" } }]
+  };
+  const drift = checkShape(renamedWindow, "pool-usage");
+  check("a renamed window_5h is reported as drift",
+    drift.ok === false && drift.missing.includes("pools[].window_5h"), JSON.stringify(drift));
+  // …and the parser really does draw zeros for that body, which is WHY the
+  // detector has to catch it: the two halves are asserted against each other.
+  const parsedRenamed = parsePools(renamedWindow);
+  check("the renamed window really would have drawn 0/0/0",
+    parsedRenamed.pools[0].window5h.used === 0 && parsedRenamed.pools[0].window5h.limit === 0,
+    JSON.stringify(parsedRenamed.pools[0].window5h));
+  const bothRenamed = checkShape({
+    plan: { id: "p1" },
+    pools: [{ id: "pool-1", window5: {}, window7: {} }]
+  }, "pool-usage");
+  check("both renamed windows are reported",
+    bothRenamed.missing.includes("pools[].window_5h") && bothRenamed.missing.includes("pools[].window_7d"),
+    JSON.stringify(bothRenamed));
+  const noPlanId = checkShape({ plan: {}, pools: [] }, "pool-usage");
+  check("a plan without its id is reported", noPlanId.missing.includes("plan.id"), JSON.stringify(noPlanId));
+  // ONE rename must not be blamed twice: when the top-level root is gone the
+  // nested path is not also reported.
+  const rootGone = checkShape({ pools: [] }, "pool-usage");
+  check("a missing `plan` root is reported once, not as plan.id too",
+    rootGone.missing.includes("plan") && !rootGone.missing.includes("plan.id"), JSON.stringify(rootGone));
+  // An empty pool list is "no rows yet", not drift.
+  check("an empty pools array is not nested drift",
+    checkShape({ plan: { id: "p1" }, pools: [] }, "pool-usage").ok === true);
+  // A pool element that is not an object fails the path rather than throwing.
+  check("a non-object pool element is reported, not thrown",
+    checkShape({ plan: { id: "p1" }, pools: [null] }, "pool-usage").ok === false);
+  check("trend carries no nested requirements yet",
+    checkShape({ series: [{ model_id: "m" }] }, "credit-usage-trend").ok === true);
 }
 
 // --- 4. parsePools(): normalization of the whole pool row -----------------
