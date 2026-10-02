@@ -1,0 +1,11 @@
+{
+  "minTokens": 70,
+  "reporters": ["console-full"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/lib/**",
+    "**/client.js",
+    "**/upstream/**",
+    "**/.git/**"
+  ]
+}
