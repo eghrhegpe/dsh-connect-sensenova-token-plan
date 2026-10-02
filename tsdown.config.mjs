@@ -54,10 +54,21 @@ export default defineConfig([
     format: "esm",
     platform: "node",
     target: "es2023",
-    // A single self-contained bundle: no code-splitting, one entry file. The
-    // published surface is one entry point (`package.json#main` +
-    // `exports["."]`), and the offline suites import the SOURCES directly, so a
-    // per-module `lib/` output is needed by neither the runtime nor the tests.
+    // One entry file, but NOT one output file. `splitting: false` governs
+    // STATIC splitting only; the two adapter modules are reached through a
+    // literal `import()` at the call site (`deps.loadAdapterModule ?? (() =>
+    // import("./llm-adapter.ts"))`), and a dynamic import forces a split chunk
+    // no matter what `splitting` says. That is load-bearing LAZINESS, not an
+    // accident: the adapters are only needed once a provider is actually
+    // published, so a Host running the panel alone never parses them.
+    //
+    // The consequence to keep in mind when editing: `lib/` is a CHUNK GRAPH
+    // whose chunk names carry a content hash, so `lib/index.js` is only valid
+    // alongside the exact chunks it names. A partial `git add lib/` (committing
+    // the entry but not a renamed chunk) ships a package that throws
+    // ERR_MODULE_NOT_FOUND at plugin load. `test/build-gate.mjs` walks the graph
+    // from this entry and fails on a dangling or orphaned chunk, with no
+    // toolchain needed.
     splitting: false,
     clean: true,
     minify: false,

@@ -28,13 +28,14 @@
  * CI is a listed follow-up in ROADMAP §6.2.)
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ARTIFACT = join(root, "client.js");
-const HOST_BUNDLE = join(root, "lib", "index.js");
+const LIB = join(root, "lib");
+const HOST_BUNDLE = join(LIB, "index.js");
 
 const results = [];
 const check = (name, pass, detail = "") => {
@@ -42,14 +43,90 @@ const check = (name, pass, detail = "") => {
   if (!pass) console.error(`FAIL ${name}${detail ? ` — ${detail}` : ""}`);
 };
 
+// === 0. ZERO-DEPENDENCY artifact integrity (runs even without tsdown) ========
+// Everything below this block needs a build toolchain; the checks here do not,
+// and they guard the failure mode ADR-005 was written for: the artifacts are
+// VERSIONED, so a partial `git add lib` ships a package whose host entry
+// resolves into a chunk that is not in the tarball.
+//
+// This is not hypothetical. `lib/` is a CODE-SPLIT graph whose chunk names
+// carry a content hash (`llm-adapter-17gZQlIS.js`), and the split is load-bearing
+// for LAZINESS, not an accident — `llm-adapter.ts` and `raccoon-llm-adapter.ts`
+// are reached through `import()` so the panel never pays for an adapter it does
+// not use (lib/index.js:4420, :7453). That shape has exactly one bad failure
+// mode: rename one file, rebuild, and `git add src/` without `git add lib/`
+// leaves `lib/index.js` importing a chunk name that no longer exists. Node then
+// throws ERR_MODULE_NOT_FOUND at PLUGIN LOAD, inside the user's Host, on the
+// first request — a bad install, not a caught error. `git diff --exit-code -- lib`
+// (CI's build-freshness job) cannot see it either: it runs a build first, so the
+// tree it diffs is the one the build just rewrote.
+//
+// So: walk the graph from the published entry and require that every relative
+// specifier resolves inside `lib/`. Pure fs, no tsdown, no network.
+if (existsSync(HOST_BUNDLE)) {
+  /** Relative specifiers a bundler left in one emitted chunk. */
+  const relSpecifiers = (text) => {
+    const found = [];
+    // `from "./x.js"`, `import("./x.js")`, `require("./x.js")`. Comments are
+    // stripped first: the bundle inlines JSDoc that quotes SOURCE import
+    // specifiers (`import("./codes.ts")`), and a comment is not a dependency.
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    for (const match of code.matchAll(/(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](\.\/[^"']+)["']/g)) {
+      found.push(match[1]);
+    }
+    return found;
+  };
+
+  const visited = new Set();
+  const dangling = [];
+  const queue = [HOST_BUNDLE];
+  while (queue.length > 0) {
+    const file = queue.shift();
+    if (visited.has(file)) continue;
+    visited.add(file);
+    let text;
+    try { text = readFileSync(file, "utf8"); } catch { dangling.push(`${file} (unreadable)`); continue; }
+    for (const spec of relSpecifiers(text)) {
+      const target = resolvePath(dirname(file), spec);
+      // A specifier escaping lib/ would resolve against the source tree at
+      // runtime (or not at all) — the published tarball has no src/.
+      if (!target.startsWith(LIB)) { dangling.push(`${file} → ${spec} (escapes lib/)`); continue; }
+      if (!existsSync(target)) { dangling.push(`${file} → ${spec} (missing)`); continue; }
+      queue.push(target);
+    }
+  }
+
+  check("every chunk lib/index.js reaches exists in lib/", dangling.length === 0,
+    dangling.length === 0 ? `${visited.size} module(s) walked` : dangling.join("; "));
+  // The converse: a chunk nothing references is a leftover from a previous
+  // build. `clean: true` should prevent it, but a hand-restored or
+  // conflict-resolved lib/ can carry one, and it would ship dead weight in
+  // every install forever.
+  const orphans = existsSync(LIB)
+    ? readdirSync(LIB).filter((name) => name.endsWith(".js")).map((name) => join(LIB, name))
+        .filter((file) => !visited.has(file))
+    : [];
+  check("lib/ holds no chunk the entry cannot reach", orphans.length === 0,
+    orphans.length === 0 ? "" : `orphan: ${orphans.map((f) => f.slice(LIB.length + 1)).join(", ")}`);
+} else {
+  // No build yet (clean checkout, never built). Same rule as test/package.test.mjs:
+  // loud, and not a regression — the tarball that ships this has no host entry,
+  // which is precisely what CI's build-freshness job exists to catch.
+  console.log("[build-gate] no lib/index.js — skipping the chunk-closure walk (run `npm run build`).");
+}
+
+// Everything past this point needs a build toolchain.
 if (!existsSync(join(root, "node_modules", "tsdown", "package.json"))) {
   process.stderr.write(
     `\n[build-gate] SKIPPED — tsdown is not installed.\n` +
     `[build-gate]   Bootstrap dev deps with: npm i -D tsdown --legacy-peer-deps\n` +
     `[build-gate]   (the repo's peerDependencies are Host-runtime packages and do not\n` +
-    `[build-gate]   resolve from a registry, so a plain npm install cannot run here).\n\n`
+    `[build-gate]   resolve from a registry, so a plain npm install cannot run here).\n` +
+    `[build-gate]   The zero-dependency artifact checks above DID run.\n\n`
   );
-  process.exit(0);
+  console.log(JSON.stringify(results, null, 2));
+  const failed = results.filter((r) => !r.pass);
+  process.exit(failed.length > 0 ? 1 : 0);
 }
 
 const normalized = (path) => existsSync(path) ? readFileSync(path, "utf8").replace(/\r\n/g, "\n") : null;
