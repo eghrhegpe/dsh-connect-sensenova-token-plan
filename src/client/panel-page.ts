@@ -7,12 +7,13 @@ import {
   AccountForm
 } from "./account-form.ts";
 import { ApiKeyForm, ProviderForm } from "./api-key-form.ts";
-import { PANEL_ID, SNAPSHOT_PATH } from "./const.ts";
-import { clock, format, statedCadenceMs } from "./format.ts";
-import { errorOfStatus, FORM_EXCLUDED_CODES, GUIDANCE_BY_CODE, interpretSnapshot, viewOf } from "./snapshot.ts";
-import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
+import { PANEL_ID } from "./const.ts";
+import { clock, format } from "./format.ts";
+import { FORM_EXCLUDED_CODES, GUIDANCE_BY_CODE, viewOf } from "./snapshot.ts";
+import { useSnapshotPolling } from "./use-snapshot-polling.ts";
+import { h, useCallback, useEffect, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
-import type { PoolData, SnapshotData, VisionModelData } from "./wire.ts";
+import type { PoolData, VisionModelData } from "./wire.ts";
 import { S } from "./styles.ts";
 import { PoolCard, PoolExhaustionNotice, SectionCard, TrendTable } from "./cards.ts";
 import { DrawSwitch } from "./provider-controls.ts";
@@ -53,18 +54,9 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
   tt: Tt;
   localeSubscribe?: unknown;
 }): unknown {
-  const [data, setData] = useState<SnapshotData | null>(null);
-  const [error, setError] = useState<string | { message: unknown } | null>(null);
-  // Has the FIRST load attempt reached a conclusion? Until it has, the
-  // panel must show "loading", not the account form: `viewOf` reads
-  // `data === null, error === null` as "nothing says you are configured",
-  // and `needsSetup` then renders the sign-in form for a fraction of a
-  // second on every mount — including for users who are configured and
-  // about to see their pools. That first-frame form was the unreachable
-  // `panel.loading` branch: without this gate the loading line was DEAD
-  // CODE, because the null/null state always routed to the form.
-  const [loadedOnce, setLoadedOnce] = useState(false);
-  const [updatedAt, setUpdatedAt] = useState(0);
+  // Polling state lives in the hook: `data`/`error`/`loadedOnce`/`updatedAt`/
+  // `cadenceMs`/`load` are returned there (see ./use-snapshot-polling.ts).
+  const { data, error, loadedOnce, updatedAt, load } = useSnapshotPolling();
   const [, setLocaleRevision] = useState(0);
   // The content sections start expanded — the panel opens showing
   // everything — while the account editor starts collapsed: it is a
@@ -106,129 +98,9 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
     return (localeSubscribe as (fn: () => void) => () => void)(() => setLocaleRevision((revision) => revision + 1));
   }, [localeSubscribe]);
 
-  // How often to ask again, in ms. The Host states it in every snapshot;
-  // this default only covers the first load, before any answer arrives.
-  const [cadenceMs, setCadenceMs] = useState(30_000);
-
-  // A snapshot only writes if it is still the newest one: the interval can
-  // start a second load before the first returns, and without this the
-  // slower response lands last, replacing fresh numbers with a stale
-  // snapshot — the usage bar visibly moves backwards. The generation is
-  // bumped when a load STARTS, which is also what lets a manual refresh
-  // supersede the scheduled one that is already on its way.
-  const generation = useRef(0);
-  const inFlight = useRef<{ abort?: () => void } | null>(null);
-
-  const load = useCallback(async () => {
-    generation.current += 1;
-    const mine = generation.current;
-    const isCurrent = () => generation.current === mine;
-    // Cancel the superseded poll, not just ignore it: a stale request keeps
-    // the Host's connection open for nothing.
-    inFlight.current?.abort?.();
-    const controller = typeof AbortController === "function" ? new AbortController() : null;
-    inFlight.current = controller;
-    try {
-      const response = await fetch(SNAPSHOT_PATH, {
-        headers: { accept: "application/json" },
-        cache: "no-store",
-        signal: controller ? controller.signal : undefined
-      });
-      if (!isCurrent()) return;
-      if (!response.ok) {
-        setError(errorOfStatus(response.status));
-        return;
-      }
-      const body = await response.json();
-      if (!isCurrent()) return;
-      // The Host answers 200 with `ok:false` for every expected failure, so
-      // the code is kept to pick the guidance rather than the message. The
-      // reading is a named module-scope function, so the tests exercise
-      // exactly what the panel does instead of a copy of it.
-      const read = interpretSnapshot(body);
-      if (read.data === null) {
-        setData(null);
-        setError(read.error);
-        return;
-      }
-      setData(read.data);
-      setError(null);
-      setUpdatedAt(Date.now());
-      // Follow the Host's cadence instead of assuming one: the two would
-      // otherwise disagree about how fresh this screen is, and the panel
-      // would go on polling at the old rate after the operator changed it.
-      // The Host clamps the value at its source (`clampInt(..., 5)`), so the
-      // panel does not clamp it a second time — a client-side floor/ceiling
-      // was a second opinion that silently overrode the stated number (the
-      // raccoon tab's 2 s scan cadence is below the old 5 s floor). The
-      // conversion is shared with that tab.
-      const stated = read.data?.pollSeconds;
-      if (typeof stated === "number" && Number.isFinite(stated)) {
-        setCadenceMs(statedCadenceMs(stated, cadenceMs));
-      }
-    } catch (reason) {
-      // An abort is our own supersession, not a network failure.
-      if (!isCurrent()) return;
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      // The attempt is over one way or another — even where the early
-      // `return`s above skipped their state writes (a missing `ok`, a
-      // body that failed to parse). Only the CURRENT load gets to say so:
-      // an aborted, superseded attempt must not flip the gate while
-      // its replacement is still in flight.
-      if (isCurrent()) setLoadedOnce(true);
-      if (inFlight.current === controller) inFlight.current = null;
-    }
-  }, []);
-
   const toggleSection = useCallback((key: string) => {
     setOpenSections((current) => ({ ...current, [key]: !current[key] }));
   }, []);
-
-  // One effect owns the whole polling cycle: an immediate load on mount,
-  // then the cadence the Host last stated. Re-running on `cadenceMs` is
-  // what lets a changed rate take effect without a reload.
-  //
-  // The interval is stopped while the tab is hidden — nobody is watching
-  // the screen, and every poll keeps a Host connection open — and a single
-  // load fires on the way back, which also gives a stale "更新于" line
-  // something fresh to say.
-  useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const run = () => {
-      if (alive) void load();
-    };
-    const start = () => {
-      if (timer === null) timer = setInterval(run, cadenceMs);
-    };
-    const stop = () => {
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-    run();
-    start();
-    const onVisibility = () => {
-      if (!alive) return;
-      if (document.visibilityState === "hidden") stop();
-      else {
-        run();
-        start();
-      }
-    };
-    if (typeof document !== "undefined" && "addEventListener" in document) {
-      document.addEventListener("visibilitychange", onVisibility);
-    }
-    return () => {
-      alive = false;
-      stop();
-      if (typeof document !== "undefined" && "addEventListener" in document) {
-        document.removeEventListener("visibilitychange", onVisibility);
-      }
-    };
-  }, [load, cadenceMs]);
 
   const pools = data?.pools;
   const trend = data?.trend;

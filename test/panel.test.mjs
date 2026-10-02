@@ -293,14 +293,17 @@ const healthy = {
 // in `PanelPage`, whose cadence the Host states in every snapshot. The form's
 // 1-second countdown timer is unrelated to polling and may stay a literal.
 {
-  const source = await readFile(new URL("../src/client/panel-page.ts", import.meta.url), "utf8");
-  const pollTimers = source.match(/setInterval\(run,\s*[^)]*\)/g) ?? [];
+  // The cadence machinery now lives in the extracted `useSnapshotPolling` hook
+  // (panel-page.ts owns only JSX + the non-polling state).
+  const hookSource = await readFile(new URL("../src/client/use-snapshot-polling.ts", import.meta.url), "utf8");
+  const pageSource = await readFile(new URL("../src/client/panel-page.ts", import.meta.url), "utf8");
+  const pollTimers = hookSource.match(/setInterval\(run,\s*[^)]*\)/g) ?? [];
   check("the poll timer takes a stated cadence, not a literal",
     pollTimers.length === 1 && /\d/.test(pollTimers[0]) === false,
     pollTimers.join(" | "));
   check("the cache note quotes the snapshot's own number",
-    /cache:\s*data\?\.cacheSeconds/.test(source),
-    (source.match(/cache:[^,}]*cacheSeconds[^)]*\)/g) ?? []).join(" | "));
+    /cache:\s*data\?\.cacheSeconds/.test(pageSource),
+    (pageSource.match(/cache:[^,}]*cacheSeconds[^)]*\)/g) ?? []).join(" | "));
 
   // The INITIAL cadence — what the first frame polls at, before any snapshot
   // has stated one — is the other literal the Host owns too:
@@ -310,8 +313,10 @@ const healthy = {
   // Host default left the quota tab polling at the old rate with nothing red.
   // The literal carries an underscore (`30_000`), the repo's own convention
   // for thousands in a number literal, which also anchors this to the cadence
-  // state and nothing else in this file.
-  const initialCadence = source.match(/useState\((\d+_\d+)\)/) ?? [];
+  // state and nothing else in this file. It is now the hook's default
+  // parameter (`useSnapshotPolling(defaultCadenceMs = 30_000)`), so the regex
+  // matches the `= 30_000` default rather than an inline `useState(30_000)`.
+  const initialCadence = hookSource.match(/defaultCadenceMs\s*=\s*(\d+_\d+)/) ?? [];
   check("the initial cadence equals the Host's own default",
     Number(initialCadence[1]?.replace(/_/g, "")) === CONFIG_DEFAULTS.pollSeconds * 1000,
     `${initialCadence[1] ?? "not found"} vs ${CONFIG_DEFAULTS.pollSeconds}s`);
