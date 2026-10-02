@@ -27,7 +27,7 @@ const jwk = publicKey.export({ format: "jwk" });
 const privateJwk = privateKey.export({ format: "jwk" });
 
 /** Counters the test asserts on, so "did it log in?" is answerable. */
-export const log = { jwks: 0, auth: 0, iam: 0, token: 0, poolUsage: 0, trend: 0, catalog: 0, badPassword: 0 };
+export const log = { jwks: 0, auth: 0, iam: 0, token: 0, poolUsage: 0, trend: 0, catalog: 0, badPassword: 0, throttled: 0 };
 
 /** A JWT the panel will accept, expiring in an hour. */
 function freshJwt() {
@@ -159,6 +159,22 @@ const server = createServer(async (req, res) => {
     seen.username = typeof parsed.username === "string" ? parsed.username : null;
     seen.password = await openSealed(parsed.password);
     process.stdout.write(`fake: iam username=${seen.username} sealedPassword=${JSON.stringify(seen.password)}\n`);
+    // A throttled account answers the platform's real rate-limit envelope: a
+    // 429 whose reason scans to `RATE_LIMITED` and whose `Retry-After` header
+    // states a window. A fake that only ever refuses a wrong password could
+    // never exercise the wait honouring, so a run would pass while a real
+    // lockout was still being extended with every poll.
+    if (seen.username === "e2e-throttle") {
+      log.throttled += 1;
+      return json(res, 429, {
+        code: 3,
+        message: "TooManyAttempts",
+        details: [
+          { "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "tooManyAttempts", domain: "iam" },
+          { "@type": "type.googleapis.com/google.rpc.LocalizedMessage", locale: "en", message: "login attempts too frequent, try again after 2 minutes" }
+        ]
+      }, { "retry-after": "120" });
+    }
     if (seen.password !== PASSWORD) {
       log.badPassword += 1;
       // The real envelope: a generic status up top, the cause in details[].

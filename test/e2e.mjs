@@ -706,6 +706,71 @@ try {
     check("a foreign origin cannot choose the model offer", evilModels.status === 403, String(evilModels.status));
   }
 
+  // === the throttle: a platform-stated window is honoured, then local =====
+  // Every earlier sign-in succeeded, so no throttle is in force: this is the
+  // run's first refusal and it must reach IAM. The fake answers the account
+  // `e2e-throttle` with a real 429 envelope carrying `Retry-After: 120`.
+  //
+  // Two properties only a real Host settles, and both are the reason the
+  // throttle exists (token-store/throttle.ts):
+  //   - the platform's own window rides out as `retryAfterMs`, so the panel
+  //     waits out a lockout instead of re-attempting into it;
+  //   - a SECOND attempt inside that window is served by the LOCAL gate and
+  //     never reaches the platform — the fake's IAM counter is the evidence,
+  //     not the plugin's word. Re-probing is what turns a lockout permanent.
+  //
+  // The deliberate resubmit that closes the block is the ONE path that clears
+  // a throttle, so the wrong-password block below starts clean again.
+  {
+    const NS = "/api/dsh-connect-sensenova-token-plan";
+    const attempt = (body) => call(`${NS}/account`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    const iamBefore = fake.log.iam;
+    const first = await attempt({ username: "e2e-throttle", password: "x" });
+    check("a rate-limited sign-in is classified as rate_limited",
+      first.body?.code === "rate_limited", String(first.body?.code));
+    check("the platform's own wait rides out as a countdown",
+      first.body?.retryAfterMs === 120000,
+      JSON.stringify({ retryAfterMs: first.body?.retryAfterMs }));
+    check("the platform's own words reach the panel",
+      typeof first.body?.detail === "string" && first.body.detail.includes("try again after 2 minutes"),
+      String(first.body?.detail));
+    check("the refusal reached the fake's IAM", fake.log.iam === iamBefore + 1,
+      `iam calls ${iamBefore} -> ${fake.log.iam}`);
+
+    // The console answers from the earlier successful polls are still inside
+    // their 60s cache, and a cache hit never calls `getToken` — so the gate
+    // under test would not fire at all. `forget: true` is the one path that
+    // clears the console cache WITHOUT clearing the throttle: a deliberate
+    // resubmit clears both, which would erase the very state being probed.
+    const cleared = await attempt({ forget: true });
+    check("forgetting the account clears the console cache, not the throttle",
+      cleared.body?.ok === true, JSON.stringify(cleared.body ?? {}).slice(0, 140));
+
+    // A cache miss now has to obtain a token, and the local gate refuses it
+    // inside the window. The fake's IAM counter is the evidence that no
+    // re-probe happened — the gate is what a poll loop hits, and re-probing
+    // is what turns a transient lockout permanent.
+    const polled = await call(`${NS}/snapshot`);
+    check("the poll is refused by the LOCAL gate while the wait is in force",
+      polled.body?.quotaError?.code === "auth_error", String(polled.body?.quotaError?.code));
+    check("the poll reports the wait rather than a clean error",
+      typeof polled.body?.auth?.retryAfterMs === "number" && polled.body.auth.retryAfterMs > 0,
+      JSON.stringify({ retryAfterMs: polled.body?.auth?.retryAfterMs }));
+    check("the poll never re-probed the platform", fake.log.iam === iamBefore + 1,
+      `iam calls ${iamBefore + 1} -> ${fake.log.iam}`);
+
+    const resubmit = await attempt({ username: "e2e-user", password: "e2e-test-password" });
+    check("a deliberate resubmit clears the throttle and signs back in",
+      resubmit.body?.ok === true, JSON.stringify(resubmit.body ?? {}).slice(0, 200));
+    check("the resubmit reached IAM, so the throttle really was cleared",
+      fake.log.iam > iamBefore + 1, `iam calls ${iamBefore + 1} -> ${fake.log.iam}`);
+  }
+
   // === a wrong password is classified, and the panel explains itself =====
   {
     const res = await call("/api/dsh-connect-sensenova-token-plan/account", {
