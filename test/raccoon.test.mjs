@@ -879,6 +879,90 @@ function section(title) {
     check("W4 the gate reopens only once save settled",
       walk.view.isInFlight() === false, `inFlight=${walk.view.isInFlight()}`);
   }
+
+  // W5: `stop()` ends a PENDING walk without waiting out the poll interval,
+  // and without ever calling the credentials service. The walk is the one side
+  // effect that outlives the request that started it, so route teardown has to
+  // be able to cut it — a 2s sleep per unmount is survivable, five minutes of
+  // gateway polling is not.
+  {
+    let saves = 0;
+    let polls = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async () => { polls += 1; return { status: RACCOON_QR_STATUS.PENDING }; },
+      saveCredential: async () => { saves += 1; },
+      invalidateCache: () => {}
+    });
+    void walk.issueScan();
+    // Let the first poll land so the walk is parked in the inter-poll sleep —
+    // the state `stop()` has to cut short.
+    for (let i = 0; i < 100 && polls === 0; i += 1) await sleep(5);
+    const before = polls;
+    walk.stop();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W5 a stopped pending walk reports canceled, not timeout",
+      event.status === LOGIN_STATUS.canceled, `${event.status}`);
+    check("W5 a stopped walk writes no credential",
+      saves === 0, `saves=${saves}`);
+    check("W5 stop() cuts the poll loop instead of draining the interval",
+      polls - before <= 1, `polled ${polls - before} more time(s) after stop`);
+  }
+
+  // W6: a poll already IN FLIGHT when `stop()` lands still resolves — and its
+  // `success` must be discarded, not written. This is the window that made the
+  // walk dangerous: the gateway call and the teardown are in the same tick, so
+  // a walk that was settling as the Host began unloading would persist a
+  // credential pair into a service the plugin no longer owns.
+  {
+    let releasePoll = null;
+    let saves = 0;
+    const walk = createRaccoonWalk({
+      fetcher: () => new Promise((resolve) => { releasePoll = () => resolve(success()); }),
+      saveCredential: async () => { saves += 1; },
+      invalidateCache: () => {}
+    });
+    void walk.issueScan();
+    for (let i = 0; i < 100 && releasePoll === null; i += 1) await sleep(5);
+    walk.stop();
+    releasePoll?.();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W6 a success arriving after stop() is discarded, not persisted",
+      saves === 0 && event.status === LOGIN_STATUS.canceled,
+      `saves=${saves} / ${event.status}`);
+  }
+
+  // W7: a scan issued after `stop()` never starts — the route that would serve
+  // it is being unregistered, so there is no tab on the other end.
+  {
+    let polls = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async () => { polls += 1; return success(); },
+      saveCredential: async () => {},
+      invalidateCache: () => {}
+    });
+    walk.stop();
+    await walk.issueScan();
+    await drain(walk);
+    check("W7 a scan issued after stop() is refused outright",
+      polls === 0 && walk.view.takeEvent().status === LOGIN_STATUS.canceled,
+      `polls=${polls}`);
+  }
+
+  // W8: `stop()` is idempotent and safe with no walk running — every teardown
+  // but the one that races a live scan calls it that way.
+  {
+    const walk = createRaccoonWalk({
+      fetcher: async () => success(),
+      saveCredential: async () => {},
+      invalidateCache: () => {}
+    });
+    walk.stop();
+    walk.stop();
+    check("W8 stop() is idempotent and safe on an idle walk",
+      walk.view.isInFlight() === false, `inFlight=${walk.view.isInFlight()}`);
+  }
 }
 
 // --- report ------------------------------------------------------------------

@@ -86,28 +86,70 @@ export interface RaccoonWalkView {
  * @param options.invalidateCache - called on successful login to drop reads taken under the previous credential.
  * @param options.onSettled - called once at the START of each scan cycle (after
  *   the QR code is generated, before the poll loop begins), regardless of the
- *   outcome. Kept for callers that want to reset per-scan UI state; the read
- *   model's `login` view reads the walk's own state (`takeEvent` / `liveScan`),
- *   not this hook, so the route registers it as a no-op.
+ *   outcome. OPTIONAL: it exists for callers that want to reset per-scan UI
+ *   state, and the read model does not use it — `login` reads the walk's own
+ *   state (`takeEvent` / `liveScan`) — so the route registers nothing and a
+ *   caller with no per-scan UI has nothing to say.
  * @param options.onLoggedIn - called AFTER the credential was persisted and the
  *   read cache cleared, with the outcome already `logged_in`. The caller's
  *   provider-registration side effect lives here. Its failures are swallowed:
  *   the credential is already in place, so a publish miss is a degraded-but-
  *   logged-in state, never a login failure.
- * @returns {{ view: RaccoonWalkView, issueScan: () => Promise<void> }}
+ * @returns {{ view: RaccoonWalkView, issueScan: () => Promise<void>, stop: () => void }}
  */
 export function createRaccoonWalk(options: {
   fetcher: (code: string) => Promise<RaccoonQrPollResult>;
   saveCredential: (credential: { accessToken: string; refreshToken: string; expiresAtMs?: number; nickname?: string }) => Promise<void>;
   invalidateCache: () => void;
-  onSettled: () => void;
+  onSettled?: () => void;
   onLoggedIn?: () => void;
-}): { view: RaccoonWalkView; issueScan: () => Promise<void> } {
+}): { view: RaccoonWalkView; issueScan: () => Promise<void>; stop: () => void } {
   let scan: { code: string; url: string } | null = null;
   /** `null` while idle; a promise while the walk runs. Cleared in finally. */
   let walk: Promise<void> | null = null;
   let status: LoginStatus | null = null;
   let error: string | null = null;
+  /**
+   * Set by `stop()` when the plugin is letting go of this walk (route
+   * teardown). It is the ONE flag that can end a poll loop early, and it is
+   * checked in three places, all of them load-bearing — see `stoppedAt` below.
+   */
+  let stopRequested = false;
+  /**
+   * Wakes the poll loop's inter-poll sleep. A bare `stopRequested` check would
+   * still leave the loop parked for up to a full poll interval after teardown,
+   * because the sleep is not interrupted by anything else; holding the resolver
+   * lets `stop()` cut it short, so a cancelled walk stops in microseconds
+   * rather than seconds. `null` while not sleeping.
+   */
+  let wakePoll: (() => void) | null = null;
+
+  /**
+   * Whether this walk must not touch the credentials service any more.
+   *
+   * Read at each of the three points where the walk would otherwise still have
+   * an effect after teardown: before each poll, after a poll returns (a
+   * gateway call in flight when `stop()` lands still resolves), and before the
+   * credential write. The last one is the reason this flag exists at all — a
+   * walk that settled in the same tick the Host began unloading would otherwise
+   * persist a fresh credential pair into a service the plugin no longer owns,
+   * and keep knocking on the gateway until its own deadline.
+   */
+  const stoppedAt = () => stopRequested;
+
+  /** The poll interval, as an interruptible sleep. */
+  const sleepOnePoll = () =>
+    new Promise<void>((resolve) => {
+      const done = () => {
+        wakePoll = null;
+        resolve();
+      };
+      const timer = setTimeout(done, RACCOON_QR_POLL_INTERVAL_MS);
+      wakePoll = () => {
+        clearTimeout(timer);
+        done();
+      };
+    });
 
   const view: RaccoonWalkView = {
     isInFlight: () => walk !== null,
@@ -135,7 +177,7 @@ export function createRaccoonWalk(options: {
     scan = { code, url };
     status = LOGIN_STATUS.scanning;
     error = null;
-    options.onSettled();
+    options.onSettled?.();
 
     const deadline = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
     let canceled = false;
@@ -143,7 +185,7 @@ export function createRaccoonWalk(options: {
 
     try {
       try {
-        while (Date.now() < deadline) {
+        while (Date.now() < deadline && !stoppedAt()) {
           let poll;
           try {
             poll = await options.fetcher(code);
@@ -151,6 +193,10 @@ export function createRaccoonWalk(options: {
             // Transient poll error: keep waiting, don't fail the walk.
             poll = { status: RACCOON_QR_STATUS.PENDING };
           }
+          // A poll already in flight when `stop()` landed still resolves. Its
+          // result is discarded: the walk is over, and acting on a `success`
+          // here is exactly the credential write `stop()` exists to prevent.
+          if (stoppedAt()) break;
           if (poll.status === RACCOON_QR_STATUS.SUCCESS) {
             // The parser guarantees a non-empty pair on `success` (a tokenless
             // success is reported as `pending`, never here) — this narrowing
@@ -162,7 +208,7 @@ export function createRaccoonWalk(options: {
             canceled = true;
             break;
           }
-          await new Promise((resolve) => setTimeout(resolve, RACCOON_QR_POLL_INTERVAL_MS));
+          await sleepOnePoll();
         }
       } finally {
         // The scan is over; the poll loop's own cleanup lands here. The GATE is
@@ -174,7 +220,19 @@ export function createRaccoonWalk(options: {
       }
 
       if (settled === null) {
-        status = canceled ? LOGIN_STATUS.canceled : LOGIN_STATUS.timeout;
+        // A stop is reported as `canceled`, not `timeout`: the gateway was
+        // never given the chance to be late, and telling the tab it timed out
+        // would be a lie it has no way to correct.
+        status = canceled || stoppedAt() ? LOGIN_STATUS.canceled : LOGIN_STATUS.timeout;
+        return;
+      }
+
+      // The last gate before the only write this walk performs. `settled` is
+      // non-null here, so without this the walk could land a credential the
+      // Host stopped owning — the poll loop can finish in the same tick the
+      // teardown starts.
+      if (stoppedAt()) {
+        status = LOGIN_STATUS.canceled;
         return;
       }
 
@@ -215,6 +273,13 @@ export function createRaccoonWalk(options: {
   }
 
   async function issueScan() {
+    // A scan issued after `stop()` is refused rather than started: the walk
+    // belongs to a route that is being unregistered, so there is no longer a
+    // tab on the other end of it.
+    if (stoppedAt()) {
+      status = LOGIN_STATUS.canceled;
+      return;
+    }
     walk = runScan()
       .catch(() => {
         // An unexpected path (should not happen) — treat as a failed scan.
@@ -225,5 +290,18 @@ export function createRaccoonWalk(options: {
     void walk;
   }
 
-  return { view, issueScan };
+  /**
+   * End the walk now, without waiting out the poll loop.
+   *
+   * Called by the route's `off()` callback, so a plugin that unloads mid-scan
+   * stops writing credentials and stops calling the gateway. Idempotent, and
+   * safe to call when no walk is running — which is every teardown but the one
+   * that races a live scan.
+   */
+  function stop() {
+    stopRequested = true;
+    wakePoll?.();
+  }
+
+  return { view, issueScan, stop };
 }

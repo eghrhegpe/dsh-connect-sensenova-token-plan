@@ -99,7 +99,10 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
     fetcher: (code: string) => pollRaccoonQrLogin(code),
     saveCredential: (credential) => (raccoonStore ? raccoonStore.save(credential) : Promise.reject(new Error("no raccoon credential store"))),
     invalidateCache: () => raccoonRead.clear(),
-    onSettled: () => { /* no-op — status flows through the view */ },
+    // No `onSettled`: it exists for callers with per-scan UI state to reset,
+    // and this route has none — the outcome flows through the view, which is
+    // what the read model reads. Passing a no-op said the same thing with more
+    // ceremony.
     // Login-settled side effect: when the switch is on, drive the publisher
     // so the just-signed-in account's catalogue reaches DSH's picker right
     // away. Best-effort: a publish miss must not flip the login outcome (the
@@ -118,7 +121,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
   });
   const walkView = raccoonWalkManager.view;
 
-  return ctx.webServer.register({
+  const offRoute = ctx.webServer.register({
     kind: "exact",
     path: RACCOON_PATH,
     handler: withOrigin(async (request: any, response: any) => {
@@ -262,7 +265,14 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
           // be served the previous account's balance for up to five minutes.
           raccoonRead.clear();
           if (raccoonPublisher !== null && raccoonPublisher !== undefined) {
-            await raccoonPublisher.publish(RACCOON_FALLBACK_MODELS, "");
+            // Through the same curation filter as every other publish path
+            // here. The credential is already gone, so the publisher lands on
+            // its `not_configured` unregister branch — but publishing the raw
+            // fallback roster made this the ONE offer that ignored the panel's
+            // allow-list, which is a trap the moment logout ever means "keep
+            // the credential, drop the provider" instead.
+            const { rows, officeIdentity } = await collectRaccoonRows(null);
+            await raccoonPublisher.publish(rows, officeIdentity);
           }
         } catch (error) {
           await answer({ ok: false, error: errMsg(error) });
@@ -275,4 +285,16 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
       writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
     }, settings.allowedHosts)
   });
+
+  // Unregistering the route ends the walk with it. The walk is the one side
+  // effect here that outlives the request that started it: up to
+  // `RACCOON_LOGIN_TIMEOUT_MS` of gateway polling, ending in a write to the
+  // credentials service. Without this, unloading the plugin mid-scan left it
+  // knocking on the gateway and could still persist a credential pair into a
+  // service the plugin no longer owns. Idempotent, and a no-op when no scan is
+  // running — which is every teardown but the one that races a live walk.
+  return () => {
+    raccoonWalkManager.stop();
+    offRoute();
+  };
 }
