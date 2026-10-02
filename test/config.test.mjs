@@ -183,6 +183,37 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
     credentialKey(name, "sensenova-console") === `${name}/sensenova-console`);
 }
 
+// --- 6b. the client's route literals match the host's derived ones ---------
+// §6 pins the slug in package.json, the patch row and the credential scope.
+// It does NOT reach the HTTP paths: `src/client/const.ts` spells seven
+// `/api/<slug>/<resource>` LITERALS (the browser bundle cannot import the
+// host, so it has no way to derive them), while `src/host/routes.ts` derives
+// the same seven as `/api/${name}/<resource>`. Between the two, and the
+// literals re-declared in `test/routes.test.mjs`, there was no pin — so a
+// rename of the slug, or adding a route on one side only, read as green
+// until the panel 404'd. Both sides are scanned as text so the check proves
+// the CLIENT side really is literals and the HOST side really is derived.
+{
+  const clientSrc = readFileSync(join(here, "..", "src", "client", "const.ts"), "utf8");
+  const hostSrc = readFileSync(join(here, "..", "src", "host", "routes.ts"), "utf8");
+
+  // The client spells the whole path as a literal (`"/api/<slug>/snapshot"`);
+  // the host derives the same one (`\`/api/${name}/snapshot\``). Comparing the
+  // FULL paths (not just the resource) is what makes a slug rename fail too.
+  const clientPaths = [...clientSrc.matchAll(/"(?:https?:)?\/api\/([^"\s]+)"/g)]
+    .map((m) => `/api/${m[1]}`)
+    .sort();
+  const hostPaths = [...hostSrc.matchAll(/\/api\/\$\{name\}\/([^`"\s]+)/g)]
+    .map((m) => `/api/${name}/${m[1]}`)
+    .sort();
+
+  check("client/const.ts actually declares route literals", clientPaths.length >= 7, clientPaths.join(", "));
+  check("host/routes.ts derives the same number of routes", hostPaths.length === clientPaths.length, hostPaths.join(", "));
+  check("the client and the host agree path for path",
+    JSON.stringify(clientPaths) === JSON.stringify(hostPaths),
+    `client: ${clientPaths.join(", ")} | host: ${hostPaths.join(", ")}`);
+}
+
 // --- 7. trendMultipliers sanitization ----------------------------------
 // The pseudo-multiplier map reaches the panel as ×N labels, so a malformed
 // entry must be dropped (not thrown — one typo must not take the panel down)

@@ -7,7 +7,7 @@ import { format, tokenSize } from "./format.ts";
 import { postJsonOrThrow } from "./http.ts";
 import { ModelRow } from "./model-row.ts";
 import { bulkModelsIn, modelIsOn, toggleModelIn } from "./models.ts";
-import { h, useCallback, useEffect, useMemo, useState } from "./runtime.ts";
+import { dictKey, h, useCallback, useEffect, useMemo, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
 import type { LlmData, ModelData } from "./wire.ts";
@@ -59,7 +59,7 @@ export function ModelRoster({ models, enabledIds, busy, tt, onToggle }: {
       // Localized per level (关闭/低/中/高/极高/最高), joined compactly.
       const levels = Array.isArray(model?.thinkingLevels) && model.thinkingLevels.length > 0
         ? format(tt("llm.metaLevels"), {
-          levels: model.thinkingLevels.map((level) => tt(`llm.level.${level}`)).join("/")
+          levels: model.thinkingLevels.map((level) => tt(dictKey("llm.level", level))).join("/")
         })
         : null;
       const meta = [ctx, out, levels].filter(Boolean).join(" · ");
@@ -195,7 +195,7 @@ export function ModelPicker({ llm, onDone, tt }: {
       h("span", { style: { ...S.muted, fontSize: 12 } }, tt("llm.rosterHint")),
       typeof llm?.thinkingDefault === "string" && llm.thinkingDefault !== ""
         ? h("span", { style: { ...S.muted, fontSize: 12 } },
-          ` · ${format(tt("llm.rosterThinkingDefault"), { level: tt(`llm.level.${llm.thinkingDefault}`) })}`)
+          ` · ${format(tt("llm.rosterThinkingDefault"), { level: tt(dictKey("llm.level", llm.thinkingDefault)) })}`)
         : null),
     models.length === 0
       ? h("p", { style: S.empty }, tt("llm.rosterEmpty"))

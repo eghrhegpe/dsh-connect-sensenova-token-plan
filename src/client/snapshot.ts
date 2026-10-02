@@ -3,6 +3,7 @@
  * code tables the panel's guidance and forms are keyed by.
  */
 import { format } from "./format.ts";
+import type { zh } from "./i18n.ts";
 import type { Tt } from "./runtime.ts";
 import type { AuthData, ShapeWarningData, SnapshotData } from "./wire.ts";
 
@@ -24,7 +25,8 @@ export interface SnapshotView {
   failure: SnapshotFailure | null;
   auth: AuthData | null;
   needsSetup: boolean;
-  guidanceKey: string | null;
+  /** The dictionary key the guidance line resolves from, never the text. */
+  guidanceKey: keyof typeof zh | null;
   guidance: string | null;
   shapeWarnings: ShapeWarningData[];
 }
@@ -83,7 +85,7 @@ export function errorOfStatus(status: number): SnapshotFailure | string {
  * renamed on either side fails the suite instead of silently reading as
  * "no guidance".
  */
-export const GUIDANCE_BY_CODE: Readonly<Record<string, string>> = Object.freeze({
+export const GUIDANCE_BY_CODE: Readonly<Record<string, keyof typeof zh>> = Object.freeze({
   auth_error: "panel.jwtExpired",
   jwt_expired: "panel.jwtExpired",
   not_configured: "panel.jwtMissing",
@@ -113,7 +115,7 @@ export const FORM_EXCLUDED_CODES: ReadonlySet<string> = Object.freeze(new Set(["
  * canned text translates; the prose (`body.detail`) carries the lockout
  * policy and anything else the platform wanted to say.
  */
-export const REFUSAL_TEXT: Readonly<Record<string, string>> = Object.freeze({
+export const REFUSAL_TEXT: Readonly<Record<string, keyof typeof zh>> = Object.freeze({
   login_rejected: "auth.badCredentials",
   account_locked: "auth.locked",
   rate_limited: "auth.rateLimited",

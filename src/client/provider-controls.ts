@@ -5,7 +5,7 @@
 import { DRAW_PATH, PROVIDER_PATH } from "./const.ts";
 import { count, format } from "./format.ts";
 import { postJsonOrThrow } from "./http.ts";
-import { h, useCallback, useState } from "./runtime.ts";
+import { dictKey, h, useCallback, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import type { LlmData } from "./wire.ts";
 import { S } from "./styles.ts";
@@ -29,7 +29,7 @@ export function ProviderStatus({ llm, tt }: { llm?: LlmData | null; tt: Tt }): u
   // Where the key came from. `memory` and `env` are both real answers;
   // an unknown source degrades to the raw tag rather than a blank line.
   const sourceText = llm.hasApiKey === true
-    ? format(tt("llm.keyPresent"), { source: tt(`llm.src.${String(llm.keySource ?? "")}`) || String(llm.keySource ?? "") })
+    ? format(tt("llm.keyPresent"), { source: tt(dictKey("llm.src", String(llm.keySource ?? ""))) || String(llm.keySource ?? "") })
     : tt("llm.noKey");
   rows.push(h("div", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" }, role: "status" }, sourceText));
   if (llm.ephemeral === true) {

@@ -15,13 +15,16 @@ import { str, obj, num, errMsg } from "./util.ts";
  * The one slug every addressable surface of this plugin derives from.
  *
  * Besides the name the Loader reports for the row, it is also the `/api` route
- * prefix (`index.ts`), the credential record's scope (`token-store.ts`) and the
+ * prefix (`routes.ts`), the credential record's scope (`token-store.ts`) and the
  * state directory (`throttle-store.ts`) — so a rename has to carry the user's
- * stored grant and parked throttle with it, not just the text. The two files
- * that cannot import from here repeat it literally: `package.json#name` and the
- * `id`/`name` pair in `cordis.patch.yml`. Neither is pinned against this
- * constant by `test/config.test.mjs` (it pins `CONFIG_DEFAULTS` only), so a
- * rename must check all three by hand.
+ * stored grant and parked throttle with it, not just the text.
+ *
+ * The mirrors that cannot import this constant are pinned by
+ * `test/config.test.mjs`, so a rename on either side goes red instead of
+ * leaving the stored grant behind: §6 checks the literal `package.json#name`
+ * and the patch row's `id`/`name` pair against it, and §6b checks that every
+ * route literal in `src/client/const.ts` (the browser bundle cannot derive them)
+ * equals the `/api/${name}/…` this half builds in `routes.ts`.
  */
 export const name = "dsh-connect-sensenova-token-plan";
 /** Cordis services this plugin needs; without `webServer` it stays inactive. */

@@ -298,19 +298,23 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
 // 事是不是真的」一无所知。事故：0.4.3 新增第三个 tab「小浣熊」，README 零处提及，
 // 而 README 进 npm 的 files 白名单——装完的用户不知道这个能力存在（PITFALLS §24）。
 // 这里从两个真源派生「README 必须出现的文案」，不写死任何名字：
-//   a) panel-page.ts 的 activeTab 联合类型 -> tab id 集合
+//   a) panel-page.ts 的 `TabId` 联合类型（activeTab 用它） -> tab id 集合
 //   b) i18n.ts 里 `tab.<id>` 的中文文案（zh 字典在前，同键只取首次）
 // 于是「加一个 tab 而忘了告诉用户」必然红，「改 tab 名而 README 不跟」也必然红。
 {
   const panelSrc = readFileSync(join(ROOT, "src", "client", "panel-page.ts"), "utf8");
   const i18nSrc = readFileSync(join(ROOT, "src", "client", "i18n.ts"), "utf8");
   const readme = readFileSync(join(ROOT, "README.md"), "utf8");
-  // 必须钉到 activeTab：本文件第一个 useState 是 useState<SnapshotData | null>，
-  // 泛配会抓到它，反而漏掉真正的 tab 联合类型（自查时此处红过一次）。
-  const union = panelSrc.match(/activeTab,\s*setActiveTab\]\s*=\s*useState<([^>]+)>/);
-  if (!union) bad("src/client/panel-page.ts 找不到 activeTab 的联合类型，检查 9 本身可能已失效");
+  // 必须钉到 activeTab 的联合类型：本文件第一个 useState 是 useState<SnapshotData | null>，
+  // 泛配会抓到它，反而漏掉真正的 tab 联合类型（自查时此处红过一次）。0.4.7 起该联合
+  // 抽成了 `TabId`（面板三处字面量联收敛到一处声明），所以真源跟随 `export type TabId`；
+  // `useState<TabId>` 仍被断言到，防止 activeTab 悄悄换回字面量联而这里还在读别名。
+  const union = panelSrc.match(/activeTab,\s*setActiveTab\]\s*=\s*useState<TabId>/);
+  const tabIdDecl = panelSrc.match(/export\s+type\s+TabId\s*=\s*([^;]+);/);
+  if (!union) bad("src/client/panel-page.ts 找不到 activeTab 的 useState<TabId>，检查 9 本身可能已失效");
+  else if (!tabIdDecl) bad("src/client/panel-page.ts 找不到 export type TabId 声明，tab id 真源断了");
   else {
-    const tabIds = [...union[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+    const tabIds = [...tabIdDecl[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
     if (tabIds.length === 0) bad("activeTab 联合类型里没有解析出任何 tab id");
     else {
       const zh = new Map();

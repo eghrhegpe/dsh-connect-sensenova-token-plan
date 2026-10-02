@@ -12,6 +12,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { decidePanelView, dictionaries, interpretSnapshot, tables, RENDER } from "./panel-decision.js";
 import { AUTH_FAILURE_CODES, CODE, CREDENTIAL_REFUSALS, NO_LOGIN_CODES } from "../src/host/codes.ts";
+import { CONFIG_DEFAULTS } from "../src/host/host-config.ts";
 
 const results = [];
 function check(name, condition, detail = "") {
@@ -299,6 +300,20 @@ const healthy = {
   check("the cache note quotes the snapshot's own number",
     /cache:\s*data\?\.cacheSeconds/.test(source),
     (source.match(/cache:[^,}]*cacheSeconds[^)]*\)/g) ?? []).join(" | "));
+
+  // The INITIAL cadence — what the first frame polls at, before any snapshot
+  // has stated one — is the other literal the Host owns too:
+  // `CONFIG_DEFAULTS.pollSeconds` is the number every snapshot states. The
+  // raccoon tab's fallback is pinned to the route's constant by
+  // `raccoon-status.test.mjs` B8; this one was left unpinned, so retuning the
+  // Host default left the quota tab polling at the old rate with nothing red.
+  // The literal carries an underscore (`30_000`), the repo's own convention
+  // for thousands in a number literal, which also anchors this to the cadence
+  // state and nothing else in this file.
+  const initialCadence = source.match(/useState\((\d+_\d+)\)/) ?? [];
+  check("the initial cadence equals the Host's own default",
+    Number(initialCadence[1]?.replace(/_/g, "")) === CONFIG_DEFAULTS.pollSeconds * 1000,
+    `${initialCadence[1] ?? "not found"} vs ${CONFIG_DEFAULTS.pollSeconds}s`);
 }
 
 // === F5. the API tab's card order and its open-by-default set ==============
@@ -439,6 +454,13 @@ const healthy = {
         }
         const template = /^`([^`$]*)\$\{/.exec(branch);
         if (template !== null && template[1].includes(".")) { families.add(template[1]); continue; }
+        // A `dictKey("<family>", value)` call is the same family spelled through
+        // the helper instead of a template literal: the family cannot be listed
+        // in the dictionary either way, so it has to be pinned the same way.
+        // The cast lives in `runtime.ts` `dictKey` (the ONE escape from the
+        // `DictionaryKey` type), and the family name is its first argument.
+        const dictKey = /^dictKey\("([^"]+)",\s*/.exec(branch);
+        if (dictKey !== null && dictKey[1].includes(".")) { families.add(`${dictKey[1]}.`); continue; }
         // An identifier or table lookup in key position: the KEYS come from a
         // table the render suite already checks VALUE BY VALUE, so record the
         // site and let F6b below pin those tables into the dictionaries.

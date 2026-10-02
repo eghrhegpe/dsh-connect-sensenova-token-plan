@@ -36,6 +36,18 @@ const LOGIN_BLOCKED_QUOTA_CODES: ReadonlySet<string> = new Set(
   Object.keys(GUIDANCE_BY_CODE).filter((code) => !FORM_EXCLUDED_CODES.has(code))
 );
 
+/**
+ * The three panel perspectives, as ONE fact.
+ *
+ * `PanelPage`'s own state, the `HeaderStatus` props type and its JSDoc
+ * `@param` each used to spell the union out by hand, so adding a fourth tab
+ * meant three edits — and the JSDoc one would not fail the build if missed.
+ * The tab bar and the header both branch on this id, so it is the one id
+ * worth naming. The three tabs stay fixed: quota (the Token Plan console),
+ * api (key + provider + draw wiring) and raccoon (the SECOND upstream).
+ */
+export type TabId = "quota" | "api" | "raccoon";
+
 export function PanelPage({ onClose, tt, localeSubscribe }: {
   onClose?: () => void;
   tt: Tt;
@@ -72,7 +84,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
   // tab bar renders on every frame — loading, error and setup states live
   // INSIDE the quota tab, so the api and raccoon tabs (both independent of
   // the Token Plan console) stay reachable before a snapshot lands.
-  const [activeTab, setActiveTab] = useState<"quota" | "api" | "raccoon">("quota");
+  const [activeTab, setActiveTab] = useState<TabId>("quota");
   // The pinned header is a SHELL: it shows the plugin identity (the card hosts
   // three tabs, so it is never a quota-only label) and, on its right, the
   // status cluster of the ACTIVE tab. The quota and api tabs read the Token
@@ -471,7 +483,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
  * appears for the api/raccoon tabs.
  *
  * @param {object} props
- * @param {"quota" | "api" | "raccoon"} props.activeTab - the active tab.
+ * @param {TabId} props.activeTab - the active tab.
  * @param {boolean} props.hasData - whether the snapshot carried pools.
  * @param {number} props.updatedAt - epoch seconds of the last snapshot.
  * @param {{message: string} | null} props.failure - stale-data failure.
@@ -493,7 +505,7 @@ export function HeaderStatus({
   tt,
   onRefreshQuota
 }: {
-  activeTab: "quota" | "api" | "raccoon";
+  activeTab: TabId;
   hasData: boolean;
   updatedAt: number;
   failure: { message: string } | null;
