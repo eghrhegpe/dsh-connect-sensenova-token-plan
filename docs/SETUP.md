@@ -19,7 +19,7 @@
 | target 形态 | 值 | 适用场景 |
 |---|---|---|
 | npm 包名（推荐） | `dsh-connect-sensenova-token-plan`（可钉版本，如 `dsh-connect-sensenova-token-plan@0.2.0`） | 普通用户，无需 clone |
-| git 地址 | `https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan` | 不经 registry 直接装 |
+| git 地址 | `https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan` | 不经 registry 直接装（DSH 市场走 pnpm git-dep；`lib/` 与 `client.js` 已随仓库提交，装出来即带宿主入口，无需构建授权） |
 | 本地路径 | 本检出目录的绝对路径（如 `~\.dsh\plugins\dsh-connect-sensenova-token-plan`） | 开发调试 |
 
 ```powershell

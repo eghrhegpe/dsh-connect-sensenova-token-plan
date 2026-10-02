@@ -3,9 +3,13 @@
  * Gate for the build (docs/ARCHITECTURE.md / ROADMAP §6.2).
  *
  * `src/` holds ALL sources (host + client); `lib/` and the root `client.js`
- * are GENERATED artifacts — git-ignored, fully rebuildable from `src/` (the
- * workbuddy layout: source in `src/`, runtime in `lib/`). This gate owns the
- * properties the offline suites (which import the SOURCES directly) cannot see:
+ * are GENERATED artifacts, now VERSIONED (committed alongside src/ — see
+ * .gitignore and the dsh-connect-qoder sibling's docs/issues/19: the DSH
+ * marketplace `github:` install source is a pnpm git-dep that won't run
+ * prepack/prepare, so an un-versioned lib/ makes a GitHub-direct install ship
+ * without its host entry). They remain fully rebuildable from `src/`. This gate
+ * owns the properties the offline suites (which import the SOURCES directly)
+ * cannot see:
  *
  * 1. BUILD — `npm run build` (host bundle + client artifact) must succeed.
  * 2. FRESHNESS — the committed-into-the-working-tree `client.js` must match a

@@ -44,7 +44,7 @@ node test/parsers.test.mjs  # 响应解析层：字符串数值/epoch、shape �
 node test/docs.test.mjs  # 文档一致性：内部链接、跨文件表格去重、README 行数上限、教学快照、API 契约
 node test/e2e.mjs           # 端到端单独跑：拉起真 Host + 假平台，约 10 秒（需 dsh CLI）
 npm test                    # 全量离线测试门禁 + 末尾 typecheck-gate + build-gate + e2e-gate（套件清单与链以 package.json scripts.test 为准，不在本文件背书数字；各自探到 typescript / tsdown / dsh CLI 才实跑，否则 SKIP）
-npm run build               # 改 src/（host 或 client）后必跑：重建 lib/ 与根 client.js（两者已 gitignore、不入 commit；build-gate 拦构建失败与产物缺失）
+npm run build               # 改 src/（host 或 client）后必跑：重建 lib/ 与根 client.js；两者已**版本化入库**（不再 gitignore，理由见 .gitignore 注释 + 兄弟插件 dsh-connect-qoder 的 docs/issues/19：github: 安装源不跑 prepack，lib 不入库则 GitHub 直装坏）；提交源码时务必把产物一并提交，否则 CI 的 build-freshness 门禁会红
 ```
 
 - **e2e 已在 `npm test` 门禁里**（经 `test/e2e-gate.mjs`），但只在这台机器装了 dsh CLI 时才真跑；

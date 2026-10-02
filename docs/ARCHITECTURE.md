@@ -13,7 +13,7 @@
 | 维度 | `dsh-connect-sensenova-token-plan`（本仓库） | `upstream/`（被忽略，独立仓库） |
 |---|---|---|
 | 形态 | DSH 插件（Host 半边 + Client 半边） | 独立 Python 桌面应用（pywebview 原生窗口） |
-| 语言 | Host 半边与 Client 半边均为 **TypeScript 源码**（`src/host/*.ts` + `src/client/*.ts`），经 `npm run build`（tsdown）构建为 `lib/`（Host 单条 ESM bundle + 动态切分 chunk）与根 `client.js`（Client IIFE 产物）；`lib/` 与 `client.js` 均为 `.gitignore` 忽略的纯构建产物，删后可从 `src/` 重建 | Python（`dashboard.py` + `auth_login.py`） |
+| 语言 | Host 半边与 Client 半边均为 **TypeScript 源码**（`src/host/*.ts` + `src/client/*.ts`），经 `npm run build`（tsdown）构建为 `lib/`（Host 单条 ESM bundle + 动态切分 chunk）与根 `client.js`（Client IIFE 产物）；`lib/` 与 `client.js` 现已**版本化入库**（不再 gitignore，理由见 `.gitignore` 注释 + 兄弟插件 dsh-connect-qoder 的 docs/issues/19：DSH 市场的 `github:` 安装源走 pnpm git-dep，不跑 prepack，lib 不入库则 GitHub 直装坏），删后可从 `src/` 重建 | Python（`dashboard.py` + `auth_login.py`） |
 | 账号凭据 | 走 **DSH 凭据服务**（`~/.dsh/.credentials.yaml`），无明文文件 | 明文存 `accounts.json`（为支持自动重登） |
 | 令牌续期 | **`refresh_token` 静默续期**，面板过期无需重启 | JWT 过期后用明文账号密码**重登** |
 | 登录节流 | 区分时间型 / 凭据型拒绝，防锁号 | 仅基础重试 |

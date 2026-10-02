@@ -179,6 +179,40 @@ jobs:
       - name: Run the end-to-end suite (hard gate)
         run: node test/e2e-gate.mjs
 
+  build-freshness:
+    name: Build artifacts are versioned & fresh (hard gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # `lib/` and root `client.js` are VERSIONED (committed alongside src/), not
+      # git-ignored: the DSH marketplace's `github:` install source is a pnpm
+      # git-dep, and pnpm 11 won't run prepack/prepare without build approval —
+      # an un-versioned lib/ means a GitHub-direct install ships without its host
+      # entry and the card silently dies. This job proves the committed artifact
+      # is exactly what `src/` rebuilds (docs/issues/19, same decision as the
+      # dsh-connect-qoder sibling). A diff here means the sources moved without
+      # regenerating the artifact (or the artifact was hand-edited).
+      - name: Install dev dependencies (tsdown, for the build)
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+      - name: Rebuild lib/ + client.js from src/
+        run: npm run build
+      - name: The committed lib/ matches a fresh build
+        run: git diff --exit-code -- lib client.js
+      # The build must also be byte-stable inside the environment: build twice and
+      # require equality. That is what makes the freshness gate above trustworthy
+      # across machines — if a rebuild were not byte-stable, the `git diff` check
+      # could not be relied on to point at a real drift.
+      - name: The build is reproducible (build twice, compare)
+        run: |
+          cp -r lib lib.first
+          cp client.js client.first.js
+          npm run build
+          diff -r lib.first lib
+          diff client.first.js client.js
+
   live-contract:
     name: Live platform contract (best effort)
     runs-on: ubuntu-latest

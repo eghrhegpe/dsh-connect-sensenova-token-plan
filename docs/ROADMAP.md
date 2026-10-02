@@ -213,6 +213,7 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 - **【当晚已被取代】「Host 半边不动」**：随后按 workbuddy 规范完成全仓归一——Host 源码迁
   `src/host/*.ts`（27 个模块），tsdown 多入口构建 `lib/`（ESM bundle + 切分 chunk）；`lib/` 与根
   `client.js` 一并 `.gitignore`，**产物彻底不入库**（上文「产物与源码同 commit」纪律随之作废），
+  *该方案于 2026-10-03 被推翻*：DSH 市场 `github:` 安装源走 pnpm git-dep、不跑 prepack，lib 不入库则 GitHub 直装坏——现改为 lib/ 与 client.js **版本化入库**（见 `.gitignore` 注释、`ci.yml` 的 build-freshness 门禁、兄弟插件 dsh-connect-qoder 的 docs/issues/19），「产物与源码同 commit」纪律恢复。
   测试面与门禁已适配；17 套件 + build-gate + e2e + tsc 全绿，「删 lib 可重建」验收通过。
   checkJs 的 JSDoc 投入随 .ts 化自然并入类型标注。
 

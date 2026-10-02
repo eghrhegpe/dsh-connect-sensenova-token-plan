@@ -23,10 +23,15 @@ dist/
 build/
 *.tsbuildinfo
 
-# 构建产物：源码在 src/，lib/ 与根 client.js 由 `npm run build` 从 src 重建，
-# 纯产物、可删可重建、绝不进版本库（workbuddy 同款约定）。
-/lib/
-/client.js
+# lib/ 与根 client.js 是**受版本管理的产物**（与兄弟插件 dsh-connect-qoder
+# 同款决策，见其 .gitignore 的 docs/issues/19 说明）：DSH 市场的 `github:` 安装源
+# 走 pnpm git-dep，pnpm 11 在没有 allowBuilds 批准时**不会**替它跑 prepack /
+# prepare——若 lib/ 不入库，用户打 GitHub 仓库地址装出来的插件就没有宿主入口
+# （lib/index.js），卡片直接失效。策略：改 src/ 后跑 `npm run build` 并把 lib/
+# 与 client.js 与源码一起提交（CI 的 build-freshness job 有新鲜度门禁：重建后
+# `git diff --exit-code -- lib` 必须为空，否则即「源码动了却没重生成产物」）；
+# 发到 registry 的那一份仍由 prepack 现场重建，两条路径都不靠手工。
+# 注意：不要把 lib/、client.js 加回忽略（下面两行已删除）。
 
 # 编辑器与系统
 .DS_Store

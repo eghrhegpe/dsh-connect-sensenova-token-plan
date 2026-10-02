@@ -2,6 +2,19 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
+## [Unreleased]
+
+### 构建产物 lib/ 改为版本化入库（与 dsh-connect-qoder 同款决策）
+
+DSH 市场的 `github:` 安装源是 pnpm git-dep，pnpm 11 在没有 allowBuilds 批准时**不会**替仓库跑 `prepack`/`prepare`——此前 `lib/` 与 `client.js` 被 gitignore，用户打 GitHub 仓库地址装出来的插件缺宿主入口（`lib/index.js`），卡片静默失效。现改为：
+
+- **`lib/` 与根 `client.js` 不再忽略、随源码一起提交**（`.gitignore` 删除对应两行，并写明理由）；
+- **CI 新增 `build-freshness` 硬门禁**：`npm run build` 后 `git diff --exit-code -- lib client.js` 必须为空，双跑构建比对字节稳定，防止「源码动了却没重生成产物」；
+- 安装文档（`docs/SETUP.md`）更正「git 地址直接装」的描述：现因为产物已入库，GitHub 直装开箱即用、无需构建授权；
+- `AGENTS.md` / `ARCHITECTURE.md` / `docs/DSH-PLUGIN.md` / `test/build-gate.mjs` 同步澄清产物已版本化。
+
+影响：改 `src/` 后除重建外，**必须把 `lib/`、`client.js` 与源码一并提交**，否则该门禁红。发到 npm registry 的那一份仍由 `prepack` 现场重建，不受影响。
+
 ## [0.4.7] — 2026-10-02
 
 扫码登录不再把面板与网关绑在一起：此前一次扫码能让一个 HTTP 请求阻塞最长 5 分钟，客户端再用 150 次补偿轮询去够那个迟迟不返回的状态，而第二上游的每次读都实打实打网关——等待的是人，不是连接。本版把等待挪出请求路径，并给第二上游的读接上缓存与单飞。
