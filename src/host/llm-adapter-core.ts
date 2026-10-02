@@ -95,26 +95,35 @@ const INERT_AUTH = {
  * @param {object} inner - the `PiAiAdapter` to wrap.
  * @returns {object} the wrapped adapter.
  */
-function withReclassifiedStream(inner) {
+function withReclassifiedStream(inner: object): object {
   return new Proxy(inner, {
-    get(target, prop, receiver) {
+    get(target: object, prop: string | symbol, receiver: object) {
       const value = Reflect.get(target, prop, receiver);
       // `stream(...)` and `prepareCall(...).stream` both return an async
       // iterable; both are wrapped here. Everything else (image,
       // resolveApiKey, …) passes through untouched.
       if (prop === "stream") {
-        return (options) => reclassifyStream(target.stream(options));
+        const stream = (target as { stream: (options: unknown) => AsyncIterableIterator<unknown> }).stream;
+        return (options: unknown) => reclassifyStream(stream(options));
       }
       if (typeof value === "function" && prop === "prepareCall") {
-        return (...args) => {
-          const prepared = value.apply(target, args);
-          if (prepared && typeof prepared.then === "function") {
-            return prepared.then((p) => p && typeof p.stream === "function"
-              ? { ...p, stream: (o) => reclassifyStream(p.stream(o)) }
-              : p);
+        const prepare = (target as { prepareCall: (...args: unknown[]) => unknown }).prepareCall;
+        return (...args: unknown[]) => {
+          const prepared = prepare.apply(target, args);
+          // The prepared value may be a promise of a call handle, or the handle
+          // itself; both shapes carry a `.stream`. The indexed signature keeps
+          // the reads off `unknown` without pinning the peer's exact type.
+          const handle = prepared as { stream?: (o: unknown) => AsyncIterableIterator<unknown>; then?: (fn: (p: unknown) => unknown) => unknown } | null;
+          if (handle !== null && typeof handle.then === "function") {
+            return handle.then((p: unknown) => {
+              const inner = p as { stream?: (o: unknown) => AsyncIterableIterator<unknown> } | null;
+              return inner !== null && typeof inner.stream === "function"
+                ? { ...inner, stream: (o: unknown) => reclassifyStream(inner.stream!(o)) }
+                : p;
+            });
           }
-          return prepared && typeof prepared.stream === "function"
-            ? { ...prepared, stream: (o) => reclassifyStream(prepared.stream(o)) }
+          return handle !== null && typeof handle.stream === "function"
+            ? { ...handle, stream: (o: unknown) => reclassifyStream(handle.stream!(o)) }
             : prepared;
         };
       }
@@ -229,10 +238,10 @@ export function assemblePiAiAdapter({
     resolveAttachments: () => get?.("attachments"),
     // Resolved lazily through `get("fs")` because the service may register
     // after this adapter is built.
-    resolveImageAccess: (attachments, ref) =>
+    resolveImageAccess: (attachments: unknown, ref: unknown) =>
       resolveImageAttachmentAccess(
         attachments,
-        (hostPath) => (get?.("fs") as FsService | undefined)?.processPathFromHostPath?.(hostPath),
+        (hostPath: string) => (get?.("fs") as FsService | undefined)?.processPathFromHostPath?.(hostPath),
         ref
       )
   });

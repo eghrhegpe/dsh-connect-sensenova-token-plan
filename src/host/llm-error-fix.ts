@@ -96,7 +96,7 @@ const STRUCTURED_TYPE = /"type"\s*:\s*"([^"]+)"/i;
  * @param {string} message - 平台错误文本（可能含状态码与 JSON）。
  * @returns {boolean} true 表示应纠正为 RATE_LIMIT。
  */
-export function looksLikeRateLimit(message) {
+export function looksLikeRateLimit(message: string): boolean {
   if (typeof message !== "string" || message.length === 0) return false;
   const m = message.toLowerCase();
   const hasRateSignal = RATE_SIGNAL.some((re) => re.test(m));
@@ -113,7 +113,7 @@ export function looksLikeRateLimit(message) {
  * @param {string} message
  * @returns {string|null}
  */
-export function extractStructuredType(message): string | null {
+export function extractStructuredType(message: string): string | null {
   if (typeof message !== "string" || message.length === 0) return null;
   const match = STRUCTURED_TYPE.exec(message);
   // `match[1]` reads as `string | undefined` under `noUncheckedIndexedAccess`,
@@ -144,7 +144,7 @@ export function extractStructuredType(message): string | null {
  * @param {{code?: string, message?: string}} failure
  * @returns {boolean} true 表示应纠正为 RATE_LIMIT。
  */
-export function shouldReclassifyQuotaToRate(failure) {
+export function shouldReclassifyQuotaToRate(failure: { code?: unknown; message?: unknown }): boolean {
   if (!failure || failure.code !== CODE.QUOTA) return false;
   const message = typeof failure.message === "string" ? failure.message : "";
   const type = extractStructuredType(message);
@@ -163,6 +163,15 @@ export function shouldReclassifyQuotaToRate(failure) {
   return looksLikeRateLimit(message);
 }
 
+/** The stream chunk shape the reclassification layer reads off a finish. */
+interface ErrorFinishChunk {
+  type?: unknown;
+  reason?: {
+    kind?: unknown;
+    failure?: { code?: unknown; message?: unknown };
+  };
+}
+
 /**
  * 把单个流 chunk 里的失败码在误判时纠正。
  *
@@ -171,25 +180,27 @@ export function shouldReclassifyQuotaToRate(failure) {
  * @param {object} chunk - harness 流协议 chunk。
  * @returns {object} 原 chunk 或 code 被纠正后的新 chunk。
  */
-export function reclassifyFinish(chunk) {
+export function reclassifyFinish(chunk: unknown): unknown {
   if (!isErrorFinish(chunk)) return chunk;
-  const reason = chunk.reason;
-  const failure = reason.failure;
-  if (!shouldReclassifyQuotaToRate(failure)) return chunk;
+  const errorChunk = chunk as ErrorFinishChunk;
+  const reason = errorChunk.reason;
+  const failure = reason?.failure;
+  if (failure === undefined || !shouldReclassifyQuotaToRate(failure)) return chunk;
   // 纠正为 RATE_LIMIT：保留 message，仅改 code 以驱动 peer 的退避重试。
   return {
-    ...chunk,
+    ...errorChunk,
     reason: { ...reason, failure: { ...failure, code: CODE.RATE_LIMIT } }
   };
 }
 
 /** 是否为「带 failure 的 error 型 finish chunk」——纠正层唯一关心的形状。 */
-function isErrorFinish(chunk) {
+function isErrorFinish(chunk: unknown): boolean {
+  if (chunk === null || typeof chunk !== "object") return false;
+  const candidate = chunk as ErrorFinishChunk;
   return (
-    chunk !== null && typeof chunk === "object" &&
-    chunk.type === "finish" &&
-    chunk.reason !== null && typeof chunk.reason === "object" &&
-    chunk.reason.kind === "error" && chunk.reason.failure != null
+    candidate.type === "finish" &&
+    candidate.reason !== null && typeof candidate.reason === "object" &&
+    candidate.reason.kind === "error" && candidate.reason.failure != null
   );
 }
 
@@ -198,7 +209,7 @@ function isErrorFinish(chunk) {
  * @param {AsyncIterableIterator<object>} source - 内层 adapter 的流。
  * @returns {AsyncGenerator<object>} 纠正后的流。
  */
-export async function* reclassifyStream(source) {
+export async function* reclassifyStream(source: AsyncIterableIterator<unknown>): AsyncGenerator<unknown> {
   for await (const chunk of source) {
     yield reclassifyFinish(chunk);
   }

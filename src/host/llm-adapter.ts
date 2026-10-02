@@ -49,8 +49,15 @@ import { assemblePiAiAdapter } from "./llm-adapter-core.ts";
  * @returns {{adapter: object, providerIds: string[]}} the adapter and the ids
  *   it owns.
  */
-export function createSensenovaAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [] }) {
-  const models = buildDescriptors(entries, { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds });
+export function createSensenovaAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [] }: {
+  entries: unknown;
+  enabledIds?: string[];
+  baseUrl: string;
+  resolveApiKey: () => Promise<string>;
+  get?: (service: string) => unknown;
+  unavailableModelIds?: string[];
+}) {
+  const models = buildDescriptors(entries as object[], { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds });
 
   return assemblePiAiAdapter({
     providerId: LLM_PROVIDER_ID,

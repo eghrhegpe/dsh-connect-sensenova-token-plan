@@ -218,7 +218,7 @@ export async function buildSnapshotBody({
   ];
   // Split each pool's advertised coverage into what this key can call and
   // what the plan lists but the key has no permission for yet.
-  const catalogIds = Array.isArray(catalog) ? catalog.map((entry) => entry.id) : [];
+  const catalogIds = Array.isArray(catalog) ? catalog.map((entry) => str((entry as { id?: unknown })?.id, "")) : [];
   if (Array.isArray(catalog)) {
     const available = new Set(catalogIds);
     pools.pools = pools.pools.map((pool) => {

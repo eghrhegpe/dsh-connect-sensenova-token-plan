@@ -133,10 +133,10 @@ export const CONFIG_DEFAULTS = Object.freeze({
  * @param {unknown} raw - the raw `trendMultipliers` config value.
  * @returns {Record<string, number>} the sanitized map.
  */
-export function resolveTrendMultipliers(raw) {
+export function resolveTrendMultipliers(raw: unknown): Record<string, number> {
   const source = raw === undefined || raw === null ? CONFIG_DEFAULTS.trendMultipliers : raw;
   if (source === null || typeof source !== "object" || Array.isArray(source)) return { ...CONFIG_DEFAULTS.trendMultipliers };
-  const out = {};
+  const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(source)) {
     if (typeof key === "string" && key !== "" && typeof value === "number" && Number.isFinite(value) && value > 0) {
       out[key] = value;
@@ -161,8 +161,29 @@ export function resolveTrendMultipliers(raw) {
  * @param {number} [max] - the upper clamp (inclusive); omit for no upper bound.
  * @returns {number} the clamped integer.
  */
-export function clampInt(raw, def, min, max = Infinity) {
+export function clampInt(raw: unknown, def: number, min: number, max = Infinity): number {
   return Math.min(max, Math.max(min, Math.floor(num(raw, def))));
+}
+
+/** The resolved settings shape `resolveSettings` produces and consumers read. */
+export interface ResolvedSettings {
+  consoleBase: string;
+  apiBase: string;
+  trendHours: number;
+  trendMultipliers: Record<string, number>;
+  cacheSeconds: number;
+  pollSeconds: number;
+  consoleTimeoutMs: number;
+  allowedHosts: Set<string>;
+  tokenSkewSeconds: number;
+  auth: Record<string, unknown>;
+  writeImageModelIds: boolean;
+  imageModelIds: string[];
+  visionModels: object[];
+  registerProvider: boolean;
+  drawEnabled: boolean;
+  drawModelId: string;
+  drawTimeoutMs: number;
 }
 
 /**
@@ -172,10 +193,10 @@ export function clampInt(raw, def, min, max = Infinity) {
  * exception would take the whole plugin down instead of leaving a panel that
  * explains itself. So problems are returned as `configError` and surfaced
  * through the snapshot route.
- * @param {object} config - the row's raw patch config.
- * @returns {{settings: object, configError: string|null}}
+ * @param config - the row's raw patch config.
+ * @returns {{settings: ResolvedSettings, configError: string|null}}
  */
-export function resolveSettings(config) {
+export function resolveSettings(config: unknown): { settings: ResolvedSettings; configError: string | null } {
   const source = obj(config);
   const consoleBase = str(source.consoleBase, CONFIG_DEFAULTS.consoleBase).replace(/\/+$/, "");
   const apiBase = str(source.apiBase, CONFIG_DEFAULTS.apiBase).replace(/\/+$/, "");
@@ -215,10 +236,10 @@ export function resolveSettings(config) {
         // first catalog poll still sees the previous catalog's set).
         writeImageModelIds: source.writeImageModelIds === true,
         imageModelIds: Array.isArray(source.imageModelIds)
-          ? source.imageModelIds.filter((id) => typeof id === "string")
+          ? source.imageModelIds.filter((id: unknown) => typeof id === "string")
           : CONFIG_DEFAULTS.imageModelIds,
         visionModels: Array.isArray(source.visionModels)
-          ? source.visionModels.filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
+          ? source.visionModels.filter((entry: unknown) => entry && typeof entry === "object" && !Array.isArray(entry))
           : CONFIG_DEFAULTS.visionModels,
         // Step three opt-in: register the OpenAI-compatible LLM provider
         // directly (strict boolean, like writeImageModelIds).
@@ -235,7 +256,8 @@ export function resolveSettings(config) {
     };
   } catch (error) {
     // Fall back to the shipped defaults so the panel still mounts and can show
-    // the reason, rather than vanishing.
+    // the reason, rather than vanishing. Every field the happy path declares is
+    // present here with its default, so a consumer cannot tell the branches apart.
     return {
       settings: {
         consoleBase,
@@ -247,7 +269,14 @@ export function resolveSettings(config) {
         consoleTimeoutMs: CONFIG_DEFAULTS.consoleTimeoutMs,
         allowedHosts: new Set(CONFIG_DEFAULTS.admittedHosts),
         tokenSkewSeconds: CONFIG_DEFAULTS.tokenSkewSeconds,
-        auth: { consoleOrigin: consoleBase }
+        auth: { consoleOrigin: consoleBase },
+        writeImageModelIds: false,
+        imageModelIds: CONFIG_DEFAULTS.imageModelIds,
+        visionModels: CONFIG_DEFAULTS.visionModels,
+        registerProvider: false,
+        drawEnabled: false,
+        drawModelId: "",
+        drawTimeoutMs: CONFIG_DEFAULTS.drawTimeoutMs
       },
       configError: errMsg(error)
     };
@@ -269,7 +298,7 @@ export function resolveSettings(config) {
  * @returns {object} the override object for `createAuth`.
  * @throws {Error} when the row looks like it nests overrides it does not read.
  */
-export function resolveAuthOverrides(source, consoleBase) {
+export function resolveAuthOverrides(source: Record<string, unknown>, consoleBase: string): Record<string, unknown> {
   // ANY nested `auth` block is refused, not just the two names below: none of
   // its keys are read, so a block of any shape is silently ignored. Testing for
   // a fixed list would leave `auth: { iamBase: ... }` — the exact key an
@@ -284,11 +313,11 @@ export function resolveAuthOverrides(source, consoleBase) {
         "panel would keep using the real platform."
     );
   }
-  const text = (key) => str(source[key], "");
+  const text = (key: string) => str(source[key], "");
   const overrides: Record<string, unknown> = { consoleOrigin: consoleBase };
-  const set = (key: string, value: any, transform?: (value: any) => any) => {
+  const set = (key: string, value: unknown, transform?: (value: string) => string) => {
     if (value === "") return;
-    overrides[key] = transform === undefined ? value : transform(value);
+    overrides[key] = transform === undefined ? value : transform(value as string);
   };
   set("iamOrigin", text("iamBase"), (value) => value.replace(/\/+$/, ""));
   set("tokenEndpoint", text("tokenEndpoint"));
@@ -318,7 +347,7 @@ export function resolveAuthOverrides(source, consoleBase) {
  * @param {object} source - the row's raw patch config.
  * @returns {Set<string>} the admitted host names, lowercased.
  */
-export function resolveAllowedHosts(source) {
+export function resolveAllowedHosts(source: Record<string, unknown>): Set<string> {
   const admitted = new Set(CONFIG_DEFAULTS.admittedHosts);
   const extra = Array.isArray(source.allowedHosts) ? source.allowedHosts : [];
   for (const entry of extra) {
@@ -333,7 +362,7 @@ export function resolveAllowedHosts(source) {
  * @param {string} host - the raw header value.
  * @returns {string} the name; bracketed for IPv6 literals.
  */
-export function hostName(host) {
+export function hostName(host: string): string {
   // "[::1]:8080" keeps its brackets; "localhost:8080" loses its port.
   if (host.startsWith("[") && host.includes("]")) {
     return host.slice(0, host.indexOf("]") + 1);
@@ -358,7 +387,9 @@ export function hostName(host) {
   const colons = host.split(":");
   if (colons.length > 2) {
     // "address + port" = 2nd-to-last and last segments are BOTH digits.
-    if (/^\d+$/.test(colons[colons.length - 2]) && /^\d+$/.test(colons[colons.length - 1])) {
+    const penultimate = colons[colons.length - 2] ?? "";
+    const last = colons[colons.length - 1] ?? "";
+    if (/^\d+$/.test(penultimate) && /^\d+$/.test(last)) {
       return host.slice(0, host.lastIndexOf(":"));
     }
     return host;
@@ -399,10 +430,10 @@ export function hostName(host) {
  * @param {Set<string>} allowedHosts - the host names this Host answers as.
  * @returns {boolean} whether the request may be served.
  */
-export function isAdmitted(request, allowedHosts) {
+export function isAdmitted(request: { headers?: { host?: unknown; origin?: unknown } }, allowedHosts: Set<string>): boolean {
   const host = str(request.headers?.host, "").toLowerCase();
   if (host === "" || !allowedHosts.has(hostName(host))) return false;
-  const origin = request.headers.origin;
+  const origin = request.headers?.origin;
   if (typeof origin !== "string" || origin === "") return true;
   if (origin === "null") return false;
   try {

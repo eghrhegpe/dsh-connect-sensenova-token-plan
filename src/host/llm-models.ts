@@ -46,6 +46,13 @@ import { identifyVisionModel } from "./parsers.ts";
 import { isChatModel } from "./modality.ts";
 import type { AdapterConfig } from "./types.ts";
 
+/** One normalized catalog entry (kept whole by `console-client.ts`). */
+export interface CatalogEntry {
+  id?: unknown;
+  name?: unknown;
+  [key: string]: unknown;
+}
+
 /**
  * The model ids whose quota pool is exhausted.
  *
@@ -60,9 +67,9 @@ import type { AdapterConfig } from "./types.ts";
  * @param {object} pools - the `parsePools` result (`{ pools: [...] }`).
  * @returns {string[]} the exhausted model ids, de-duplicated, in first-seen order.
  */
-export function exhaustedModelIds(pools) {
+export function exhaustedModelIds(pools: { pools?: unknown }): string[] {
   const list = Array.isArray(pools?.pools) ? pools.pools : [];
-  const out = new Set();
+  const out = new Set<string>();
   for (const pool of list) {
     const limit5 = num(pool?.window5h?.limit, 0);
     const rem5 = num(pool?.window5h?.remaining, 0);
@@ -137,7 +144,7 @@ export const FALLBACK_CONTEXT_WINDOW = 128_000;
  * @param {object} entry - one normalized catalog entry.
  * @returns {number} the declared window, or the fallback.
  */
-export function contextWindowOf(entry) {
+export function contextWindowOf(entry: CatalogEntry): number {
   for (const key of ["context_length", "context_window", "contextWindow", "max_context_tokens"]) {
     const value = Math.floor(num(entry?.[key], 0));
     if (value > 0) return value;
@@ -156,7 +163,7 @@ export function contextWindowOf(entry) {
  * @param {object} entry - one normalized catalog entry.
  * @returns {number} the declared ceiling, or 0 when the entry states none.
  */
-export function maxOutputLengthOf(entry) {
+export function maxOutputLengthOf(entry: CatalogEntry): number {
   for (const key of ["max_output_length", "maxOutputLength", "max_output_tokens"]) {
     const value = Math.floor(num(entry?.[key], 0));
     if (value > 0) return value;
@@ -217,7 +224,7 @@ export { isChatModel };
  * `off`/`high` open, and a new model is added WITH its 200-probe evidence,
  * never assumed.
  */
-const PROBED_EFFORT = Object.freeze({
+const PROBED_EFFORT: Readonly<Record<string, { low: boolean; medium: boolean; high: boolean; xhigh: boolean; max: boolean }>> = Object.freeze({
   "deepseek-v4-flash": { low: true, medium: true, high: true, xhigh: true, max: false },
   "glm-5.2":           { low: true, medium: true, high: true, xhigh: false, max: true },
   "sensenova-6.8-flash-lite": { low: true, medium: true, high: true, xhigh: false, max: false },
@@ -229,7 +236,7 @@ const PROBED_EFFORT = Object.freeze({
   "kimi-k3":           { low: false, medium: true, high: true, xhigh: false, max: false }
 });
 
-export function thinkingLevelMapFor(entry) {
+export function thinkingLevelMapFor(entry: CatalogEntry): Record<string, string | null> {
   const id = str(entry?.id, "");
   const probed = PROBED_EFFORT[id];
   return {
@@ -265,7 +272,7 @@ const THINKING_LADDER = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
  * @param {object} entry - one normalized catalog entry.
  * @returns {string[]} level ids in escalation order, e.g. ["off","low",...].
  */
-export function supportedThinkingLevels(entry) {
+export function supportedThinkingLevels(entry: CatalogEntry): string[] {
   const map = thinkingLevelMapFor(entry);
   return THINKING_LADDER.filter((level) => {
     const mapped = map[level];
@@ -288,7 +295,7 @@ export function supportedThinkingLevels(entry) {
  * @param {string} [options.baseUrl] - the OpenAI-compatible base URL.
  * @returns {object} the pi-ai descriptor.
  */
-export function toPiDescriptor(entry: any, options: AdapterConfig = {}) {
+export function toPiDescriptor(entry: CatalogEntry, options: AdapterConfig = {}) {
   const { providerId = LLM_PROVIDER_ID, baseUrl } = options;
   const id = str(entry?.id, "");
   if (id === "") throw new Error("toPiDescriptor: catalog entry has no id");
@@ -331,7 +338,7 @@ export function toPiDescriptor(entry: any, options: AdapterConfig = {}) {
  * @param {string[]} [enabledIds] - the allow-list; empty/absent disables it.
  * @returns {object[]} the entries still offered, in catalog order.
  */
-export function filterByEnabled(entries, enabledIds) {
+export function filterByEnabled(entries: unknown, enabledIds?: unknown): object[] {
   const list = Array.isArray(enabledIds) ? enabledIds : [];
   if (list.length === 0) return Array.isArray(entries) ? entries : [];
   const allow = new Set(list);
@@ -364,7 +371,7 @@ export const HIDE_ALL_MODELS = "__hide_all__";
  * @param {string} id - the model id to ask about.
  * @returns {boolean}
  */
-export function isModelEnabled(enabledIds, id) {
+export function isModelEnabled(enabledIds: string[] | undefined, id: string): boolean {
   const list = Array.isArray(enabledIds) ? enabledIds : [];
   if (list.length === 0) return true;
   return list.includes(str(id, ""));
@@ -386,7 +393,7 @@ export function isModelEnabled(enabledIds, id) {
  * @param {object[]} entries - the normalized catalog entries.
  * @returns {{id: string, name: string, vision: boolean}[]}
  */
-export function rosterOf(entries) {
+export function rosterOf(entries: unknown): { id: string; name: string; vision: boolean }[] {
   const position = new Map();
   const out: { id: string; name: string; vision: boolean }[] = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
@@ -435,7 +442,8 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
   const out: (object | undefined)[] = [];
   for (const entry of Array.isArray(filtered) ? filtered : []) {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
-    const id = str(entry.id, "");
+    const catalogEntry = entry as CatalogEntry;
+    const id = str(catalogEntry.id, "");
     if (id === "") continue;
     // A model whose quota pool is exhausted would answer every request with
     // `429 quota_exceeded`, so the picker must not offer it — the panel (via
@@ -446,7 +454,7 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
       seen.set(id, out.length);
       out.push(undefined);
     }
-    out[seen.get(id)] = toPiDescriptor({ ...entry, id }, { providerId, baseUrl });
+    out[seen.get(id)] = toPiDescriptor({ ...catalogEntry, id }, { providerId, baseUrl });
   }
   // Every `undefined` pushed above is overwritten at that same index before the
   // loop advances (see the comment on `out`), so no hole survives to here. The
@@ -470,7 +478,7 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
  *   array (in which case every row reads as available).
  * @returns {{id: string, name: string, vision: boolean, available: boolean, quotaExhausted: boolean, contextWindow: number, maxOutputLength: number, thinkingLevels: string[]}[]}
  */
-export function rosterWithAvailability(entries, pools) {
+export function rosterWithAvailability(entries: unknown, pools: { pools?: unknown }) {
   const blocked = new Set(exhaustedModelIds(pools));
   const position = new Map();
   const out: { id: string; name: string; vision: boolean; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number; thinkingLevels: string[] }[] = [];
@@ -515,7 +523,7 @@ export function rosterWithAvailability(entries, pools) {
  * @param {object[]} entries - the normalized catalog entries.
  * @returns {{modelCount: number, visionCount: number, visionIds: string[]}}
  */
-export function summarizeCatalog(entries) {
+export function summarizeCatalog(entries: unknown) {
   const list = (Array.isArray(entries) ? entries : []).filter(isChatModel);
   const visionIds = list
     .filter((entry) => str(entry?.id, "") !== "")

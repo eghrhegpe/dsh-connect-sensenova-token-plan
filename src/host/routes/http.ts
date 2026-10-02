@@ -124,7 +124,7 @@ export async function readJsonBodyOr400(request: any, response: any, limit = MAX
  * @param allowedHosts - the settings' allowed-hosts list the fence checks against.
  * @returns the fenced handler.
  */
-export function withOrigin(handler: (request: any, response: any) => Promise<void>, allowedHosts: unknown) {
+export function withOrigin(handler: (request: any, response: any) => Promise<void>, allowedHosts: Set<string>) {
   return async (request: any, response: any) => {
     if (!isAdmitted(request, allowedHosts)) {
       refuseOrigin(response);

@@ -17,6 +17,7 @@
 import { CODE } from "./codes.ts";
 import { str, obj } from "./util.ts";
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
+import type { ResolvedSettings } from "./host-config.ts";
 
 /**
  * One cached console response: the body plus the epoch millis it was fetched.
@@ -40,7 +41,15 @@ import { createCoalescedFetch } from "./coalesced-fetch.ts";
  * @param tokenStore - the credentials-backed token store.
  * @returns {Promise<unknown>} the parsed console body.
  */
-export async function fetchConsole(settings, path, params, cacheMs, cache, inflight, tokenStore) {
+export async function fetchConsole(
+  settings: ResolvedSettings,
+  path: string,
+  params: Record<string, string> | undefined,
+  cacheMs: number,
+  cache: Map<string, { body: unknown; at: number; gen: number }>,
+  inflight: Map<string, Promise<unknown>>,
+  tokenStore: { getToken(): Promise<string>; invalidate(token?: string): void }
+): Promise<unknown> {
   const query = params && Object.keys(params).length > 0
     ? `?${new URLSearchParams(params).toString()}`
     : "";
@@ -51,7 +60,7 @@ export async function fetchConsole(settings, path, params, cacheMs, cache, infli
   const coalesced = createCoalescedFetch({ cache, inflight });
 
   const run = async () => {
-    const send = async (token) => fetch(url, {
+    const send = async (token: string) => fetch(url, {
       headers: { authorization: `Bearer ${token}`, accept: "application/json" },
       signal: AbortSignal.timeout(settings.consoleTimeoutMs)
     });
@@ -96,7 +105,13 @@ export async function fetchConsole(settings, path, params, cacheMs, cache, infli
  * @param inflight - the in-flight map to share requests through.
  * @param apiKey - the SenseNova API key.
  */
-export async function fetchModelCatalog(settings, cacheMs, cache, inflight, apiKey) {
+export async function fetchModelCatalog(
+  settings: ResolvedSettings,
+  cacheMs: number,
+  cache: Map<string, { body: unknown; at: number; gen: number }>,
+  inflight: Map<string, Promise<unknown>>,
+  apiKey: string
+): Promise<object[]> {
   const url = `${settings.apiBase}/models`;
   // Same single-flight treatment as fetchConsole: an open panel and a Models
   // page both poll `/v1/models`, and they should share one call.
@@ -117,11 +132,11 @@ export async function fetchModelCatalog(settings, cacheMs, cache, inflight, apiK
     // platform adding `input_modalities` needs no parser change here.
     const models = Array.isArray(body?.data)
       ? body.data
-          .map((entry) => {
+          .map((entry: unknown) => {
             const source = obj(entry);
             return { id: str(source.id, ""), ...source };
           })
-          .filter((entry) => entry.id !== "")
+          .filter((entry: { id?: string }) => entry.id !== "")
       : [];
     return models;
   };
