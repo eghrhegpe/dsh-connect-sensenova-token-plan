@@ -43,7 +43,7 @@ export function apply(ctx: ClientCtx): void {
     } catch {
       return () => {};
     }
-  }, "dsh-connect-sensenova-token-plan: dictionaries");
+  }, `${NS}: dictionaries`);
 
   let translate: Tt = (key) => key;
   try {
@@ -75,7 +75,7 @@ export function apply(ctx: ClientCtx): void {
       ) as () => void
     );
   } catch (error) {
-    console.warn("[dsh-connect-sensenova-token-plan] config card registration failed:", error);
+    console.warn(`[${NS}] config card registration failed:`, error);
   }
 
   ctx.effect(() => () => {
@@ -86,5 +86,5 @@ export function apply(ctx: ClientCtx): void {
         // Already released with its owning declaration.
       }
     }
-  }, "dsh-connect-sensenova-token-plan: ui mounts");
+  }, `${NS}: ui mounts`);
 }

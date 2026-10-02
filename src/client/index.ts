@@ -31,6 +31,7 @@
  * @returns {{inject: string[], apply: Function, panel: object}}
  */
 import { inject, apply } from "./apply.ts";
+import { NS } from "./const.ts";
 import {
   errorOfStatus,
   FORM_EXCLUDED_CODES,
@@ -147,7 +148,7 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
 }
 
 /** The registration the Host loads: id plus the factory the Host materializes. */
-const REGISTRATION = { id: "dsh-connect-sensenova-token-plan", factory: clientFactory };
+const REGISTRATION = { id: NS, factory: clientFactory };
 
 // The bundle must load in three module worlds (the IIFE wrapper keeps the
 // top level free of import/export, so all three see the same statements):

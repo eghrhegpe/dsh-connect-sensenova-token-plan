@@ -27,6 +27,16 @@ import { RaccoonRoster } from "./raccoon-roster.ts";
 import { RACCOON_SITE_URL } from "./const.ts";
 import { S } from "./styles.ts";
 
+/**
+ * The QR image is drawn at a fixed 208 px and the login window divides the
+ * remaining-millis figure by one day's length; both numbers used to be bare
+ * literals inside the component. Named here so a change is one edit, and the
+ * render suite's `width: 208` assertions keep tracking intent rather than a
+ * magic number.
+ */
+const QR_SIZE = 208;
+const DAY_MS = 86_400_000;
+
 /** The secret-free state the /raccoon route answers. */
 export interface RaccoonState {
   ok?: boolean;
@@ -98,10 +108,10 @@ function qrImageOf(scanUrl: string | null | undefined): unknown {
   if (typeof scanUrl !== "string" || scanUrl === "") return null;
   try {
     return h("img", {
-      src: qrDataUrl(scanUrl, { size: 208 }),
+      src: qrDataUrl(scanUrl, { size: QR_SIZE }),
       alt: "WeChat QR",
-      width: 208,
-      height: 208,
+      width: QR_SIZE,
+      height: QR_SIZE,
       style: { display: "block", margin: "8px 0", borderRadius: 4 }
     });
   } catch {
@@ -192,7 +202,7 @@ export function RaccoonCard({
       metaLine.push(h("span", { key: "exp" }, ` · ${format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })}`));
     }
     if (refreshAt !== null) {
-      const days = Math.max(1, Math.round((refreshAt - Date.now()) / 86_400_000));
+      const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
       metaLine.push(h("span", {
         key: "refresh",
         title: format(tt("raccoon.refreshTip"), { days })

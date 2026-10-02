@@ -191,27 +191,37 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
 // the same seven as `/api/${name}/<resource>`. Between the two, and the
 // literals re-declared in `test/routes.test.mjs`, there was no pin — so a
 // rename of the slug, or adding a route on one side only, read as green
-// until the panel 404'd. Both sides are scanned as text so the check proves
-// the CLIENT side really is literals and the HOST side really is derived.
+// until the panel 404'd. All three copies are scanned as text so the check
+// proves the CLIENT side really is literals, the HOST side really is derived,
+// and the SUITE's own copies did not drift away from either.
 {
   const clientSrc = readFileSync(join(here, "..", "src", "client", "const.ts"), "utf8");
   const hostSrc = readFileSync(join(here, "..", "src", "host", "routes.ts"), "utf8");
+  const suiteSrc = readFileSync(join(here, "..", "test", "routes.test.mjs"), "utf8");
 
   // The client spells the whole path as a literal (`"/api/<slug>/snapshot"`);
   // the host derives the same one (`\`/api/${name}/snapshot\``). Comparing the
   // FULL paths (not just the resource) is what makes a slug rename fail too.
+  // The suite re-declares the same literals once, at its top (the request
+  // helpers call them by name); those are scanned too, by the same rule as the
+  // client's, so a third copy that fell behind turns this red rather than
+  // silently testing a path the panel never uses.
   const clientPaths = [...clientSrc.matchAll(/"(?:https?:)?\/api\/([^"\s]+)"/g)]
     .map((m) => `/api/${m[1]}`)
     .sort();
   const hostPaths = [...hostSrc.matchAll(/\/api\/\$\{name\}\/([^`"\s]+)/g)]
     .map((m) => `/api/${name}/${m[1]}`)
     .sort();
+  const suitePaths = [...suiteSrc.matchAll(/(?:const|,)\s*([A-Z_]+_PATH)\s*=\s*"(?:https?:)?\/api\/([^"\s]+)"/g)]
+    .map((m) => `/api/${m[2]}`)
+    .sort();
 
   check("client/const.ts actually declares route literals", clientPaths.length >= 7, clientPaths.join(", "));
   check("host/routes.ts derives the same number of routes", hostPaths.length === clientPaths.length, hostPaths.join(", "));
-  check("the client and the host agree path for path",
-    JSON.stringify(clientPaths) === JSON.stringify(hostPaths),
-    `client: ${clientPaths.join(", ")} | host: ${hostPaths.join(", ")}`);
+  check("test/routes.test.mjs re-declares the same paths", suitePaths.length === clientPaths.length, suitePaths.join(", "));
+  check("the client, the host and the suite agree path for path",
+    JSON.stringify(clientPaths) === JSON.stringify(hostPaths) && JSON.stringify(hostPaths) === JSON.stringify(suitePaths),
+    `client: ${clientPaths.join(", ")} | host: ${hostPaths.join(", ")} | suite: ${suitePaths.join(", ")}`);
 }
 
 // --- 7. trendMultipliers sanitization ----------------------------------

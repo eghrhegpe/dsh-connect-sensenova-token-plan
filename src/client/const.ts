@@ -4,11 +4,18 @@
 export const NS = "dsh-connect-sensenova-token-plan";
 
 /**
- * The plugin slug. Carried by the coin glyph's `data-dsh-panel-entry` marker
- * (see `cards.ts`) so the card's icon stays tied to this plugin. It is NOT a
- * sidebar row id or a slot key — the card registers under `key: NS`.
+ * The plugin slug, under its marker name: carried by the coin glyph's
+ * `data-dsh-panel-entry` marker (see `cards.ts`) and the page root's
+ * `data-dsh-plugin` marker (see `panel-page.ts`), so the card's icon stays
+ * tied to this plugin.
+ *
+ * Derived, not re-spelled: `REGISTRATION.id` in `index.ts` and every log
+ * prefix in `apply.ts` read {@link NS} or this constant, so a rename of the
+ * slug has ONE home (`NS`) instead of four literals that could drift.
+ * It is NOT a sidebar row id or a slot key — the card registers under
+ * `key: NS`.
  */
-export const PANEL_ID = "dsh-connect-sensenova-token-plan";
+export const PANEL_ID = NS;
 
 /** The Host snapshot route. Relative, same-origin. */
 export const SNAPSHOT_PATH = "/api/dsh-connect-sensenova-token-plan/snapshot";

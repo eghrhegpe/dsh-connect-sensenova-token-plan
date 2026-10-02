@@ -210,7 +210,10 @@ export function RaccoonTab({
         if (body?.ok === true) {
           setState(body);
         } else {
-          setLoginNote(body?.error ?? tt("raccoon.error").replace("{error}", "login did not finish"));
+          // Through the shared `format`, not a hand-rolled `.replace`: the
+          // dictionary's `{error}` slot is one interpolation rule, owned by
+          // `format.ts` (the refusal table's `auth.failed` uses the same one).
+          setLoginNote(body?.error ?? format(tt("raccoon.error"), { error: "login did not finish" }));
         }
       }
     } catch (why) {

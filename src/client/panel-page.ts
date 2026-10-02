@@ -7,7 +7,7 @@ import {
   AccountForm
 } from "./account-form.ts";
 import { ApiKeyForm, ProviderForm } from "./api-key-form.ts";
-import { SNAPSHOT_PATH } from "./const.ts";
+import { PANEL_ID, SNAPSHOT_PATH } from "./const.ts";
 import { clock, format, statedCadenceMs } from "./format.ts";
 import { errorOfStatus, FORM_EXCLUDED_CODES, GUIDANCE_BY_CODE, interpretSnapshot, viewOf } from "./snapshot.ts";
 import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
@@ -435,7 +435,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
 
   return h(
     "div",
-    { style: S.page, "data-dsh-plugin": "dsh-connect-sensenova-token-plan" },
+    { style: S.page, "data-dsh-plugin": PANEL_ID },
     // The bar is pinned (flex:none); everything below scrolls inside
     // `S.scroll` instead of being clipped by the shell's center column. The
     // bar is a SHELL: a plugin-identity title on the left, and the ACTIVE
@@ -482,18 +482,9 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
  * invariant that quota-only copy (renewal chip, stale-data banner) never
  * appears for the api/raccoon tabs.
  *
- * @param {object} props
- * @param {TabId} props.activeTab - the active tab.
- * @param {boolean} props.hasData - whether the snapshot carried pools.
- * @param {number} props.updatedAt - epoch seconds of the last snapshot.
- * @param {{message: string} | null} props.failure - stale-data failure.
- * @param {unknown} props.authChip - the quota-only renewal/needs-login chip.
- * @param {{updatedAt:number;error:string|null;onRefresh:() => void} | null} props.raccoonStatus
- *   - the raccoon tab's reported freshness + refresher, or null when that tab
- *   is not mounted.
- * @param {Tt} props.tt - the dictionary.
- * @param {() => void} props.onRefreshQuota - re-fetch the Token Plan snapshot.
- * @returns {unknown} the status cluster tree, or null when nothing applies.
+ * Prop types are declared once, by the TypeScript annotation on the function
+ * — an earlier `@param {TabId} props.activeTab` style JSDoc spelled the same
+ * types a second time, where a change to one side could not fail the build.
  */
 export function HeaderStatus({
   activeTab,
