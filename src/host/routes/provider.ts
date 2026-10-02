@@ -21,10 +21,11 @@ export const PROVIDER_PATH = `/api/${name}/provider`;
  * Register the provider route. Wiring subset: `settings`, `providerStore`,
  * `providerState`, `publishProvider`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Wiring} wiring - as assembled by `apply()` in `index.ts`.
+ * @param {Pick<Wiring, "settings" | "providerStore" | "providerState" | "publishProvider">} wiring
+ *   - the subset this route reads, as assembled by `apply()` in `index.ts`.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerProviderRoute(ctx: any, wiring: Wiring) {
+export function registerProviderRoute(ctx: any, wiring: Pick<Wiring, "settings" | "providerStore" | "providerState" | "publishProvider">) {
   const { settings, providerStore, providerState, publishProvider } = wiring;
 
   return ctx.webServer.register({

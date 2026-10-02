@@ -20,12 +20,14 @@ export const API_KEY_PATH = `/api/${name}/api-key`;
 
 /**
  * Register the API-key route. Wiring subset: `settings`, `apiKeyStore`,
- * `catalogStore`, `providerState`, `publishProvider`, `cache`, `logger`.
+ * `catalogStore`, `providerState`, `publishProvider`, `cache`, `inflight`,
+ * `logger`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Wiring} wiring - as assembled by `apply()` in `index.ts`.
+ * @param {Pick<Wiring, "settings" | "apiKeyStore" | "catalogStore" | "providerState" | "publishProvider" | "cache" | "inflight" | "logger">} wiring
+ *   - the subset this route reads, as assembled by `apply()` in `index.ts`.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerApiKeyRoute(ctx: any, wiring: Wiring) {
+export function registerApiKeyRoute(ctx: any, wiring: Pick<Wiring, "settings" | "apiKeyStore" | "catalogStore" | "providerState" | "publishProvider" | "cache" | "inflight" | "logger">) {
   const { settings, apiKeyStore, catalogStore, providerState, publishProvider, cache, inflight, logger } = wiring;
 
   return ctx.webServer.register({

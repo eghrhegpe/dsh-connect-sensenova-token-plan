@@ -311,13 +311,21 @@ export function createProviderPublisher(deps: HostDeps = {}) {
  * models before its first poll (and with no console login at all).
  *
  * Fire-and-forget: a state dir that cannot be read just waits for the poll.
- * @param {ReturnType<typeof createProviderPublisher>} publisher
+ * @param {Pick<ReturnType<typeof createProviderPublisher>, "state" | "publish">} publisher
+ *   — the only two members the seed touches. Typed off the REAL publisher
+ *   rather than a hand-written structural copy: that copy declared the third
+ *   `publish` parameter as `unknown`, which is WIDER than the `string[]` the
+ *   publisher actually accepts, so under `strictFunctionTypes` the genuine
+ *   publisher was not assignable to it. `lifecycle.ts` passing `wiring: any`
+ *   is the only reason this never surfaced — tightening that annotation
+ *   exposed it. The seed only ever passes a literal `[]` (below), so the
+ *   narrower type is a zero-runtime-change correction.
  * @param {() => Promise<object[]>} listCatalog - read the persisted catalog entries.
  * @param {() => Promise<string[]>} listEnabled - read the persisted allow-list.
  * @param {(entries: object[], enabledIds: string[]) => string} signatureOf -
  *   the cheap offered-set signature.
  */
-export function seedPublisherFromCatalog(publisher: { state: any; publish: (entries: unknown, enabledIds: unknown, unavailableIds: unknown) => Promise<unknown> }, listCatalog: () => Promise<object[]>, listEnabled: () => Promise<string[]>, signatureOf: (entries: object[], enabledIds: string[]) => string) {
+export function seedPublisherFromCatalog(publisher: Pick<ReturnType<typeof createProviderPublisher>, "state" | "publish">, listCatalog: () => Promise<object[]>, listEnabled: () => Promise<string[]>, signatureOf: (entries: object[], enabledIds: string[]) => string) {
   return (async () => {
     try {
       const [stored, storedEnabled] = await Promise.all([

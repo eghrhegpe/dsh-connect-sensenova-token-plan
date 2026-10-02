@@ -21,12 +21,13 @@ export const ACCOUNT_PATH = `/api/${name}/account`;
 
 /**
  * Register the account route. Wiring subset: `settings`, `tokenStore`,
- * `cache`.
+ * `cache`, `inflight`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Wiring} wiring - as assembled by `apply()` in `index.ts`.
+ * @param {Pick<Wiring, "settings" | "tokenStore" | "cache" | "inflight">} wiring
+ *   - the subset this route reads, as assembled by `apply()` in `index.ts`.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerAccountRoute(ctx: any, wiring: Wiring) {
+export function registerAccountRoute(ctx: any, wiring: Pick<Wiring, "settings" | "tokenStore" | "cache" | "inflight">) {
   const { settings, tokenStore, cache, inflight } = wiring;
 
   return ctx.webServer.register({

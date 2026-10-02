@@ -23,10 +23,15 @@ export const SNAPSHOT_PATH = `/api/${name}/snapshot`;
  * `cache`, `inflight`, `tokenStore`, `apiKeyStore`, `publisher`,
  * `catalogStore`, `providerStore`, `drawStore`, `visionPublish`, `logger`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Wiring} wiring - as assembled by `apply()` in `index.ts`.
+ * @param {Pick<Wiring, "settings" | "configError" | "cache" | "inflight" | "tokenStore" | "apiKeyStore" | "publisher" | "catalogStore" | "providerStore" | "drawStore" | "visionPublish" | "logger">} wiring
+ *   - the subset this route reads, as assembled by `apply()` in `index.ts`.
+ *   Twelve of twenty-two — the widest surface in the family, and the reason
+ *   the declaration is worth having: `apiKeyStore` is read directly off the
+ *   bag rather than destructured, so it was invisible to a grep of the
+ *   destructuring line and the `Pick` now names it in the type instead.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerSnapshotRoute(ctx: any, wiring: Wiring) {
+export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" | "configError" | "cache" | "inflight" | "tokenStore" | "apiKeyStore" | "publisher" | "catalogStore" | "providerStore" | "drawStore" | "visionPublish" | "logger">) {
   const { settings, configError, cache, inflight, tokenStore, publisher, catalogStore, providerStore, drawStore, visionPublish, logger } = wiring;
 
   return ctx.webServer.register({

@@ -48,10 +48,14 @@ export const RACCOON_PATH = `/api/${name}/raccoon`;
  * Register the Raccoon route. Wiring subset: `settings`, `raccoonStore`,
  * `raccoonSwitch`, `raccoonPublisher`, `raccoonCache`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Wiring} wiring - as assembled by `apply()` in `index.ts`.
+ * @param {Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache">} wiring
+ *   - the Raccoon half's subset, as assembled by `apply()` in `index.ts`. The
+ *   `Pick` is what makes "changing the Raccoon line must not affect the Token
+ *   Plan one" (ARCHITECTURE §5.5) a compile-time fact rather than a review
+ *   promise: this route physically cannot reach a Token Plan field.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerRaccoonRoute(ctx: any, wiring: Wiring) {
+export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache">) {
   const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache } = wiring;
 
   // The Raccoon gateway reads (balance + catalogue) go through the SAME

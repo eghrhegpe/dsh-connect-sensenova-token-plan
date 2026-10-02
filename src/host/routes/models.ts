@@ -23,10 +23,11 @@ export const MODELS_PATH = `/api/${name}/models`;
  * Register the models route. Wiring subset: `settings`, `catalogStore`,
  * `providerStore`, `providerState`, `publishProvider`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Wiring} wiring - as assembled by `apply()` in `index.ts`.
+ * @param {Pick<Wiring, "settings" | "catalogStore" | "providerStore" | "providerState" | "publishProvider">} wiring
+ *   - the subset this route reads, as assembled by `apply()` in `index.ts`.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerModelsRoute(ctx: any, wiring: Wiring) {
+export function registerModelsRoute(ctx: any, wiring: Pick<Wiring, "settings" | "catalogStore" | "providerStore" | "providerState" | "publishProvider">) {
   const { settings, catalogStore, providerStore, providerState, publishProvider } = wiring;
 
   return ctx.webServer.register({

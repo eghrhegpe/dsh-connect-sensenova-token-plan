@@ -27,6 +27,7 @@ import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
 import { resolveSwitchEnabled } from "./switch-precedence.ts";
+import type { Wiring } from "./types.ts";
 
 /** How many times a mount-time optional-service read is retried. */
 const SERVICE_RETRY_ATTEMPTS = 3;
@@ -110,19 +111,39 @@ type DrawFetchResponse = {
 };
 
 /**
+ * The wiring subset {@link registerDrawTool} reads — its own `Pick`, not the
+ * whole bag.
+ *
+ * This function is exported so a test can mount the tool standalone, and the
+ * fields it actually touches are seven of the twenty-two. Declaring the
+ * subset as a type (rather than naming it in prose) is what lets the compiler
+ * catch a field that stopped being read, or a new one that starts being read
+ * without a declaration.
+ */
+export type DrawToolWiring = Pick<Wiring,
+  | "settings"
+  | "configError"
+  | "providerState"
+  | "catalogStore"
+  | "resolveApiKey"
+  | "publisher"
+  | "drawStore"
+>;
+
+/**
  * Register the `sensenova_draw_image` agent tool (ARCHITECTURE.md §5.4,
  * route B). Opt-in (`drawEnabled`, default off) and doubly degraded — a Host
  * with no tools service never sees it, and a peer that fails to load leaves
  * the panel and the provider untouched. Named as a separate export so a test
  * can inject its own `ctx`/`wiring`; `startSideEffects` calls it when enabled.
  * @param ctx - the host root context (reads `ctx.get("tools")` / `ctx.tools`).
- * @param {object} wiring - see {@link startSideEffects}.
+ * @param {DrawToolWiring} wiring - the seven fields read below.
  * @param {object} side - test seams from `apply`'s `deps`.
  * @param {Function} side.loadToolsModule - lazy `@deepseek-ai/dsh-tools` loader.
  * @param {Function} side.drawFetch - draw request fetch (stubbed in tests).
  * @returns {Promise<void>}
  */
-export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: any, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
+export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: DrawToolWiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
   const { settings, configError, providerState, catalogStore, resolveApiKey, publisher, drawStore } = wiring;
   const { loadToolsModule, drawFetch } = side;
   if (configError !== null) return;
@@ -293,20 +314,15 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
  * Run the mount-time side effects: the persisted-catalog seed, the draw tool
  * (when opted in), and vision step two's settings-row writer.
  * @param ctx - the host root context.
- * @param {object} wiring - assembled by `apply()`.
- * @param {object} wiring.settings - the resolved settings row.
- * @param {string|null} wiring.configError - a settings/auth misconfiguration.
- * @param {object} wiring.publisher - the `createProviderPublisher` instance.
- * @param {object} wiring.providerState - `publisher.state` (shared reference).
- * @param {object} wiring.catalogStore - the `createFileCatalogStore` instance.
- * @param {Function} wiring.resolveApiKey - resolves the live `sk-` key.
- * @param {{current: Function|null}} wiring.visionPublish - filled here.
- * @param {object} [wiring.logger] - `ctx.logger` (Host logging).
+ * @param {Wiring} wiring - assembled by `apply()`; the fields read here are
+ *   `settings` / `visionPublish` / `logger` plus the whole {@link DrawToolWiring}
+ *   it forwards to {@link registerDrawTool}. The per-field notes that used to
+ *   sit here are what the {@link Wiring} declaration now says instead.
  * @param {object} side - test seams from `apply`'s `deps`
  *   (`loadToolsModule`, `drawFetch`).
  * @returns {void} — seed and draw are fire-and-forget.
  */
-export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: any, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
+export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Wiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
   const { publisher, catalogStore, settings, visionPublish } = wiring;
 
   // Seed the registration from the persisted catalog so a restarted Host
@@ -404,13 +420,15 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
  *      be gone during shutdown).
  *
  * This order is a concurrency fix and must NOT be simplified.
- * @param {object} wiring - assembled by `apply()`.
- * @param {Function} wiring.releaseProvider - `publisher.release()`.
- * @param {object} wiring.publisher - the `createProviderPublisher` instance.
- * @param {Function[]} offs - the unregister callbacks from {@link registerRoutes}.
+ * @param {Wiring} wiring - assembled by `apply()`; only the publisher pair
+ *   and the release are read, so the type says exactly three fields.
+ * @param {Array<() => void>} offs - the unregister callbacks from
+ *   {@link registerRoutes}. `Function[]` was the old spelling and it is
+ *   `any[]` in disguise — a `Function` may be called with any arguments and
+ *   return anything, so it pinned neither the shape nor the arity.
  * @returns {void}
  */
-export function teardown(wiring: any, offs: Function[]) {
+export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher">, offs: Array<() => void>) {
   const { publisher, releaseProvider, raccoonPublisher } = wiring;
   // Before anything else: a publish still in flight (the mount seed's, or a
   // poll's) must not register into a Host that is letting this plugin go.
