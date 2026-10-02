@@ -38,6 +38,7 @@ import {
   RACCOON_CATALOG_TTL_MS
 } from "./raccoon-status.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
+import { createRaccoonWalk, LOGIN_STATUS } from "./raccoon-walk.ts";
 
 /** The one read-only route the Client panel polls. */
 const SNAPSHOT_PATH = `/api/${name}/snapshot`;
@@ -657,59 +658,20 @@ export function registerRoutes(ctx, wiring) {
   // and answers with the scan URL to display the moment it is issued. The
   // credential never touches this plugin's directory, git, or logs — it goes
   // straight to the DSH credentials service through `raccoonStore`.
-  // The in-flight QR login state lives OUTSIDE the handler: a handler-local
-  // would be re-initialized to null on EVERY request (each call re-runs the
-  // function body), so a GET arriving while the POST login walk is waiting
-  // could never see the scan — the tab would poll forever with no QR to
-  // render. One scan per process (the single long-poll owns it); cleared when
-  // the walk settles.
-  let raccoonScan: { code: string; url: string } | null = null;
-  /**
-   * The in-flight login walk, kept as the CONCURRENCY GATE.
-   *
-   * The walk is no longer the request (see the `login` branch): it runs in the
-   * background and the POST answers the moment the scan code is issued. The
-   * promise is held only so a second click (or a second tab) cannot start a
-   * second walk — two walks would each hold a different code while the GET
-   * could only ever report one, which is how a scan silently stops matching
-   * the QR on screen.
-   */
-  let raccoonWalk: Promise<void> | null = null;
-  /**
-   * The settled outcome of the last login walk (`logged_in` / `timeout` /
-   * `canceled` / `failed`), or `"scanning"` while one is in flight.
-   *
-   * A terminal status is delivered ONCE and then cleared: it is an event, not a
-   * state, and leaving it standing would have the tab re-announce a two-minute
-   * old timeout on every later poll. The panel's durable truth is `loggedIn`,
-   * which the credential itself answers.
-   */
-  let raccoonLoginStatus: string | null = null;
-  /** The reason behind a `failed` walk; cleared with the status. */
-  let raccoonLoginError: string | null = null;
-  /**
-   * The login walk's transient state, as `raccoon-status.ts` reads it.
-   *
-   * Defined ONCE beside the bindings it closes over (not per request): the
-   * module can only ask, so the clearing of a terminal event stays the route's
-   * single decision, and the exact ordering the read model depends on (see the
-   * two comments in `readRaccoonStatus`) is visible here rather than inferred.
-   */
-  const raccoonLoginView = {
-    takeEvent: () => {
-      const status = raccoonLoginStatus;
-      const error = raccoonLoginError;
-      // A terminal status is an EVENT, not a state: hand it over and clear it,
-      // or every later poll re-announces a two-minute-old timeout. `scanning`
-      // is the live state of an in-flight walk, so it stays.
-      if (status !== null && status !== "scanning") {
-        raccoonLoginStatus = null;
-        raccoonLoginError = null;
-      }
-      return { status, error };
-    },
-    liveScan: () => raccoonScan
-  };
+  //
+  // The walk lifecycle is owned by `raccoon-walk.ts`: one instance for the
+  // entire route, so a second click / tab mid-walk sees the SAME scan
+  // (concurrency gate via `view.isInFlight()`). The route only drives the
+  // side-effects (save credential → invalidate cache → publish) and reads
+  // the transient state through `view`. One scan per process; cleared on
+  // settle; no handler-local state survives a re-mount.
+  const raccoonWalkManager = createRaccoonWalk({
+    fetcher: (code) => pollRaccoonQrLogin(code),
+    saveCredential: (credential) => raccoonStore.save(credential),
+    invalidateCache: () => raccoonRead.clear(),
+    onSettled: () => { /* no-op — status flows through the view */ }
+  });
+  const walkView = raccoonWalkManager.view;
   const offRaccoon = ctx.webServer.register({
     kind: "exact",
     path: RACCOON_PATH,
@@ -730,7 +692,7 @@ export function registerRoutes(ctx, wiring) {
             switchStore: raccoonSwitch,
             publisher: raccoonPublisher,
             read: raccoonRead,
-            login: raccoonLoginView
+            login: walkView
           },
           withDiagnostics
         );
@@ -836,111 +798,44 @@ export function registerRoutes(ctx, wiring) {
         return;
       }
 
-      // ── login: issue a WeChat scan, then walk it in the BACKGROUND ──
+      // ── login: delegate to the walk module, drive side-effects here ──
       //
-      // The walk used to BE the request: the POST blocked up to the 5-minute
-      // deadline, polling the gateway every 2 s. That is an HTTP handler
-      // holding a connection for five minutes — a tab reload, a proxy timeout
-      // or a Host restart cuts it mid-walk, and the scan it issued stays pinned
-      // on this route with nothing left to clear it. The client compensated by
-      // running its own 150 × 2 s poll beside it, so one scan cost the gateway
-      // hundreds of reads for a number that cannot change that fast.
-      //
-      // Now the POST answers the moment the scan is issued, the walk runs
-      // behind it, and the tab learns the outcome from the GET it already
-      // polls. One walk at a time (`raccoonWalk`).
+      // `raccoon-walk.ts` owns the scan lifecycle: concurrency gate, gateway
+      // polling, settle / timeout / cancel, credential save, cache invalidation.
+      // This branch drives the publisher because provider registration touches
+      // external state (the switch file + the DSH adapter registry).
       if (action === "login") {
         if (raccoonStore === null || raccoonStore === undefined) {
           await answer({ ok: false, error: "the raccoon credential store is unavailable" });
           return;
         }
-        // A walk is already waiting: hand back ITS scan rather than issuing a
-        // second one. Two walks would each own a different code while the GET
-        // can only ever report one, so the QR on screen would stop matching the
-        // code being polled — a scan that looks permanently stuck, with no
-        // error anywhere to explain it.
-        if (raccoonWalk !== null && raccoonScan !== null) {
-          await answer({ ok: true, status: "scanning", scanUrl: raccoonScan.url, scanCode: raccoonScan.code });
+        // Replace walk's default save/invalidate with one that also publishes
+        // when the switch is on (so a logged-in user sees models immediately).
+        raccoonWalkManager.invalidateCache = () => {
+          raccoonRead.clear();
+          if (raccoonPublisher !== null && raccoonPublisher !== undefined && !raccoonPublisher.isDisposed()) {
+            optional(raccoonSwitch?.enabled()).then((sw) => {
+              if (sw === true) {
+                collectRaccoonRows(null).then(({ rows, officeIdentity }) => {
+                  void raccoonPublisher.publish(rows, officeIdentity);
+                }).catch(() => {});
+              }
+            }).catch(() => {});
+          }
+        };
+        if (walkView.isInFlight()) {
+          // A walk is already waiting: hand back ITS scan rather than issuing
+          // a second one. Two walks would each own a different code while the
+          // GET can only ever report one — a scan that looks permanently stuck.
+          const cur = walkView.liveScan();
+          await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur.url, scanCode: cur.code });
           return;
         }
-        const code = generateRaccoonQrCode();
-        const scanUrl = raccoonQrLoginUrl(code);
-        // The scan is in flight now: a GET the tab makes while this walk is
-        // waiting reports the SAME code/URL (see `raccoonState`), so a refresh
-        // or a second tab continues the scan instead of voiding it.
-        raccoonScan = { code, url: scanUrl };
-        raccoonLoginStatus = "scanning";
-        raccoonLoginError = null;
-        raccoonWalk = (async () => {
-          const deadline = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
-          let settled: any = null;
-          let canceled = false;
-          while (Date.now() < deadline) {
-            const poll = await optional(pollRaccoonQrLogin(code), { status: RACCOON_QR_STATUS.PENDING });
-            if (poll.status === RACCOON_QR_STATUS.SUCCESS) {
-              settled = poll;
-              break;
-            }
-            if (poll.status === RACCOON_QR_STATUS.CANCELED) {
-              canceled = true;
-              break;
-            }
-            await new Promise((resolve) => setTimeout(resolve, RACCOON_QR_POLL_INTERVAL_MS));
-          }
-          if (settled === null) {
-            // Timed out or the phone canceled: the panel says "try again".
-            raccoonLoginStatus = canceled ? "canceled" : "timeout";
-            return;
-          }
-          // Evidence, not guesswork: the success envelope was only ever probed
-          // for the token pair, so log its FIELD NAMES (never values — no
-          // secret can leak in a key list) once per login. A field the panel
-          // later wants (a nickname the extractor missed, an org id) shows up
-          // here on the first real scan instead of staying a silent gap.
-          const dataFields = Array.isArray(settled.dataFields) ? settled.dataFields : [];
-          logger?.info?.(`${name}: raccoon login envelope fields: ${dataFields.join(", ") || "(none)"}; nickname extracted: ${settled.nickname !== ""}`);
-          // The scan worked: persist the pair to the credentials service (the
-          // refresh token is single-use, so the store owns that write-back),
-          // then drive the registration if the switch is on.
-          try {
-            await raccoonStore.save({
-              accessToken: settled.accessToken,
-              refreshToken: settled.refreshToken,
-              ...(settled.expiresAtMs !== undefined ? { expiresAtMs: settled.expiresAtMs } : {}),
-              // The QR success envelope carries the nickname — store it, or the
-              // panel's "已登录：" line has nothing to show.
-              ...(settled.nickname !== undefined && settled.nickname !== "" ? { nickname: settled.nickname } : {})
-            });
-          } catch (error) {
-            // The scan worked and the credential did not land: the tab can only
-            // hear about it through the same event channel, so the reason rides
-            // there (sanitized — the store's message may quote the document).
-            raccoonLoginStatus = "failed";
-            raccoonLoginError = redactSecrets(error instanceof Error ? error.message : String(error));
-            return;
-          }
-          // A new credential invalidates every read taken under the previous
-          // one: the balance and the catalogue are per-account facts, and a
-          // cached answer from the old session must not surface under the new
-          // login. (This walk's own catalogue read is keyed on the NEW token, so
-          // it is unaffected.)
-          raccoonRead.clear();
-          if (raccoonPublisher !== null && raccoonPublisher !== undefined && raccoonPublisher.isDisposed() === false) {
-            const switchState = await optional(raccoonSwitch ? raccoonSwitch.enabled() : null);
-            if (switchState === true) {
-              const { rows, officeIdentity } = await collectRaccoonRows(settled.accessToken);
-              await raccoonPublisher.publish(rows, officeIdentity);
-            }
-          }
-          raccoonLoginStatus = "logged_in";
-        })().finally(() => {
-          // Both exits land here: the scan is over either way, and the gate
-          // must reopen even when the walk threw — otherwise every later login
-          // would be told "a walk is already waiting" forever.
-          raccoonWalk = null;
-          raccoonScan = null;
-        });
-        await answer({ ok: true, status: "scanning", scanUrl, scanCode: code });
+        void raccoonWalkManager.issueScan();
+        // The scan is now in flight: report it to the caller so the tab can
+        // render the QR. The GET will poll for the settled event via takeEvent().
+        const cur = walkView.liveScan();
+        await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur.url, scanCode: cur.code });
         return;
       }
 

@@ -15,6 +15,9 @@
  * so the offline suites can substitute a fake factory without touching the
  * Host's node_modules.
  *
+ * 跨切面行为指路：catalog 变化 / switch 翻转 / Key 清除 → 重注册 = `index.ts` seed poll + provider route handler + `publishProvider` 调用链。
+ * 看到"为什么 catalog 一小时缓存"的疑问，先读 `ARCHITECTURE.md` §5.2 的快照去抖与 `catalog-store.ts` 头注。
+ *
  * @module dsh-connect-sensenova-token-plan/provider-publish
  */
 

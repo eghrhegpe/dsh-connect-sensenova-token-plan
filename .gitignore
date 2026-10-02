@@ -11,6 +11,7 @@ tmp/
 .box-agent/
 .box-agent-scratch/
 .zcode/
+.agnes/
 
 # 依赖与构建（link 安装下通常没有实体目录，保险起见）
 node_modules/
