@@ -61,11 +61,56 @@ export function registerRaccoonRoute(ctx: any, wiring: Wiring) {
   // place; a Host that wired none still gets a private one rather than a crash.
   const raccoonRead = raccoonCache ?? createCoalescedFetch();
 
+  // The publish payload every registration-driving action shares: the live
+  // catalogue when a credential exists, else the static fallback, MINUS the
+  // panel's curated-away ids (filterRaccoonRows). `switch`, `models` and the
+  // settled `login` walk (via `onLoggedIn` below, constructed before the
+  // handler) all drive the same publisher with it, so it lives at the ROUTE
+  // level — a function declaration so both the handler and the walk hook can
+  // reference it regardless of definition order.
+  async function collectRaccoonRows(catalogToken?: unknown) {
+    let rows = RACCOON_FALLBACK_MODELS;
+    let officeIdentity = "";
+    try {
+      const { credential } = await optional(raccoonStore ? raccoonStore.resolve() : null, { credential: null });
+      if (catalogToken !== undefined && catalogToken !== null && catalogToken !== "") {
+        // A freshly-scanned token: the read lands in the same cache under its
+        // own fingerprint, so the first GET after login reuses it instead of
+        // re-fetching what this very call just fetched.
+        const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(catalogToken)}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS));
+        if (live !== null && live.length > 0) rows = live;
+      } else if (credential?.accessToken) {
+        const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(credential.accessToken)}`, () => fetchRaccoonCatalog(credential), RACCOON_CATALOG_TTL_MS));
+        if (live !== null && live.length > 0) rows = live;
+        officeIdentity = credential.officeIdentity ?? "";
+      }
+    } catch {
+      // Fallback roster is already the safe default.
+    }
+    const ids = await optional(raccoonSwitch ? raccoonSwitch.enabledIds() : null);
+    return { rows: filterRaccoonRows(rows, ids), officeIdentity };
+  }
+
   const raccoonWalkManager = createRaccoonWalk({
     fetcher: (code: string) => pollRaccoonQrLogin(code),
     saveCredential: (credential) => raccoonStore.save(credential),
     invalidateCache: () => raccoonRead.clear(),
-    onSettled: () => { /* no-op — status flows through the view */ }
+    onSettled: () => { /* no-op — status flows through the view */ },
+    // Login-settled side effect: when the switch is on, drive the publisher
+    // so the just-signed-in account's catalogue reaches DSH's picker right
+    // away. Best-effort: a publish miss must not flip the login outcome (the
+    // walk swallows the hook's exceptions); the next switch toggle or the
+    // mount seed retries.
+    onLoggedIn: () => {
+      if (raccoonPublisher === null || raccoonPublisher === undefined || raccoonPublisher.isDisposed()) return;
+      optional(raccoonSwitch?.enabled()).then((sw: boolean | null) => {
+        if (sw === true) {
+          collectRaccoonRows(null).then(({ rows, officeIdentity }) => {
+            void raccoonPublisher.publish(rows, officeIdentity);
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
   });
   const walkView = raccoonWalkManager.view;
 
@@ -112,34 +157,11 @@ export function registerRaccoonRoute(ctx: any, wiring: Wiring) {
         const state = await raccoonState();
         writeJson(response, 200, { ...state, ...extra }, { "cache-control": "no-store" });
       };
-      // The publish payload every registration-driving action shares: the live
-      // catalogue when a credential exists, else the static fallback, MINUS
-      // the panel's curated-away ids (filterRaccoonRows). `switch`, `models`
-      // and the settled `login` walk all drive the same publisher with it.
-      const collectRaccoonRows = async (catalogToken?: unknown) => {
-        let rows = RACCOON_FALLBACK_MODELS;
-        let officeIdentity = "";
-        try {
-          const { credential } = await optional(raccoonStore ? raccoonStore.resolve() : null, { credential: null });
-          if (catalogToken !== undefined && catalogToken !== null && catalogToken !== "") {
-            // A freshly-scanned token: the read lands in the same cache under
-            // its own fingerprint, so the first GET after login reuses it
-            // instead of re-fetching what this very call just fetched.
-            const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(catalogToken)}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS));
-            if (live !== null && live.length > 0) rows = live;
-          } else if (credential?.accessToken) {
-            const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(credential.accessToken)}`, () => fetchRaccoonCatalog(credential), RACCOON_CATALOG_TTL_MS));
-            if (live !== null && live.length > 0) rows = live;
-            officeIdentity = credential.officeIdentity ?? "";
-          }
-        } catch {
-          // Fallback roster is already the safe default.
-        }
-        const ids = await optional(raccoonSwitch ? raccoonSwitch.enabledIds() : null);
-        return { rows: filterRaccoonRows(rows, ids), officeIdentity };
-      };
-
-      // ── switch: register / deregister the Raccoon provider with DSH ──
+      // The publish payload every registration-driving action shares lives at the
+      // ROUTE level (`collectRaccoonRows` above): `switch`, `models` and the
+      // settled `login` walk drive the same publisher with it. The walk's
+      // `onLoggedIn` hook is registered once at construction, rendering the
+      // old per-login-branch override dead.
       if (action === "switch") {
         if (typeof body.value.enabled !== "boolean") {
           writeJson(response, 400, { ok: false, error: "expected { action: \"switch\", enabled: boolean }" }, { "cache-control": "no-store" });
@@ -198,28 +220,15 @@ export function registerRaccoonRoute(ctx: any, wiring: Wiring) {
       // ── login: delegate to the walk module, drive side-effects here ──
       //
       // `raccoon-walk.ts` owns the scan lifecycle: concurrency gate, gateway
-      // polling, settle / timeout / cancel, credential save, cache invalidation.
-      // This branch drives the publisher because provider registration touches
-      // external state (the switch file + the DSH adapter registry).
+      // polling, settle / timeout / cancel, credential save, cache invalidation,
+      // and — through its `onLoggedIn` hook — the publish the route registers
+      // once at construction (previously faked by assigning `invalidateCache`
+      // onto the walk's returned object, a write nobody read).
       if (action === "login") {
         if (raccoonStore === null || raccoonStore === undefined) {
           await answer({ ok: false, error: "the raccoon credential store is unavailable" });
           return;
         }
-        // Replace walk's default save/invalidate with one that also publishes
-        // when the switch is on (so a logged-in user sees models immediately).
-        (raccoonWalkManager as any).invalidateCache = () => {
-          raccoonRead.clear();
-          if (raccoonPublisher !== null && raccoonPublisher !== undefined && !raccoonPublisher.isDisposed()) {
-            optional(raccoonSwitch?.enabled()).then((sw: boolean | null) => {
-              if (sw === true) {
-                collectRaccoonRows(null).then(({ rows, officeIdentity }) => {
-                  void raccoonPublisher.publish(rows, officeIdentity);
-                }).catch(() => {});
-              }
-            }).catch(() => {});
-          }
-        };
         if (walkView.isInFlight()) {
           // A walk is already waiting: hand back ITS scan rather than issuing
           // a second one. Two walks would each own a different code while the

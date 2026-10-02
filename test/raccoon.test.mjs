@@ -54,6 +54,7 @@ import {
   raccoonRequestHeaders
 } from "../src/host/raccoon-models.ts";
 import { createRaccoonPublisher, raccoonSignature } from "../src/host/raccoon-publish.ts";
+import { createRaccoonWalk, LOGIN_STATUS } from "../src/host/raccoon-walk.ts";
 import { createFileRaccoonStore, normalizeRaccoonEnabled, RACCOON_SWITCH_VERSION } from "../src/host/raccoon-switch-store.ts";
 import { installNetworkGuard } from "./peer-roots.mjs";
 import { surface as clientSurface } from "./client-surface.js";
@@ -787,6 +788,97 @@ function section(title) {
     .filter((file) => readFileSync(file, "utf8").includes("RACCOON_DESKTOP_PREFIX"));
   check("the desktop one-time reward endpoint stays unwired",
     wired.length === 0, wired.map((file) => file.replace(srcRoot, "src")).join(", "));
+}
+
+// --- W. the QR walk's onLoggedIn hook and the save-window gate ----------
+// A1: a successful login must drive the caller's logged-in side effect
+// (provider publish) — and only AFTER the credential landed. A failed save
+// must not fire it, and a throwing hook must not flip the outcome.
+// A2: the concurrency gate must stay closed THROUGH the save window — a
+// second login clicked while the credential is being written must not issue
+// a second scan — and reopen only once save settled.
+{
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const success = () => ({ status: RACCOON_QR_STATUS.SUCCESS, accessToken: "at", refreshToken: "rt" });
+  const drain = async (walk) => {
+    for (let i = 0; i < 40 && walk.view.isInFlight(); i += 1) await sleep(10);
+  };
+
+  // W1: happy path — save → invalidate → onLoggedIn, exactly in that order.
+  {
+    const order = [];
+    const walk = createRaccoonWalk({
+      fetcher: async () => success(),
+      saveCredential: async () => { order.push("save"); },
+      invalidateCache: () => { order.push("invalidate"); },
+      onSettled: () => {},
+      onLoggedIn: () => { order.push("onLoggedIn"); }
+    });
+    await walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W1 a successful scan drives save, then invalidate, then onLoggedIn",
+      event.status === LOGIN_STATUS.logged_in && order.join(",") === "save,invalidate,onLoggedIn",
+      `${event.status} / ${order.join(",")}`);
+  }
+
+  // W2: a failed save fires NO onLoggedIn and reports failed.
+  {
+    let logins = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async () => success(),
+      saveCredential: async () => { throw new Error("the credentials service refused"); },
+      invalidateCache: () => {},
+      onSettled: () => {},
+      onLoggedIn: () => { logins += 1; }
+    });
+    await walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W2 a failed save reports failed and never fires onLoggedIn",
+      event.status === LOGIN_STATUS.failed && logins === 0 && event.error !== null,
+      `${event.status} / logins=${logins}`);
+  }
+
+  // W3: a throwing onLoggedIn must NOT flip the outcome — the credential is
+  // already persisted, so a publish miss is a degraded-but-logged-in state.
+  {
+    const walk = createRaccoonWalk({
+      fetcher: async () => success(),
+      saveCredential: async () => {},
+      invalidateCache: () => {},
+      onSettled: () => {},
+      onLoggedIn: () => { throw new Error("publish boom"); }
+    });
+    await walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W3 a throwing onLoggedIn leaves the login logged_in",
+      event.status === LOGIN_STATUS.logged_in && event.error === null,
+      `${event.status} / error=${event.error}`);
+  }
+
+  // W4: the gate stays closed THROUGH the held save (A2) and reopens after.
+  {
+    let releaseSave = null;
+    const walk = createRaccoonWalk({
+      fetcher: async () => success(),
+      saveCredential: () => new Promise((resolve) => { releaseSave = () => resolve(); }),
+      invalidateCache: () => {},
+      onSettled: () => {},
+      onLoggedIn: () => {}
+    });
+    void walk.issueScan();
+    // Wait until the walk has reached the (held) save — the exact window the
+    // old gate reopened in, letting a second login race the credential write.
+    for (let i = 0; i < 100 && releaseSave === null; i += 1) await sleep(5);
+    check("W4 the walk is still in flight DURING the held save",
+      walk.view.isInFlight() === true && releaseSave !== null, `inFlight=${walk.view.isInFlight()}`);
+    releaseSave?.();
+    await drain(walk);
+    check("W4 the gate reopens only once save settled",
+      walk.view.isInFlight() === false, `inFlight=${walk.view.isInFlight()}`);
+  }
 }
 
 // --- report ------------------------------------------------------------------

@@ -16,12 +16,17 @@
  *   - polling the gateway until settle or timeout
  *   - persisting the credential pair (delegates to callers)
  *   - clearing the read cache on settle
+ *   - firing the logged-in side-effect hook (`onLoggedIn`) after the
+ *     credential landed
  *   - emitting the settled outcome as an event
  *
- * Callers drive the three business steps (save, publish, invalidate) because
- * those touch external state (credentials service, provider registration,
- * route-owned cache). The walk module holds only the transient screen — the
- * scan code, the in-flight gate, the event that the GET returns.
+ * Callers register the business-step callbacks (save, invalidate, onLoggedIn)
+ * ONCE at construction; the walk drives them at the right point of the
+ * lifecycle. `onLoggedIn` is where provider registration happens — the login
+ * branch used to fake it by assigning `invalidateCache` onto the returned
+ * object, a write nobody reads (the walk's own `invalidateCache` is the one
+ * captured at construction). The walk module holds only the transient screen —
+ * the scan code, the in-flight gate, the event that the GET returns.
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-walk
  */
@@ -84,6 +89,11 @@ export interface RaccoonWalkView {
  *   outcome. Kept for callers that want to reset per-scan UI state; the read
  *   model's `login` view reads the walk's own state (`takeEvent` / `liveScan`),
  *   not this hook, so the route registers it as a no-op.
+ * @param options.onLoggedIn - called AFTER the credential was persisted and the
+ *   read cache cleared, with the outcome already `logged_in`. The caller's
+ *   provider-registration side effect lives here. Its failures are swallowed:
+ *   the credential is already in place, so a publish miss is a degraded-but-
+ *   logged-in state, never a login failure.
  * @returns {{ view: RaccoonWalkView, issueScan: () => Promise<void> }}
  */
 export function createRaccoonWalk(options: {
@@ -91,6 +101,7 @@ export function createRaccoonWalk(options: {
   saveCredential: (credential: { accessToken: string; refreshToken: string; expiresAtMs?: number; nickname?: string }) => Promise<void>;
   invalidateCache: () => void;
   onSettled: () => void;
+  onLoggedIn?: () => void;
 }): { view: RaccoonWalkView; issueScan: () => Promise<void> } {
   let scan: { code: string; url: string } | null = null;
   /** `null` while idle; a promise while the walk runs. Cleared in finally. */
@@ -131,54 +142,75 @@ export function createRaccoonWalk(options: {
     let settled: SettledScan | null = null;
 
     try {
-      while (Date.now() < deadline) {
-        let poll;
+      try {
+        while (Date.now() < deadline) {
+          let poll;
+          try {
+            poll = await options.fetcher(code);
+          } catch {
+            // Transient poll error: keep waiting, don't fail the walk.
+            poll = { status: RACCOON_QR_STATUS.PENDING };
+          }
+          if (poll.status === RACCOON_QR_STATUS.SUCCESS) {
+            // The parser guarantees a non-empty pair on `success` (a tokenless
+            // success is reported as `pending`, never here) — this narrowing
+            // states that contract instead of re-checking it at runtime.
+            settled = poll as SettledScan;
+            break;
+          }
+          if (poll.status === RACCOON_QR_STATUS.CANCELED) {
+            canceled = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, RACCOON_QR_POLL_INTERVAL_MS));
+        }
+      } finally {
+        // The scan is over; the poll loop's own cleanup lands here. The GATE is
+        // deliberately NOT reopened here: `saveCredential` still runs below,
+        // and during that window `isInFlight()` must stay true — otherwise a
+        // second login would issue a second scan and the two walks race to
+        // write the shared scan/status/error (PITFALLS §31; test T2 covers the
+        // poll window only). The gate reopens two levels down, after save.
+      }
+
+      if (settled === null) {
+        status = canceled ? LOGIN_STATUS.canceled : LOGIN_STATUS.timeout;
+        return;
+      }
+
+      try {
+        await options.saveCredential({
+          accessToken: settled.accessToken,
+          refreshToken: settled.refreshToken,
+          ...(settled.expiresAtMs !== undefined ? { expiresAtMs: settled.expiresAtMs } : {}),
+          ...(settled.nickname !== undefined && settled.nickname !== "" ? { nickname: settled.nickname } : {})
+        });
+        options.invalidateCache();
+        status = LOGIN_STATUS.logged_in;
+        // The logged-in side effect (provider publish etc.), fired after the
+        // credential landed and the outcome was set. Its failure must NOT flip
+        // the result: the pair is already persisted, so a publish miss is a
+        // degraded-but-logged-in state, never a failed login.
         try {
-          poll = await options.fetcher(code);
+          options.onLoggedIn?.();
         } catch {
-          // Transient poll error: keep waiting, don't fail the walk.
-          poll = { status: RACCOON_QR_STATUS.PENDING };
+          // no-op — best-effort; the next switch toggle or mount seed retries.
         }
-        if (poll.status === RACCOON_QR_STATUS.SUCCESS) {
-          // The parser guarantees a non-empty pair on `success` (a tokenless
-          // success is reported as `pending`, never here) — this narrowing
-          // states that contract instead of re-checking it at runtime.
-          settled = poll as SettledScan;
-          break;
-        }
-        if (poll.status === RACCOON_QR_STATUS.CANCELED) {
-          canceled = true;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, RACCOON_QR_POLL_INTERVAL_MS));
+      } catch (saveError) {
+        // The scan worked but the credential did not land: the tab can only hear
+        // about it through the event channel, so the reason rides there
+        // (sanitized — the store's message may quote the document).
+        status = LOGIN_STATUS.failed;
+        error = String(saveError instanceof Error ? saveError.message : saveError);
       }
     } finally {
-      // Both exits land here: the scan is over either way, and the gate must
-      // reopen even when the walk threw — otherwise every later login would be
-      // told "a walk is already waiting" forever.
+      // Both exits land here: whatever the outcome (settled / save / publish),
+      // the gate must reopen even when the walk threw — otherwise every later
+      // login would be told "a walk is already waiting" forever. Reopening
+      // AFTER save keeps a second login from racing this walk's credential
+      // write (the poll-loop cleanup alone reopened it too early, so a login
+      // clicked during the save window used to issue a second scan).
       walk = null;
-    }
-
-    if (settled === null) {
-      status = canceled ? LOGIN_STATUS.canceled : LOGIN_STATUS.timeout;
-      return;
-    }
-
-    try {
-      await options.saveCredential({
-        accessToken: settled.accessToken,
-        refreshToken: settled.refreshToken,
-        ...(settled.expiresAtMs !== undefined ? { expiresAtMs: settled.expiresAtMs } : {}),
-        ...(settled.nickname !== undefined && settled.nickname !== "" ? { nickname: settled.nickname } : {})
-      });
-      options.invalidateCache();
-      status = LOGIN_STATUS.logged_in;
-    } catch (saveError) {
-      // The scan worked but the credential did not land: the tab can only hear
-      // about it through the event channel, so the reason rides there
-      // (sanitized — the store's message may quote the document).
-      status = LOGIN_STATUS.failed;
-      error = String(saveError instanceof Error ? saveError.message : saveError);
     }
   }
 
