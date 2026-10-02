@@ -530,6 +530,37 @@ check("empty token yields null expiry", readJwtExpiry("") === null);
   }
 }
 
+// --- 7a. a refresh 400 is classified by the body's error, not the status ----
+// The token endpoint's 400 means `invalid_grant` (the token is dead: only a
+// password login recovers it) OR a request-shape problem (`invalid_client` /
+// `invalid_scope` — the TOKEN is fine). Only the former is REFRESH_REJECTED:
+// the caller's rejection path REAPS the stored grant, so a misclassified
+// `invalid_client` would delete a perfectly healthy refresh token for good.
+{
+  const cases = [
+    { label: "invalid_grant is a dead token", body: { error: "invalid_grant", error_description: "grant is stale" }, status: 400, expect: "refresh_rejected" },
+    { label: "invalid_client is NOT a dead token", body: { error: "invalid_client", error_description: "unknown client" }, status: 400, expect: "refresh_failed" },
+    { label: "invalid_scope is NOT a dead token", body: { error: "invalid_scope", error_description: "scope not allowed" }, status: 400, expect: "refresh_failed" },
+    { label: "a non-JSON 400 body is NOT a dead token", body: "gateway refused", status: 400, expect: "refresh_failed" },
+    { label: "a 500 is a transport failure, not a dead token", body: "boom", status: 500, expect: "refresh_failed" }
+  ];
+  for (const c of cases) {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(
+      typeof c.body === "string" ? c.body : JSON.stringify(c.body),
+      { status: c.status, headers: { "content-type": "application/json" } });
+    try {
+      const mod = await import(`../src/host/sensenova-auth.ts?refresh400=${Date.now()}-${Math.random()}`);
+      let code = null;
+      try { await mod.createAuth().refresh("refresh-token"); } catch (error) { code = error?.code; }
+      check(`refresh 400=${c.status} ${c.body.error ?? "(no error field)"} classifies as ${c.expect}`,
+        code === c.expect, String(code));
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+}
+
 // --- 7b. a SUCCESSFUL login also reports its trace ----------------------
 // Only failures used to reach `onTrace`, so a working walk was never written
 // down — and diffing a working attempt against a failing one is the entire

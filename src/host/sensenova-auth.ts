@@ -524,12 +524,17 @@ export async function refreshWith(cfg, refreshToken, options: { timeoutMs?: numb
     signal: AbortSignal.timeout(options.timeoutMs ?? cfg.requestTimeoutMs)
   });
   if (!response.ok) {
-    // 400 invalid_grant means the refresh token itself is dead (revoked,
-    // reused, or expired): only a fresh password login can recover.
-    const code = response.status === 400 ? CODE.REFRESH_REJECTED : CODE.REFRESH_FAILED;
     const body = obj(await response.json().catch(() => ({})));
+    // Only `invalid_grant` means the refresh token itself is dead (revoked,
+    // reused, or expired) and only a password login can recover. Any other 400
+    // (invalid_client, invalid_scope, a malformed request — an operator typo in
+    // the overrides lands here) says nothing about the token. Treating every 400
+    // as a dead token is DESTRUCTIVE: the caller's REFRESH_REJECTED path
+    // purges the stored grant (token-store/grant.ts purgeGrant) and deletes a
+    // perfectly healthy token pair.
+    const dead = response.status === 400 && str(body.error, "") === "invalid_grant";
     const detail = str(body.error_description, str(body.error, `HTTP ${response.status}`));
-    throw pluginError(code, `refresh rejected (HTTP ${response.status}): ${detail}`);
+    throw pluginError(dead ? CODE.REFRESH_REJECTED : CODE.REFRESH_FAILED, `refresh rejected (HTTP ${response.status}): ${detail}`);
   }
   return readTokenResponse(response, cfg);
 }
