@@ -22,8 +22,10 @@ import {
 } from "../src/host/raccoon-status.ts";
 import { createCoalescedFetch } from "../src/host/coalesced-fetch.ts";
 import { optional } from "../src/host/util.ts";
-import { RACCOON_API_BASE, RACCOON_POINTS_PREFIX, RACCOON_FALLBACK_MODELS } from "../src/host/raccoon.ts";
+import { RACCOON_API_BASE, RACCOON_POINTS_PREFIX, RACCOON_FALLBACK_MODELS, RACCOON_QR_POLL_INTERVAL_MS } from "../src/host/raccoon.ts";
 import { installNetworkGuard } from "./peer-roots.mjs";
+import { surface } from "./client-surface.js";
+import { statedCadenceMs } from "../src/client/format.ts";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -216,6 +218,51 @@ try {
   }
 } catch (error) {
   fail("B: the login event contract", error);
+}
+
+// === B2. the tab's cadence is STATED, not guessed ==========================
+// The client used to hold `RACCOON_POLL_MS = 60_000` / `RACCOON_SCAN_POLL_MS
+// = 2_000` while this module held the same two numbers as cache windows
+// (`RACCOON_BALANCE_TTL_MS`, and the route's `RACCOON_QR_POLL_INTERVAL_MS`).
+// One knob, two homes, and nothing able to see them drift — the anti-
+// redeclaration check in `raccoon.test.mjs` reads only `src/host/routes.ts`,
+// so a client-side copy was outside its reach by construction. The route now
+// states the cadence in its own answer, and these checks pin the statement to
+// the numbers that actually govern the caching.
+try {
+  const answer = await readRaccoonStatus(deps({ read: stubRead({ balance: BALANCE_HIT, catalog: CATALOG_HIT }) }));
+  check("B5 the answer states the tab's idle cadence in seconds",
+    answer.pollSeconds === RACCOON_BALANCE_TTL_MS / 1000,
+    `${answer.pollSeconds} vs TTL ${RACCOON_BALANCE_TTL_MS}`);
+  check("B6 the answer states the scan cadence, equal to the route's own QR poll",
+    answer.scanPollSeconds === RACCOON_QR_POLL_INTERVAL_MS / 1000,
+    `${answer.scanPollSeconds} vs ${RACCOON_QR_POLL_INTERVAL_MS}`);
+  check("B7 the stated cadence survives the client's converter unchanged",
+    statedCadenceMs(answer.pollSeconds, 1) === RACCOON_BALANCE_TTL_MS
+      && statedCadenceMs(answer.scanPollSeconds, 1) === RACCOON_QR_POLL_INTERVAL_MS,
+    `${statedCadenceMs(answer.pollSeconds, 1)} / ${statedCadenceMs(answer.scanPollSeconds, 1)}`);
+  // The old converter clamped to a 5 s floor, which silently rewrote the 2 s
+  // scan cadence into 5 s — a client-side opinion overriding the number the
+  // Host states (and the Host already clamps its own config at the source).
+  // The check is explicit about the sub-floor value so the clamp cannot come
+  // back unnoticed, and about a malformed one so the fallback still works.
+  check("B7b a stated cadence below the old floor is passed through, not clamped",
+    statedCadenceMs(2, 60_000) === 2_000 && statedCadenceMs(0.5, 7_000) === 1_000,
+    `${statedCadenceMs(2, 60_000)} / ${statedCadenceMs(0.5, 7_000)}`);
+  check("B7c a missing or malformed cadence falls back instead of inventing one",
+    statedCadenceMs(undefined, 60_000) === 60_000 && statedCadenceMs(Number.NaN, 2_000) === 2_000
+      && statedCadenceMs("30", 60_000) === 60_000 && statedCadenceMs(0, 60_000) === 60_000,
+    `${statedCadenceMs(undefined, 60_000)} / ${statedCadenceMs(Number.NaN, 2_000)} / ${statedCadenceMs("30", 60_000)} / ${statedCadenceMs(0, 60_000)}`);
+  // The two built-in fallbacks are what the first frame uses before any answer
+  // has arrived, so they must equal the values the Host is expected to state —
+  // otherwise the tab's opening seconds poll at a rate the Host never asked
+  // for. Pinned to the shipped constants through the bundle's own surface.
+  check("B8 the tab's pre-answer fallbacks match the Host's own windows",
+    surface.helpers.RACCOON_POLL_MS === RACCOON_BALANCE_TTL_MS
+      && surface.helpers.RACCOON_SCAN_POLL_MS === RACCOON_QR_POLL_INTERVAL_MS,
+    `${surface.helpers.RACCOON_POLL_MS} / ${surface.helpers.RACCOON_SCAN_POLL_MS}`);
+} catch (error) {
+  fail("B2: the stated cadence", error);
 }
 
 // === C. the ?debug=1 scaffold ==============================================

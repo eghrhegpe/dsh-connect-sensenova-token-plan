@@ -27,6 +27,7 @@
  */
 
 import { count, format, tokenSize } from "./format.ts";
+import { raccoonModelIsOn } from "./models.ts";
 import { ModelRow } from "./model-row.ts";
 import { h } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
@@ -72,7 +73,9 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
   const rows = Array.isArray(models) ? models : [];
   const fallbackNote = source === "empty" ? tt("raccoon.modelsEmpty") : source === "unreadable" ? tt("raccoon.modelsFallback") : null;
   // `null` (the panel never curated) is "every model pushes", not "none does".
-  const curated = Array.isArray(enabledIds) ? new Set(enabledIds) : null;
+  // The predicate is the SHARED one (`models.ts`): the rule this line applies
+  // is the same rule the toggle implements, so a row can no longer disagree
+  // with the list that ticking it would post.
   return h(
     "div",
     { style: { ...S.modelPanel, marginTop: 10 } },
@@ -100,7 +103,7 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
       rows.map((row) => {
         const id = String(row?.id ?? "");
         const label = String(row?.name ?? id);
-        const on = curated === null ? true : curated.has(id);
+        const on = raccoonModelIsOn(enabledIds, id);
         // The credit rate reads as its own chip, drawn exactly like the Token
         // Plan roster's `×N` (0 is "free", not "×0" — see the module note).
         const rate = typeof row?.multiplier === "number" ? row.multiplier : null;

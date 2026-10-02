@@ -1085,6 +1085,45 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     check("a save in flight freezes the roster's own checkboxes",
       boxes.length === 2 && boxes[1].props.disabled === true, `disabled=${String(boxes[1]?.props?.disabled)}`);
   }
+
+  // The curation toggle is TWO-WAY, and this is the check that would have
+  // caught it not being: the card used to post `current.filter((entry) =>
+  // entry !== id)` for every click, so a model could be switched off and never
+  // switched back on. Every frame above renders the checkbox from `state`, so
+  // the wrong list was invisible — the click had to be fired and what it
+  // POSTED had to be read, which is what these do.
+  {
+    const roster = [{ id: "a", name: "A" }, { id: "b", name: "B" }];
+    const click = (state, rowId) => {
+      const posted = [];
+      const tree = card(state, { onIds: (ids) => posted.push(ids) });
+      // Skip the provider-switch box: the roster's own rows are the ones that
+      // carry an `aria-label` (the switch has none), so the matcher is exact
+      // rather than positional — a reordered header must not shift it.
+      const rows = findAll(tree, (props) => props.type === "checkbox" && typeof props["aria-label"] === "string");
+      const row = rows[rowId === "a" ? 0 : 1];
+      row.props.onChange({ target: { checked: row.props.checked !== true } });
+      return posted[0];
+    };
+
+    const off = click({ ok: true, enabled: true, loggedIn: true, models: roster, enabledModelIds: ["a"] }, "a");
+    check("unchecking a curated model drops just that id",
+      JSON.stringify(off) === JSON.stringify([]), JSON.stringify(off));
+
+    const backOn = click({ ok: true, enabled: true, loggedIn: true, models: roster, enabledModelIds: ["a"] }, "b");
+    check("re-checking an unchecked model ADDS it back (the one-way door)",
+      JSON.stringify(backOn) === JSON.stringify(["a", "b"]), JSON.stringify(backOn));
+
+    const firstOff = click({ ok: true, enabled: true, loggedIn: true, models: roster, enabledModelIds: null }, "a");
+    check("the first uncheck of an uncurated roster materialises the rest",
+      JSON.stringify(firstOff) === JSON.stringify(["b"]), JSON.stringify(firstOff));
+
+    // The empty list is the state the old code could never leave: every later
+    // click posted `[]` again, so the whole roster stayed off for good.
+    const fromEmpty = click({ ok: true, enabled: true, loggedIn: true, models: roster, enabledModelIds: [] }, "b");
+    check("a roster curated down to nothing can be turned back on",
+      JSON.stringify(fromEmpty) === JSON.stringify(["b"]), JSON.stringify(fromEmpty));
+  }
 }
 
 console.log(JSON.stringify(results, null, 2));

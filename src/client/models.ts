@@ -1,5 +1,10 @@
 /**
  * The model allow-list algebra, shared by the picker and the roster rows.
+ *
+ * It carries BOTH dialects of the `enabledModelIds` field: the Token Plan
+ * side (`[]` = no filter, the hide-all sentinel for "nothing") and the
+ * Raccoon gateway side (`null` = no filter, `[]` for "nothing"). Callers pick
+ * a dialect by calling its primitive — never by re-deriving the rule inline.
  */
 
 /**
@@ -85,4 +90,48 @@ export function bulkModelsIn(enabledIds: unknown, roster: unknown, targets: unkn
   for (const id of targets as Iterable<string>) if (allOn) on.add(id as string);
   else on.delete(id as string);
   return allowListFor(on, roster);
+}
+
+// --- the Raccoon dialect -----------------------------------------------------
+//
+// The SECOND upstream spells the same field the other way round, and that is a
+// documented fact of its route, not an accident (see `raccoon-roster.ts` and
+// `docs/ROADMAP.md` §6.1): `null`/absent means "the whole roster pushes", while
+// an empty ARRAY means "nothing does". The two dialects live here, side by
+// side, for the reason the whole module exists: "what counts as on" and "what
+// to post after a tick" are ONE fact, and any caller that re-derives them
+// inline gets one of the two directions wrong. It did: the card hand-rolled
+// `ids.filter((id) => id !== toggled)`, so a model could be switched OFF and
+// never back ON (the un-tick path was the only one implemented).
+
+/**
+ * Whether one model id is offered by the RACCOON curation.
+ *
+ * Mirrors the gateway route's reading: an array is a strict allow-list
+ * (`[]` offers nothing), anything else — `null`, absent — offers everything.
+ */
+export function raccoonModelIsOn(enabledIds: unknown, id: string): boolean {
+  return Array.isArray(enabledIds) ? enabledIds.includes(id) : true;
+}
+
+/**
+ * The next curation after ticking or unticking one model, in that dialect.
+ *
+ * Deliberately the mirror of {@link toggleModelIn} minus the hide-all
+ * sentinel: an empty array already spells "nothing pushes" here, so a second
+ * spelling would be a second way to say it.
+ *
+ * The result is a COMPLETE, roster-ordered list rather than a diff, and an
+ * all-on toggle deliberately does NOT collapse back to `null`: `null` keeps
+ * its one meaning ("the panel never curated"), so a curation the reader made
+ * stays made — a model the gateway adds later starts unticked instead of
+ * slipping into DSH on its own, which is the same policy the Token Plan side
+ * spells with `allowListFor`.
+ */
+export function toggleRaccoonModelIn(enabledIds: unknown, roster: unknown, id: string): string[] {
+  const all = rosterIds(roster);
+  const on = new Set(all.filter((model) => raccoonModelIsOn(enabledIds, model)));
+  if (on.has(id)) on.delete(id);
+  else on.add(id);
+  return all.filter((model) => on.has(model));
 }

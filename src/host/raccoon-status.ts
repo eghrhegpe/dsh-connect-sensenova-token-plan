@@ -18,7 +18,7 @@
  * @module dsh-connect-sensenova-token-plan/raccoon-status
  */
 import { createHash } from "node:crypto";
-import { fetchRaccoonBalance, fetchRaccoonCatalog, RACCOON_FALLBACK_MODELS } from "./raccoon.ts";
+import { fetchRaccoonBalance, fetchRaccoonCatalog, RACCOON_FALLBACK_MODELS, RACCOON_QR_POLL_INTERVAL_MS } from "./raccoon.ts";
 import { str, redactSecrets, optional, errMsg, pickDefined } from "./util.ts";
 
 /**
@@ -345,6 +345,14 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
     ok: true,
     enabled: effectiveEnabled,
     switchSource: switchState === null ? "off" : "panel",
+    // The tab's own cadence, stated by the side that owns the cache windows —
+    // the same discipline the quota snapshot follows with `pollSeconds`. The
+    // client used to hard-code 60 s / 2 s while this module held the same two
+    // numbers as TTLs, i.e. one knob with two homes and nothing able to see
+    // them drift. Seconds, not milliseconds: this is a wire field, and the
+    // snapshot's own spelling is seconds.
+    pollSeconds: RACCOON_BALANCE_TTL_MS / 1000,
+    scanPollSeconds: RACCOON_QR_POLL_INTERVAL_MS / 1000,
     loggedIn,
     nickname,
     // Whether the stored access token has lapsed. `loggedIn` alone says "a

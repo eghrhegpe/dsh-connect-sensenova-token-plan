@@ -19,25 +19,35 @@
  * logged-out view).
  */
 import { RACCOON_PATH } from "./const.ts";
-import { format } from "./format.ts";
+import { format, statedCadenceMs } from "./format.ts";
 import { postJson, postJsonOrThrow } from "./http.ts";
 import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { RaccoonCard } from "./raccoon-card.ts";
 import type { RaccoonState } from "./raccoon-card.ts";
 
-/** The cadence the tab polls at while open (balance + roster drift slowly). */
-const RACCOON_POLL_MS = 60_000;
 /**
- * The cadence while a scan is waiting.
+ * The cadence the tab opens with, before any answer has stated one.
+ *
+ * NOT the tab's cadence: the route states `pollSeconds` in every answer (it
+ * owns the cache windows the poll has to respect) and that is what the loop
+ * runs on. This is only what the very first frame uses, so it must equal the
+ * value the Host is expected to state — pinned to `RACCOON_BALANCE_TTL_MS` by
+ * `test/raccoon-status.test.mjs` B8, because an unpinned fallback is a second
+ * home for the number this file no longer owns.
+ */
+export const RACCOON_POLL_MS = 60_000;
+/**
+ * The cadence while a scan is waiting, before any answer has stated one.
  *
  * The gateway's own client polls every 2 s, so a confirmed scan must be
  * noticed within a couple of seconds of it happening. It costs nothing when no
  * scan is in flight (the loop drops back to the slow cadence the moment the
  * route stops saying `scanning`), and it is bounded by the SERVER's deadline —
- * the tab holds no timer of its own that could outlive the walk.
+ * the tab holds no timer of its own that could outlive the walk. Pinned to the
+ * route's `RACCOON_QR_POLL_INTERVAL_MS` by the same check as above.
  */
-const RACCOON_SCAN_POLL_MS = 2_000;
+export const RACCOON_SCAN_POLL_MS = 2_000;
 
 /**
  * The Raccoon tab body.
@@ -72,6 +82,18 @@ export function RaccoonTab({
   const [modelsNote, setModelsNote] = useState<string | null>(null);
   const [idsBusy, setIdsBusy] = useState(false);
   const alive = useRef(true);
+  /**
+   * Which read is allowed to write.
+   *
+   * The loop's cadence changes (60 s → 2 s when a scan starts) and every change
+   * rebuilds it with an immediate load, so two reads can be in flight at once
+   * and the SLOWER one can land last — putting the older answer on screen and
+   * making the balance, the roster and the login status all step backwards.
+   * `alive` alone cannot catch that: it says nothing about supersession. The
+   * quota tab has carried the same guard all along; this one now does too,
+   * because the two loops answer to the same problem.
+   */
+  const generation = useRef(0);
 
   // Stamp the header's refresh channel with the time of the last successful
   // GET. A failed read keeps the previous timestamp (the data is only stale,
@@ -84,11 +106,13 @@ export function RaccoonTab({
 
   const load = useCallback(async () => {
     const at = Date.now();
+    const mine = (generation.current += 1);
+    const isCurrent = () => alive.current && generation.current === mine;
     try {
       const response = await fetch(RACCOON_PATH, { headers: { accept: "application/json" }, cache: "no-store" });
-      if (!response.ok || !alive.current) return;
+      if (!response.ok || !isCurrent()) return;
       const body = (await response.json().catch(() => null)) as RaccoonState | null;
-      if (!alive.current) return;
+      if (!isCurrent()) return;
       if (body === null || body.ok === false) {
         setError(typeof body?.error === "string" && body.error !== "" ? body.error : "no answer");
         // A failed read does not reset the timestamp we already reported.
@@ -111,9 +135,9 @@ export function RaccoonTab({
       setError(null);
       report(at, null);
     } catch {
-      if (alive.current) setError("unable to reach the Host");
+      if (isCurrent()) setError("unable to reach the Host");
     } finally {
-      if (alive.current) setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [report, tt]);
 
@@ -121,6 +145,14 @@ export function RaccoonTab({
   // deadline), so the tab has no timer of its own to leak: it simply polls
   // faster while the route says so, and drops back the moment it stops.
   const scanning = state?.loginStatus === "scanning";
+
+  // The cadence is STATED by the Host in every answer (it owns the two cache
+  // windows the poll has to respect), and the module constants are only what
+  // the first frame uses before an answer has arrived — the same shape the
+  // quota tab follows with the snapshot's `pollSeconds`, through the same
+  // converter.
+  const pollMs = statedCadenceMs(state?.pollSeconds, RACCOON_POLL_MS);
+  const scanPollMs = statedCadenceMs(state?.scanPollSeconds, RACCOON_SCAN_POLL_MS);
 
   // One loop owns the tab's polling: an immediate load on entry, then the
   // cadence; the timer stops on unmount (the tab may close at any time). The
@@ -134,15 +166,20 @@ export function RaccoonTab({
       if (alive.current) void load();
     };
     run();
-    timer = setInterval(run, scanning ? RACCOON_SCAN_POLL_MS : RACCOON_POLL_MS);
+    timer = setInterval(run, scanning ? scanPollMs : pollMs);
     return () => {
       alive.current = false;
+      // Invalidate the reads this loop started: the cadence change that
+      // rebuilds this effect (60 s ↔ 2 s) also re-sets `alive` to true on the
+      // way back in, so a slow read from the OLD loop could otherwise still
+      // pass the liveness test and overwrite the new loop's fresher answer.
+      generation.current += 1;
       if (timer !== null) clearInterval(timer);
       // The tab is closing: drop its freshness from the header (the quota/api
       // tabs own their own clusters, so nothing else should show this one's).
       if (onReportStatus !== undefined) onReportStatus(null);
     };
-  }, [load, onReportStatus, scanning]);
+  }, [load, onReportStatus, scanning, pollMs, scanPollMs]);
 
   const toggle = useCallback(async (enabled: boolean) => {
     setLoginNote(null);

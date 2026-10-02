@@ -122,7 +122,12 @@ export function AccountForm({ auth, onDone, tt, bare, snapshotAt }: {
       const waitMs = typeof body?.retryAfterMs === "number" ? body.retryAfterMs : null;
       if (waitMs !== null && waitMs > 0) {
         setCooldown(waitMs);
-        setFormError(tt(code === "account_locked" ? "auth.locked" : "auth.rateLimited"));
+        // The line comes from the table, not from a second copy of the two
+        // codes: `account_locked` and `rate_limited` are already classified
+        // there, and a code this branch compares inline could be renamed in
+        // `codes.ts` while the table kept working — the check below reads the
+        // table, so a literal here would have drifted out of its sight.
+        setFormError(tt(REFUSAL_TEXT[typeof code === "string" ? code : ""] ?? "auth.rateLimited"));
         return;
       }
       // Only say "wrong password" when the platform said so. Every other

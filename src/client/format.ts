@@ -1,5 +1,23 @@
 /** Time and number formatters. */
 
+/**
+ * A Host-STATED cadence in seconds, as the milliseconds `setInterval` wants,
+ * or `fallbackMs` when the answer carried no usable number.
+ *
+ * The stated value is passed through as-is once it is a usable number: the
+ * Host owns the number, it knows the gateway budget behind it (its own scan
+ * poll is 2 s) and it knows its cache windows, so a second opinion here would
+ * be the very drift this helper exists to prevent. The one shape kept away
+ * from the timer is a value that would become a busy loop or a nonsense
+ * interval — a non-number (`NaN`, a string, a missing or non-positive field)
+ * falls back, and a sub-second value rounds up to a whole 1 s rather than
+ * flooring to `0` (which `setInterval` reads as "as fast as possible").
+ */
+export function statedCadenceMs(seconds: unknown, fallbackMs: number): number {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return fallbackMs;
+  return Math.max(1, Math.floor(seconds)) * 1000;
+}
+
 /** `HH:MM` for one epoch second. */
 export function clock(epoch: unknown): string {
   if (typeof epoch !== "number" || !Number.isFinite(epoch) || epoch <= 0) return "—";

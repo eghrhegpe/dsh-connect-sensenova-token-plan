@@ -44,10 +44,12 @@ import {
   bulkModelsIn,
   HIDE_ALL_MODELS,
   modelIsOn,
+  raccoonModelIsOn,
   setAllModelsIn,
-  toggleModelIn
+  toggleModelIn,
+  toggleRaccoonModelIn
 } from "./models.ts";
-import { clock, clockLong, count, format, tokenSize, when } from "./format.ts";
+import { clock, clockLong, count, format, statedCadenceMs, tokenSize, when } from "./format.ts";
 import { provideClientReact } from "./runtime.ts";
 import { en, zh } from "./i18n.ts";
 import { S } from "./styles.ts";
@@ -67,7 +69,7 @@ import { ModelPicker, ModelRoster } from "./model-picker.ts";
 import { HeaderStatus, PanelPage } from "./panel-page.ts";
 import { RaccoonCard } from "./raccoon-card.ts";
 import { RaccoonRoster } from "./raccoon-roster.ts";
-import { RaccoonTab } from "./raccoon-tab.ts";
+import { RaccoonTab, RACCOON_POLL_MS, RACCOON_SCAN_POLL_MS } from "./raccoon-tab.ts";
 import { buildQrMatrix, qrDataUrl } from "./qr.ts";
 
 function clientFactory(loaderRequire: (specifier: string) => unknown): {
@@ -101,12 +103,17 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       count,
       format,
       tokenSize,
+      statedCadenceMs,
+      RACCOON_POLL_MS,
+      RACCOON_SCAN_POLL_MS,
       HIDE_ALL_MODELS,
       modelIsOn,
       allowListFor,
       toggleModelIn,
       setAllModelsIn,
-      bulkModelsIn
+      bulkModelsIn,
+      raccoonModelIsOn,
+      toggleRaccoonModelIn
     }),
     components: Object.freeze({
       QuotaCard,

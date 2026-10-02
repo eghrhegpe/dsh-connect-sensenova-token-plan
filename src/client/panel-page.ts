@@ -8,8 +8,8 @@ import {
 } from "./account-form.ts";
 import { ApiKeyForm, ProviderForm } from "./api-key-form.ts";
 import { SNAPSHOT_PATH } from "./const.ts";
-import { clock, format } from "./format.ts";
-import { errorOfStatus, GUIDANCE_BY_CODE, interpretSnapshot, viewOf } from "./snapshot.ts";
+import { clock, format, statedCadenceMs } from "./format.ts";
+import { errorOfStatus, FORM_EXCLUDED_CODES, GUIDANCE_BY_CODE, interpretSnapshot, viewOf } from "./snapshot.ts";
 import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import type { PoolData, SnapshotData, VisionModelData } from "./wire.ts";
@@ -23,10 +23,18 @@ import { RaccoonTab } from "./raccoon-tab.ts";
  *
  * The Host answers `ok:true` with an in-body `quotaError` when the console is
  * unreachable; for these codes the quota tab leads with the account form
- * instead of empty sections. The complement of `FORM_EXCLUDED_CODES` (the
- * codes no login fixes): `console_error` stays a notice, never a form.
+ * instead of empty sections. The set is DERIVED — every wire code the panel
+ * has a guidance line for, minus the ones no login can fix
+ * (`FORM_EXCLUDED_CODES`: `config_error` stays a notice, never a form).
+ *
+ * Derived rather than listed because the hand-written version WAS "the
+ * complement of FORM_EXCLUDED_CODES" in a comment only: a code the Host adds
+ * later would have kept its guidance line yet silently landed in the
+ * "empty sections, no form" branch — the one outcome a reader cannot act on.
  */
-const LOGIN_BLOCKED_QUOTA_CODES = new Set(["not_configured", "jwt_expired", "auth_error"]);
+const LOGIN_BLOCKED_QUOTA_CODES: ReadonlySet<string> = new Set(
+  Object.keys(GUIDANCE_BY_CODE).filter((code) => !FORM_EXCLUDED_CODES.has(code))
+);
 
 export function PanelPage({ onClose, tt, localeSubscribe }: {
   onClose?: () => void;
@@ -137,9 +145,14 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
       // Follow the Host's cadence instead of assuming one: the two would
       // otherwise disagree about how fresh this screen is, and the panel
       // would go on polling at the old rate after the operator changed it.
+      // The Host clamps the value at its source (`clampInt(..., 5)`), so the
+      // panel does not clamp it a second time — a client-side floor/ceiling
+      // was a second opinion that silently overrode the stated number (the
+      // raccoon tab's 2 s scan cadence is below the old 5 s floor). The
+      // conversion is shared with that tab.
       const stated = read.data?.pollSeconds;
       if (typeof stated === "number" && Number.isFinite(stated)) {
-        setCadenceMs(Math.min(3600, Math.max(5, Math.floor(stated))) * 1000);
+        setCadenceMs(statedCadenceMs(stated, cadenceMs));
       }
     } catch (reason) {
       // An abort is our own supersession, not a network failure.

@@ -9,7 +9,7 @@
  * mirror did not model at all: the greying-out added to stop a bad password
  * becoming a lockout was, as a consequence, entirely uncovered.
  */
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { decidePanelView, dictionaries, interpretSnapshot, tables, RENDER } from "./panel-decision.js";
 import { AUTH_FAILURE_CODES, CODE, CREDENTIAL_REFUSALS, NO_LOGIN_CODES } from "../src/host/codes.ts";
 
@@ -238,6 +238,32 @@ const healthy = {
   // each of them is answered by signing in, which is what the form offers.
   const hidden = [...AUTH_FAILURE_CODES].filter((code) => tables.FORM_EXCLUDED_CODES.has(code));
   check("no auth-failure code is hidden from the form", hidden.length === 0, hidden.join(", "));
+
+  // A code compared INLINE in a component (`code === "login_failed"`) is a
+  // third place a wire code can live: outside all three tables, and therefore
+  // outside every check above. `login_failed` was exactly that — a rename in
+  // codes.ts would have turned the branch into dead code and shown the
+  // platform's raw error instead of the form's own line, with nothing red.
+  // Only the code-shaped literals are collected (dotted strings are dictionary
+  // keys, whose existence F6 already covers).
+  const components = (await readdir(new URL("../src/client/", import.meta.url)))
+    .filter((name) => name.endsWith(".ts") && name !== "i18n.ts");
+  const inline = new Set();
+  // `typeof code === "string"` is a type guard, not a wire code, so the
+  // primitives are excluded — the point is to find comparisons against the
+  // taxonomy, and a type test is not one.
+  const PRIMITIVES = new Set(["string", "number", "boolean", "object", "undefined", "function", "symbol", "bigint"]);
+  for (const name of components) {
+    const source = await readFile(new URL(`../src/client/${name}`, import.meta.url), "utf8");
+    for (const match of source.matchAll(/(?:code|error\?\.code)\s*===\s*"([^".]+)"/g)) {
+      if (!PRIMITIVES.has(match[1])) inline.add(match[1]);
+    }
+  }
+  check("the inline code comparisons were actually found", inline.size >= 1, [...inline].join(", "));
+  const undeclared = [...inline].filter((code) => !declared.has(code));
+  check("every code a component compares inline is declared in codes.js",
+    undeclared.length === 0,
+    undeclared.length > 0 ? undeclared.join(", ") : `checked: ${[...inline].sort().join(", ")}`);
 }
 
 // === F3. the two dictionaries carry the same keys ========================
@@ -317,6 +343,155 @@ const healthy = {
   check("the English hint matches the Chinese one on this point",
     !/\babove\b|\bbelow\b/.test(dictionaries.en["llm.rosterEmpty"] ?? ""),
     dictionaries.en["llm.rosterEmpty"]);
+}
+
+// === F6. every key the panel ASKS for exists, in both languages ============
+// F3 above proves the two dictionaries agree with each other. It cannot see
+// the other half of the pair: a key that is in neither dictionary — or is
+// spelled differently in the component than in the dictionary — renders as
+// the RAW KEY on screen. That is invisible to the render suite by design: it
+// drives the components with an identity `tt` and therefore asserts the key
+// NAMES a frame asks for, which is exactly the thing that is wrong. `tt` also
+// falls back to the key rather than throwing, so nothing else catches it
+// either. So the bundle's own source is scanned for the keys it asks for.
+//
+// The scanner is structural, not "every quoted string": an argument may be a
+// ternary whose CONDITION compares against a wire code (`code ===
+// "account_locked" ? "auth.locked" : …`), and those codes are not dictionary
+// keys. Only key POSITIONS are collected — a whole argument, or a branch of a
+// ternary in argument position — and a template argument is recorded as a
+// dynamic FAMILY (`llm.level.…`) that must be covered by an enum from the
+// Host, since the client cannot enumerate the values the Host sends.
+{
+  const DIRECTORY = new URL("../src/client/", import.meta.url);
+  const files = (await readdir(DIRECTORY)).filter((name) => name.endsWith(".ts") && name !== "i18n.ts");
+  check("the bundle's sources were actually found (not silently none)", files.length >= 10, files.join(", "));
+
+  // Split a `tt(...)` argument on its TOP-LEVEL `?`/`:` — skipping `?.`, `??`,
+  // string and template literals, and anything inside brackets — so the
+  // branches of a ternary come out as separate expressions while an optional
+  // chain in the condition does not split the argument in two.
+  const branchesOf = (argument) => {
+    const parts = [];
+    let depth = 0;
+    let start = 0;
+    let quote = null;
+    for (let index = 0; index < argument.length; index += 1) {
+      const char = argument[index];
+      if (quote !== null) {
+        if (char === "\\") index += 1;
+        else if (char === quote) quote = null;
+        continue;
+      }
+      if (char === '"' || char === "'" || char === "`") { quote = char; continue; }
+      if (char === "(" || char === "[" || char === "{") depth += 1;
+      else if (char === ")" || char === "]" || char === "}") depth -= 1;
+      else if (depth === 0 && (char === "?" || char === ":")) {
+        // `?.` is a chain, `??` is a nullish default; neither is a ternary.
+        if (argument[index + 1] === "." || char === "?" && argument[index + 1] === "?") continue;
+        parts.push(argument.slice(start, index));
+        start = index + 1;
+      }
+    }
+    parts.push(argument.slice(start));
+    return parts.map((part) => part.trim());
+  };
+
+  // The `tt(` call sites, with the balanced argument text that follows each.
+  const callsOf = (source) => {
+    const out = [];
+    const opener = /(?<![\w.$])tt\(/g;
+    for (let match = opener.exec(source); match !== null; match = opener.exec(source)) {
+      let depth = 1;
+      let index = match.index + match[0].length;
+      const from = index;
+      let quote = null;
+      for (; index < source.length && depth > 0; index += 1) {
+        const char = source[index];
+        if (quote !== null) {
+          if (char === "\\") index += 1;
+          else if (char === quote) quote = null;
+          continue;
+        }
+        if (char === '"' || char === "'" || char === "`") { quote = char; continue; }
+        if (char === "(") depth += 1;
+        else if (char === ")") depth -= 1;
+      }
+      out.push(source.slice(from, index - 1));
+    }
+    return out;
+  };
+
+  const asked = new Set();
+  const families = new Set();
+  const deferred = new Set();
+  const conditions = new Set();
+  let sites = 0;
+  for (const name of files) {
+    const source = await readFile(new URL(name, DIRECTORY), "utf8");
+    for (const argument of callsOf(source)) {
+      sites += 1;
+      for (const branch of branchesOf(argument)) {
+        const literal = /^"([^"]*)"$/.exec(branch);
+        if (literal !== null) {
+          if (literal[1].includes(".")) asked.add(literal[1]);
+          continue;
+        }
+        const template = /^`([^`$]*)\$\{/.exec(branch);
+        if (template !== null && template[1].includes(".")) { families.add(template[1]); continue; }
+        // An identifier or table lookup in key position: the KEYS come from a
+        // table the render suite already checks VALUE BY VALUE, so record the
+        // site and let F6b below pin those tables into the dictionaries.
+        // A ternary's CONDITION also lands here (`code === "account_locked"`)
+        // and is not a key source, so the two are kept apart: bare identifiers
+        // and `TABLE[...]` are key sources, everything else is a condition.
+        if (/^[A-Za-z_$][\w$]*$/.test(branch) || /^[A-Za-z_$][\w$]*\[[^\]]*\]$/.test(branch)) deferred.add(branch);
+        else if (branch !== "") conditions.add(branch);
+      }
+    }
+  }
+  check("the scan reached the whole bundle (tt call sites, not zero)", sites >= 100, `${sites} sites in ${files.length} files`);
+  check("key-shaped literals were collected (an empty set passes vacuously)",
+    asked.size >= 80, `${asked.size} distinct keys`);
+
+  const zh = dictionaries.zh;
+  const en = dictionaries.en;
+  const missing = [...asked].filter((key) => !(key in zh) || !(key in en));
+  check("every key the bundle asks for exists in both languages",
+    missing.length === 0,
+    missing.map((key) => `${key} (${key in zh ? "zh" : "∅"}/${key in en ? "en" : "∅"})`).join(", "));
+
+  // The dynamic families the client cannot enumerate: their VALUES come from
+  // the Host, so the Host's own lists are what they are checked against —
+  // textually, because neither list is reachable without importing the Host
+  // module (the ladder is module-private, the key sources are a JSDoc union).
+  // A level the Host adds therefore turns this red until it has a name.
+  check("the dynamic key families were found", families.size >= 2, [...families].join(", "));
+  const llmSource = await readFile(new URL("../src/host/llm-models.ts", import.meta.url), "utf8");
+  const keyStoreSource = await readFile(new URL("../src/host/api-key-store.ts", import.meta.url), "utf8");
+  const ladder = (llmSource.match(/THINKING_LADDER\s*=\s*\[([^\]]*)\]/)?.[1] ?? "")
+    .match(/"([^"]+)"/g)?.map((quoted) => quoted.slice(1, -1)) ?? [];
+  const sources = [...new Set((keyStoreSource.match(/source:\s*"([^"]+)"/g) ?? [])
+    .map((entry) => /"([^"]+)"/.exec(entry)[1]))];
+  check("the Host's thinking ladder was actually read", ladder.length >= 5, ladder.join(", "));
+  check("the Host's key sources were actually read", sources.length >= 2, sources.join(", "));
+  const familyKeys = [...ladder.map((level) => `llm.level.${level}`), ...sources.map((source) => `llm.src.${source}`)];
+  const familyMissing = familyKeys.filter((key) => !(key in zh) || !(key in en));
+  check("every thinking level and key source the Host can send has a name",
+    familyMissing.length === 0,
+    familyMissing.length > 0 ? familyMissing.join(", ") : `${familyKeys.length} keys checked`);
+
+  // F6b: the table-driven arguments. `GUIDANCE_BY_CODE` values and
+  // `REFUSAL_TEXT` values are the keys those sites pass to `tt`, and they are
+  // only as good as the dictionary behind them.
+  check("the table-driven tt sites are the ones expected",
+    [...deferred].sort().join(",") === "REFUSAL_TEXT[code],guidanceKey,open,quotaGuidanceKey",
+    `identifiers: ${[...deferred].sort().join(",")} | conditions: ${[...conditions].sort().join(", ")}`);
+  const tableKeys = [...Object.values(tables.GUIDANCE_BY_CODE ?? {}), ...Object.values(tables.REFUSAL_TEXT ?? {})];
+  const tableMissing = [...new Set(tableKeys)].filter((key) => !(key in zh) || !(key in en));
+  check("every table value the panel can hand to tt is a real key in both languages",
+    tableMissing.length === 0,
+    tableMissing.length > 0 ? tableMissing.join(", ") : `${new Set(tableKeys).size} keys checked`);
 }
 
 // === G. the checks are running the shipped module, not a stale copy ======

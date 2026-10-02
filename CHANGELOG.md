@@ -13,6 +13,15 @@
 - **CI 的两处静默红修掉**：offline 硬门禁在干净 runner 上拿不到 peer 依赖，连续一整天红在第二个套件（`set -e` 让后面 17 个套件从未跑过）；e2e job 少了构建步骤，一直在拿 gitignored 的缺席产物做端到端。两项修完 CI 在 `main` 上转绿。
 - **内部重构**（行为由冻结基线与套件背书）：`routes.ts` 拆成 7 条命名路由并给 `Wiring` 上类型；两个上游的发布状态机与 adapter 装配各收敛为一份（`publish-core.ts` / `llm-adapter-core.ts`）；小浣熊的状态读与 walk 各自成模块。`peerDependencies` 补齐原先漏声明的 5 个 Host 包。
 
+### 修复：小浣熊的模型勾选是单向门（2026-10-02）
+
+用户可见的 bug，不是重构：**取消勾选过的模型再也勾不回来**。小浣熊 roster 的每次点击都发出「原清单里去掉这个 id」，加方向从来没实现——把整列点空后该 provider 就永久推不出模型，只能手改状态文件。复选框渲染自状态、写出去的清单没有回显，所以界面上完全看不出异常。
+
+- **勾选代数收进一个家**（`src/client/models.ts`、`raccoon-card.ts`、`raccoon-roster.ts`）：Token Plan 与网关的 `enabledModelIds` 是**两种方言**（`[]` = 不过滤 vs `null` = 整份推送），组件因此就地手搓了半个代数。新增 `raccoonModelIsOn` / `toggleRaccoonModelIn`，行态与切换后的清单读同一个谓词；全开时不塌回 `null`（`null` 只保留「从未策展」），因此网关日后新增的模型默认不勾。
+- **轮询节奏改由 Host 播报**（`src/host/raccoon-status.ts`、`src/client/raccoon-tab.ts`）：`/raccoon` 的 GET 新增 `pollSeconds` / `scanPollSeconds`，客户端照用；两个客户端常量降级为「首帧兜底」并与 Host 的窗口值钉死。顺带去掉了客户端重复的 5 s 下限 / 3600 s 上限——Host 已在配置源头 clamp，客户端那道是第二个意见（且会把 2 s 的扫码档悄悄改成 5 s）。
+- **小浣熊轮询补上竞态防护**（`src/client/raccoon-tab.ts`）：档位切换会重建循环并立刻取数，慢的那次可能后落地、把余额/roster/登录态整体倒退。加入与额度 tab 同款的 generation 守卫。
+- **文案不再复述 Host 的数字**（`src/client/i18n.ts`）：`note` 的「约 3 小时」与 `raccoon.loginTimeout` 的「5 分钟」都是 Host 常量的手抄件（改一处即撒谎），改为只讲事实、不带数字。
+
 ## [0.4.6] — 2026-10-01
 
 小浣熊面板把「凭据已过期」当成了「已登录」：access token 早已失效时，登录卡仍显示「已登录：退出登录」，注册也照样成立，于是模型能选、请求却一个个 401——用户只能靠猜。

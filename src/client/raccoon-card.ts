@@ -19,6 +19,7 @@
  */
 
 import { count, format, when } from "./format.ts";
+import { toggleRaccoonModelIn } from "./models.ts";
 import { h } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { qrDataUrl } from "./qr.ts";
@@ -70,6 +71,19 @@ export interface RaccoonState {
   loginStatus?: string;
   /** The reason a `failed` walk gave; only ever present beside that status. */
   loginError?: string;
+  /**
+   * The tab's idle poll cadence, in SECONDS, as stated by the route.
+   *
+   * The Host owns the two cache windows this poll has to respect
+   * (`RACCOON_BALANCE_TTL_MS` / `RACCOON_CATALOG_TTL_MS`), so it states the
+   * cadence it wants rather than leaving the client to guess a number that
+   * has to track them — the same contract the snapshot's own `pollSeconds`
+   * carries. Absent on an older Host: the tab then keeps its built-in
+   * fallback. See `statedCadenceMs`.
+   */
+  pollSeconds?: number;
+  /** The cadence while a scan waits on the phone (see `pollSeconds`). */
+  scanPollSeconds?: number;
 }
 
 /**
@@ -280,11 +294,14 @@ export function RaccoonCard({
           busy: idsBusy || waiting,
           registered: state?.providerRegistered === true,
           onToggle: (id: string) => {
-            // Toggle against the WHOLE roster: an uncurated list (`null`) reads
-            // as "every model on", so the first uncheck materialises the list
-            // from the roster minus that one id.
-            const current = Array.isArray(state?.enabledModelIds) ? state.enabledModelIds : models.map((row) => String(row?.id ?? ""));
-            onIds(current.filter((entry) => entry !== id));
+            // The next curation is computed by the SHARED dialect primitive
+            // (`models.ts`), never here. The hand-rolled version this replaces
+            // was `current.filter((entry) => entry !== id)`: it mirrored the
+            // uncheck direction and silently dropped the check one, so a model
+            // switched off could never be switched back on — the list was a
+            // one-way door, and nothing noticed because the checkbox renders
+            // from state rather than from what the click posted.
+            onIds(toggleRaccoonModelIn(state?.enabledModelIds, models.map((row) => String(row?.id ?? "")), id));
           }
         })
       : // Without the roster the old status wording is the only place the

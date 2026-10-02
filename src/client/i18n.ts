@@ -160,7 +160,7 @@ export const zh = {
   "draw.needsKey": "尚未配置 API Key；保存后即可出图。",
   "draw.noCandidates": "当前 API Key 目录里暂无出图模型；出图不可用。",
   "draw.modelFallback": "第一个可用模型",
-  "note": "数据来自商汤控制台 API（pool-usage / credit-usage-trend），Host 侧缓存 {cache} 秒；控制台令牌约 3 小时过期，由 Host 用 refresh_token 静默续期。",
+  "note": "数据来自商汤控制台 API（pool-usage / credit-usage-trend），Host 侧缓存 {cache} 秒；控制台令牌到期后由 Host 用 refresh_token 静默续期。",
   "tab.quota": "积分额度",
   "tab.api": "接入 API",
   "tab.raccoon": "小浣熊",
@@ -208,7 +208,11 @@ export const zh = {
   // The three terminal outcomes of a QR walk. They are EVENTS the tab reports
   // once (the route clears them as it hands them over), not a persistent state:
   // "signed in" is `loggedIn`, which the credential answers on every poll.
-  "raccoon.loginTimeout": "扫码超时（5 分钟内未确认）——请重新点击登录。",
+  // The number of minutes used to be spelled here ("5 分钟内未确认") while the
+  // Host held `RACCOON_LOGIN_TIMEOUT_MS` as the real deadline: the text is a
+  // copy nobody pins, so a tuned deadline would have made the panel lie. The
+  // sentence now states the outcome without restating the Host's number.
+  "raccoon.loginTimeout": "扫码超时（未在时限内确认）——请重新点击登录。",
   "raccoon.loginCanceled": "扫码已取消——请重新点击登录。",
   "raccoon.loginFailed": "登录未能保存：{error}",
   "raccoon.error": "小浣熊操作失败：{error}"
@@ -359,7 +363,7 @@ export const en: typeof zh = {
   "draw.needsKey": "No API key yet; save one to start generating images.",
   "draw.noCandidates": "This API key's catalogue has no image model; drawing is unavailable.",
   "draw.modelFallback": "the first available model",
-  "note": "Data from the SenseNova console API (pool-usage / credit-usage-trend), cached {cache}s on the Host; the console token lasts ~3h and the Host renews it silently from a refresh token.",
+  "note": "Data from the SenseNova console API (pool-usage / credit-usage-trend), cached {cache}s on the Host; the Host renews the console token silently from a refresh token.",
   "tab.quota": "Quota & Usage",
   "tab.api": "API Integration",
   "tab.raccoon": "Raccoon",
@@ -400,7 +404,7 @@ export const en: typeof zh = {
   "raccoon.rateTitle": "Credit multiplier as declared by the gateway catalogue (0 = free)",
   "raccoon.unregistered": "Not registered — tick the switch above.",
   "raccoon.awaitingLogin": "Enabled — log in to register the models.",
-  "raccoon.loginTimeout": "The scan timed out (no confirmation within 5 minutes) — start it again.",
+  "raccoon.loginTimeout": "The scan timed out (no confirmation within the deadline) — start it again.",
   "raccoon.loginCanceled": "The scan was canceled — start it again.",
   "raccoon.loginFailed": "Sign-in could not be saved: {error}",
   "raccoon.error": "Raccoon operation failed: {error}"
