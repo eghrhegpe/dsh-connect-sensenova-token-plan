@@ -546,11 +546,19 @@ async function rejects(fn) {
   // import: `buildSnapshotBody` is the pure aggregator and its only state
   // sources are parameters. The reason union widens freely — but only if
   // nobody sneaks the holder back in as an import.
+  //
+  // The two halves of the first assertion are deliberately NOT symmetric:
+  // "no import of the holder" is the durable invariant, while the param is
+  // asserted only as `drawToolNote?: () =>` (an optional CLOSURE, never a
+  // plain value). Pinning the full return type here would churn on every
+  // legitimate widening — this assertion already had to be hand-edited once
+  // when the reason union was introduced, which is exactly the cost a marker
+  // test should not impose.
   const aggregateSrc = readFileSync(new URL("../src/host/snapshot-aggregate.ts", import.meta.url), "utf8");
   const routeSrc = readFileSync(new URL("../src/host/routes/snapshot.ts", import.meta.url), "utf8");
   check("the aggregator reads the absence note via a param, never an import",
     !aggregateSrc.includes('from "./draw-tool-state.ts"')
-      && aggregateSrc.includes("drawToolNote?: () => DrawToolAbsentReason | null"),
+      && aggregateSrc.includes("drawToolNote?: () =>"),
     "snapshot-aggregate.ts drawToolNote wiring");
   check("the snapshot route injects the absence reader",
     routeSrc.includes("drawToolNote: () => drawToolNote()"),
