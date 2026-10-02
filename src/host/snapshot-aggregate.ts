@@ -25,7 +25,6 @@ import { parsePools, parseTrend, checkShape, identifyVisionModel } from "./parse
 import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
 import { catalogSignature, syncSignaturesAfterPublish } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
-import { drawToolAbsent } from "./draw-tool-state.ts";
 import { str, errMsg } from "./util.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
 import type { SnapshotData } from "../shared/wire.ts";
@@ -149,7 +148,8 @@ export async function buildSnapshotBody({
   catalogStore,
   panelSwitch,
   drawSwitch,
-  drawModelId
+  drawModelId,
+  drawToolAbsent
 }: {
   settings: import("./host-config.ts").ResolvedSettings;
   cache: Map<string, { body: unknown; at: number; gen: number }>;
@@ -165,6 +165,7 @@ export async function buildSnapshotBody({
   panelSwitch: () => Promise<boolean | null>;
   drawSwitch?: () => Promise<boolean | null>;
   drawModelId?: () => Promise<string | null>;
+  drawToolAbsent?: () => boolean;
 }): Promise<SnapshotData> {
   const providerState = publisher.state;
   const resolveApiKey = async () => (await apiKeyStore.resolve()).value;
@@ -354,9 +355,13 @@ export async function buildSnapshotBody({
     drawSource: switchSource(effectiveDrawPanelSwitch),
     // Emitted ONLY when the switch is on and the tool never registered because
     // this Host exposes no tools service — the one normal absence the copy
-    // (`draw.noTools`) already names. Present, never false, so the client
-    // treats it as "show the note" rather than "check a boolean's polarity".
-    ...(drawToolAbsent() ? { drawToolAbsent: true } : {}),
+    // (`draw.noTools`) already names. Injected as a closure like `drawSwitch`,
+    // so this aggregator stays pure: its only state sources are parameters, and
+    // a test can hand it a `() => true` without touching global state. Present,
+    // never false, so the client treats it as "show the note" rather than
+    // "check a boolean's polarity". Widening to the full three-reason version is
+    // a pure type change (`() => boolean` → `() => string | null`).
+    ...(drawToolAbsent?.() ? { drawToolAbsent: true } : {}),
     // A draw call's actual target model, picked by the same precedence the
     // tool itself uses (`pickDrawModel`) over the same normalized catalog —
     // so the panel's line and the tool's behavior cannot disagree. Emitted

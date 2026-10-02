@@ -516,6 +516,19 @@ async function rejects(fn) {
   check("draw registry refusal is not silent (degrade marker present)",
     lifecycleSrc.includes('degrade("draw: tools registry refused the registration"'),
     "lifecycle.ts registry-refusal catch");
+  // The absence note must reach the snapshot BY INJECTION, not by a global
+  // import: `buildSnapshotBody` is the pure aggregator and its only state
+  // sources are parameters. Widening to three reasons later is a pure type
+  // change — but only if nobody sneaks the holder back in as an import.
+  const aggregateSrc = readFileSync(new URL("../src/host/snapshot-aggregate.ts", import.meta.url), "utf8");
+  const routeSrc = readFileSync(new URL("../src/host/routes/snapshot.ts", import.meta.url), "utf8");
+  check("the aggregator reads the absence note via a param, never an import",
+    !aggregateSrc.includes('from "./draw-tool-state.ts"')
+      && aggregateSrc.includes("drawToolAbsent?: () => boolean"),
+    "snapshot-aggregate.ts drawToolAbsent wiring");
+  check("the snapshot route injects the absence reader",
+    routeSrc.includes("drawToolAbsent: () => drawToolAbsent()"),
+    "routes/snapshot.ts injection");
 }
 
 console.log(JSON.stringify(results, null, 2));

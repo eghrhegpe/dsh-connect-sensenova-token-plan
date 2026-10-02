@@ -14,7 +14,14 @@
  *
  * Only the FIRST is a normal fact the panel should state (the other two are
  * Host bugs, and their traces belong in the log, not the copy). This module
- * holds exactly that one bit, read by the snapshot's draw block.
+ * holds exactly that one bit.
+ *
+ * It is the WRITER's home: `registerDrawTool` sets it, and the snapshot route
+ * (`routes/snapshot.ts`) injects `() => drawToolAbsent()` into
+ * `buildSnapshotBody`, so the aggregator itself never imports this module and
+ * stays pure — the same closure-injection pattern as `drawSwitch`. If the full
+ * three-reason version ever lands, the holder widens from a boolean to a note
+ * code and nothing else moves.
  *
  * In memory and NOT profile-scoped on purpose: it is a per-mount diagnostic,
  * recomputed on every Host (re)mount by `registerDrawTool`, never persisted.

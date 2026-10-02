@@ -12,6 +12,7 @@ import { name } from "../host-config.ts";
 import { buildSnapshotBody, failureCode } from "../snapshot-aggregate.ts";
 import { CODE } from "../codes.ts";
 import { optional, errMsg } from "../util.ts";
+import { drawToolAbsent } from "../draw-tool-state.ts";
 import { writeJson, refuseMethod, withOrigin } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
@@ -69,7 +70,11 @@ export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" 
           catalogStore,
           panelSwitch: () => optional(providerStore.enabled()),
           drawSwitch: () => optional(drawStore ? drawStore.enabled() : null),
-          drawModelId: () => optional(drawStore ? drawStore.modelId() : null)
+          drawModelId: () => optional(drawStore ? drawStore.modelId() : null),
+          // The draw tool's mount-time absence note is wired in HERE (the HTTP
+          // edge), keeping the aggregation below free of any module-global
+          // state — the same injection pattern as the two switch readers.
+          drawToolAbsent: () => drawToolAbsent()
         });
         if (body.visionModels !== undefined) {
           // A write failure here is silent otherwise: the vision list fails to
