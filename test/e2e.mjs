@@ -370,6 +370,20 @@ try {
 
   const session = await openSession(host.url, PORT);
   const call = session.call;
+  /**
+   * A JSON POST through the same session (origin + trust cookie) as `call`.
+   *
+   * The wire shape is the bare object: `readJsonBody` wraps it into
+   * `{ok, value}` internally, so the panel sends `{"enabled":false}`, not
+   * `{"value":{"enabled":false}}`. A wrong wrap here reads as a refused
+   * mutation rather than as a test bug, which is how the first pass of this
+   * block lost ten checks.
+   */
+  const post = (path, value) => call(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(value)
+  });
 
   // === the panel is reachable and honest about having no account ==========
   {
@@ -555,6 +569,141 @@ try {
     check("nothing was written to the pre-§23 shared state directory",
       !existsSync(join(home, "state", "dsh-connect-sensenova-token-plan", "catalog.json")),
       join(home, "state", "dsh-connect-sensenova-token-plan", "catalog.json"));
+  }
+
+  // === the switch and curation routes, against the REAL llm service ========
+  // Every route below is pure local — it reads and writes plugin state, it
+  // never touches the network — so the fake platform needed no new endpoint for
+  // them. They were the five of seven routes this suite never called: the
+  // snapshot/account/api-key trio was all the run touched, and the switch
+  // routes only ever ran against a hand-built fake llm in routes.test.mjs.
+  // That leaves two properties only a real Host can settle, so they are the
+  // point of this block:
+  //   - the flip works through the REAL registration service (not an injected
+  //     fake adapter): POSTing the switch off must actually withdraw the
+  //     provider from the Host, and the curation must narrow the OFFER the
+  //     Host really serves, read back out of a real HTTP response.
+  //   - the trust fence is uniform. The routes' own comments promise that a
+  //     foreign page cannot flip model routing Host-wide, but the fence had
+  //     only been probed on snapshot and account. A valid session cookie plus
+  //     a foreign Origin is the stronger form: the cookie alone must not be
+  //     enough to get in.
+  // State is restored as it goes, so the later checks still see a configured,
+  // registered panel.
+  {
+    const NS = "/api/dsh-connect-sensenova-token-plan";
+
+    // -- /provider: the switch is config-backed until the panel saves one --
+    const prov = await call(`${NS}/provider`);
+    check("the /provider route reports the config default with its source",
+      prov.status === 200 && prov.body?.registerProvider === true && prov.body?.registerSource === "config",
+      JSON.stringify(prov.body ?? {}).slice(0, 220));
+    check("the provider is registered at that point", prov.body?.providerRegistered === true,
+      String(prov.body?.providerRegistered));
+
+    const junkProv = await post(`${NS}/provider`, { enabled: "yes" });
+    check("a non-boolean switch is refused before anything is written",
+      junkProv.status === 400 && junkProv.body?.ok === false,
+      `${junkProv.status} ${JSON.stringify(junkProv.body ?? {}).slice(0, 120)}`);
+
+    const off = await post(`${NS}/provider`, { enabled: false });
+    check("flipping the switch off WITHDRAWS the provider from the real Host",
+      off.status === 200 && off.body?.ok === true && off.body?.registerProvider === false &&
+        off.body?.registerSource === "panel" && off.body?.providerRegistered === false,
+      JSON.stringify(off.body ?? {}).slice(0, 260));
+    check("a withdrawn provider is not reported as an error",
+      off.body?.providerError === undefined, String(off.body?.providerError ?? null));
+
+    const offGet = await call(`${NS}/provider`);
+    check("the saved switch survives into the next request as the effective value",
+      offGet.body?.registerProvider === false && offGet.body?.registerSource === "panel" &&
+        offGet.body?.providerRegistered === false,
+      JSON.stringify(offGet.body ?? {}).slice(0, 200));
+
+    const backOn = await post(`${NS}/provider`, { enabled: true });
+    check("the provider comes back on the request that carries the flip",
+      backOn.body?.ok === true && backOn.body?.registerProvider === true && backOn.body?.providerRegistered === true,
+      JSON.stringify(backOn.body ?? {}).slice(0, 260));
+
+    // -- /models: the curation narrows what the Host really offers ---------
+    const junkModels = await post(`${NS}/models`, { enabledModelIds: "SenseNova-Lite" });
+    check("a non-array allow-list is refused rather than read as all models",
+      junkModels.status === 400 && junkModels.body?.ok === false,
+      `${junkModels.status} ${JSON.stringify(junkModels.body ?? {}).slice(0, 140)}`);
+
+    const getModels = await call(`${NS}/models`, { method: "GET" });
+    check("the curation route refuses a GET", getModels.status === 405, String(getModels.status));
+
+    const narrowed = await post(`${NS}/models`, { enabledModelIds: ["SenseNova-Vision"] });
+    check("the curation is saved and reported",
+      narrowed.status === 200 && narrowed.body?.ok === true &&
+        JSON.stringify(narrowed.body?.enabledModelIds) === JSON.stringify(["SenseNova-Vision"]) &&
+        narrowed.body?.providerRegistered === true,
+      JSON.stringify(narrowed.body ?? {}).slice(0, 260));
+
+    const narrowedSnap = await call(`${NS}/snapshot`);
+    check("the offer the Host serves is narrowed to the ticked model",
+      narrowedSnap.body?.llm?.modelCount === 1 && narrowedSnap.body?.llm?.visionCount === 1,
+      JSON.stringify({ m: narrowedSnap.body?.llm?.modelCount, v: narrowedSnap.body?.llm?.visionCount }));
+    check("the roster itself is still complete while the offer is narrowed",
+      narrowedSnap.body?.llm?.models?.length === 2, String(narrowedSnap.body?.llm?.models?.length));
+    check("the snapshot reports the curation",
+      JSON.stringify(narrowedSnap.body?.llm?.enabledModelIds) === JSON.stringify(["SenseNova-Vision"]),
+      JSON.stringify(narrowedSnap.body?.llm?.enabledModelIds));
+
+    const restored = await post(`${NS}/models`, { enabledModelIds: [] });
+    const restoredSnap = await call(`${NS}/snapshot`);
+    check("an empty allow-list restores the whole offer",
+      restored.body?.ok === true &&
+        restoredSnap.body?.llm?.modelCount === 2 && restoredSnap.body?.llm?.visionCount === 1,
+      JSON.stringify({ saved: restored.body?.ok, m: restoredSnap.body?.llm?.modelCount, v: restoredSnap.body?.llm?.visionCount }));
+
+    // -- /draw: the draw-tool switch, the third pure-local writer ----------
+    const drawGet = await call(`${NS}/draw`);
+    check("the /draw route reports the config default",
+      drawGet.status === 200 && drawGet.body?.drawEnabled === false && drawGet.body?.drawSource === "config",
+      JSON.stringify(drawGet.body ?? {}).slice(0, 200));
+
+    const badModel = await post(`${NS}/draw`, { drawModelId: "   " });
+    check("a blank draw model preference is refused",
+      badModel.status === 400 && badModel.body?.ok === false, `${badModel.status}`);
+
+    const withModel = await post(`${NS}/draw`, { drawModelId: "SenseNova-Draw" });
+    check("a saved model preference wins over the config default",
+      withModel.body?.ok === true && withModel.body?.drawModelId === "SenseNova-Draw" &&
+        withModel.body?.drawModelSource === "panel",
+      JSON.stringify(withModel.body ?? {}).slice(0, 220));
+
+    const drawOn = await post(`${NS}/draw`, { enabled: true });
+    check("the draw switch is saved as a panel value",
+      drawOn.body?.ok === true && drawOn.body?.drawEnabled === true && drawOn.body?.drawSource === "panel",
+      JSON.stringify(drawOn.body ?? {}).slice(0, 220));
+
+    const forget = await post(`${NS}/draw`, { forget: true });
+    check("a forget returns the SWITCH to the config default",
+      forget.body?.ok === true && forget.body?.drawEnabled === false && forget.body?.drawSource === "config",
+      JSON.stringify(forget.body ?? {}).slice(0, 260));
+    check("a forget preserves the model preference (saveModel null is the reset)",
+      forget.body?.drawModelId === "SenseNova-Draw" && forget.body?.drawModelSource === "panel",
+      JSON.stringify({ m: forget.body?.drawModelId, s: forget.body?.drawModelSource }));
+
+    // -- the fence, on the mutation paths ----------------------------------
+    const evilProvider = await readJson(await fetch(`http://127.0.0.1:${PORT}${NS}/provider`, {
+      method: "POST",
+      headers: { cookie: session.cookie, origin: "https://evil.test", "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false })
+    }));
+    check("a foreign origin cannot flip the provider switch", evilProvider.status === 403, String(evilProvider.status));
+    const stillOn = await call(`${NS}/provider`);
+    check("the refused flip left the switch where the panel left it",
+      stillOn.body?.registerProvider === true && stillOn.body?.providerRegistered === true,
+      JSON.stringify(stillOn.body ?? {}).slice(0, 200));
+    const evilModels = await readJson(await fetch(`http://127.0.0.1:${PORT}${NS}/models`, {
+      method: "POST",
+      headers: { cookie: session.cookie, origin: "https://evil.test", "content-type": "application/json" },
+      body: JSON.stringify({ enabledModelIds: ["SenseNova-Lite"] })
+    }));
+    check("a foreign origin cannot choose the model offer", evilModels.status === 403, String(evilModels.status));
   }
 
   // === a wrong password is classified, and the panel explains itself =====
