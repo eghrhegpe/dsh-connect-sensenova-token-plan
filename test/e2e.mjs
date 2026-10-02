@@ -706,6 +706,60 @@ try {
     check("a foreign origin cannot choose the model offer", evilModels.status === 403, String(evilModels.status));
   }
 
+  // === the second upstream: /raccoon answers through the real Host ========
+  // The raccoon route is the one route this suite never called. With no
+  // credential and the switch at its opt-in default OFF, `readRaccoonStatus`
+  // takes none of the gateway reads (raccoon-status.ts: `loggedIn` false skips
+  // the balance and catalogue fetches), so this GET is pure local state and
+  // needs no fake gateway. What it still proves, and nothing else does:
+  //   - the route is really registered with the Host (a wrong path or a
+  //     duplicate would 404/401 here instead of answering);
+  //   - the isolation invariant (AGENTS.md fact 3): reading the second
+  //     upstream leaves the Token Plan registration exactly as it was;
+  //   - the `?debug=1` scaffold rides only on the explicit opt-in.
+  {
+    const NS = "/api/dsh-connect-sensenova-token-plan";
+    const before = await call(`${NS}/provider`);
+
+    const raccoon = await call(`${NS}/raccoon`);
+    check("the /raccoon route answers through the real webserver",
+      raccoon.status === 200 && raccoon.body?.ok === true,
+      `${raccoon.status} ${JSON.stringify(raccoon.body ?? {}).slice(0, 140)}`);
+    check("the opt-in default is reported as off",
+      raccoon.body?.enabled === false && raccoon.body?.switchSource === "off",
+      JSON.stringify({ enabled: raccoon.body?.enabled, source: raccoon.body?.switchSource }));
+    check("no credential is claimed",
+      raccoon.body?.loggedIn === false && raccoon.body?.nickname === "",
+      JSON.stringify({ loggedIn: raccoon.body?.loggedIn, nickname: raccoon.body?.nickname }));
+    check("the second provider is not registered", raccoon.body?.providerRegistered === false,
+      String(raccoon.body?.providerRegistered));
+    check("the roster falls back without ever reading the gateway",
+      raccoon.body?.modelsSource === "empty" && Array.isArray(raccoon.body?.models) &&
+        raccoon.body.models.length > 0,
+      JSON.stringify({ source: raccoon.body?.modelsSource, count: raccoon.body?.models?.length }));
+
+    // The scaffold carries environment-derived values, so the ordinary poll
+    // must not — only an explicit `?debug=1` may.
+    const plain = JSON.stringify(raccoon.body ?? {});
+    check("an ordinary poll carries no diagnostics scaffold",
+      !plain.includes("hostProxyEnv") && !plain.includes("raccoonEnvShadow"), plain.slice(0, 140));
+    const debug = await call(`${NS}/raccoon?debug=1`);
+    check("an explicit ?debug=1 does carry the scaffold",
+      Object.hasOwn(debug.body ?? {}, "hostProxyEnv") && typeof debug.body?.raccoonEnvShadow === "boolean",
+      JSON.stringify({ hostProxyEnv: debug.body?.hostProxyEnv, shadow: debug.body?.raccoonEnvShadow }).slice(0, 140));
+
+    const after = await call(`${NS}/provider`);
+    check("reading the raccoon line left the SenseNova provider registered",
+      before.body?.providerRegistered === true && after.body?.providerRegistered === true &&
+        after.body?.registerProvider === true,
+      JSON.stringify({ before: before.body?.providerRegistered, after: after.body?.providerRegistered }));
+
+    const evil = await readJson(await fetch(`http://127.0.0.1:${PORT}${NS}/raccoon`, {
+      headers: { cookie: session.cookie, origin: "https://evil.test" }
+    }));
+    check("a foreign origin is refused on the raccoon route", evil.status === 403, String(evil.status));
+  }
+
   // === the throttle: a platform-stated window is honoured, then local =====
   // Every earlier sign-in succeeded, so no throttle is in force: this is the
   // run's first refusal and it must reach IAM. The fake answers the account
