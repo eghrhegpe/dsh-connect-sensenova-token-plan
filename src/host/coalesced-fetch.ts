@@ -45,7 +45,7 @@ export const MAX_CACHE_AGE_MS = 3600_000;
  * }}
  */
 export function createCoalescedFetch(options: {
-  cache?: Map<string, { body: unknown; at: number }>;
+  cache?: Map<string, { body: unknown; at: number; gen: number }>;
   inflight?: Map<string, Promise<unknown>>;
   maxAgeMs?: number;
 } = {}) {
@@ -54,6 +54,18 @@ export function createCoalescedFetch(options: {
     inflight = new Map(),
     maxAgeMs = MAX_CACHE_AGE_MS
   } = options;
+
+  // Generation counters, one per key and one global: `clear()` bumps them so a
+  // STALE in-flight producer — the one that started before the clear and lands
+  // after it — cannot write its answer back where a newer identity now owns the
+  // key. Each cache entry carries the generation it was written under; a read
+  // only accepts entries whose generation matches the key's CURRENT one, so a
+  // late write from a pre-clear flight is written but immediately invisible,
+  // and the next read simply refetches. This is what makes `clear()`'s promise
+  // (below) actually hold in the concurrent case.
+  let globalGen = 0;
+  const keyGens = new Map<string, number>();
+  const genOf = (key: string) => keyGens.get(key) ?? globalGen;
 
   /** Drop entries past the sweep ceiling; called after every write. */
   const sweep = () => {
@@ -74,12 +86,16 @@ export function createCoalescedFetch(options: {
    */
   const read = async (key, producer, ttlMs) => {
     const cached = cache.get(key);
-    if (cached !== undefined && Date.now() - cached.at < ttlMs) return cached.body;
+    if (cached !== undefined && cached.gen === genOf(key) && Date.now() - cached.at < ttlMs) return cached.body;
     const pending = inflight.get(key);
     if (pending !== undefined) return pending;
+    // Capture the generation the flight is born under: if `clear()` runs while
+    // this producer is in flight, the write below lands under the OLD gen and
+    // is ignored by every later read.
+    const born = genOf(key);
     const flight = (async () => {
       const body = await producer();
-      cache.set(key, { body, at: Date.now() });
+      cache.set(key, { body, at: Date.now(), gen: born });
       sweep();
       return body;
     })().finally(() => {
@@ -94,19 +110,27 @@ export function createCoalescedFetch(options: {
   /**
    * Drop one key's cached answer, or the whole cache.
    *
-   * In-flight calls are NOT cancelled — a reader already waiting answers with
-   * what it asked for, and the next read simply misses. What this guarantees is
-   * that the NEXT read after a change (a new account, a forgotten key, a fresh
-   * login) cannot be served an answer belonging to the previous identity.
+   * The drop bumps the key's (or the global) generation AND evicts the
+   * in-flight map entry, so the NEXT read cannot join a pre-clear flight nor be
+   * served a pre-clear cache entry — the previous identity's answer is gone for
+   * good even when its producer was still in flight when the change happened.
+   * In-flight calls themselves are NOT cancelled: a reader that already took a
+   * flight's promise still settles with what it asked for; only NEW reads miss.
    * @param {string} [key] - the key to drop; omit to drop everything.
    * @returns {void}
    */
   const clear = (key) => {
     if (key === undefined) {
+      globalGen += 1;
       cache.clear();
+      // A pre-clear flight must not be joinable by the next read either.
+      inflight.clear();
+      keyGens.clear();
       return;
     }
+    keyGens.set(key, genOf(key) + 1);
     cache.delete(key);
+    inflight.delete(key);
   };
 
   return { read, clear };
