@@ -11,7 +11,7 @@
  * This needs no peer package — it only imports `index.js` and reads the patch
  * file as text, so it runs on a clean checkout.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { resolveSettings, CONFIG_DEFAULTS, resolveAuthOverrides, credentialKey, hostName, isAdmitted, name } from "../src/host/index.ts";
@@ -189,17 +189,25 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
 // `/api/${NS}/<resource>` TEMPLATES (the browser bundle cannot import the
 // host, so it derives them from its own NS), while `src/host/routes.ts`
 // derives the same seven as `/api/${name}/<resource>` from the registered
-// name. Between the two, and the literals re-declared in
-// `test/routes.test.mjs`, there was no pin — so a rename of the slug, or
-// adding a route on one side only, read as green until the panel 404'd. All
-// three spellings are scanned as text and expanded to their literal form, so
-// the check proves the CLIENT side really is a template off NS, the HOST side
-// really is derived, the two slugs agree, and the SUITE's own copies did not
-// drift away from either.
+// name. Test files then re-spell the resolved literals: the seven route
+// constants at the top of `routes.test.mjs`, the in-panel expectations in
+// `wiring.test.mjs` (20 mentions) and the live paths in `e2e.mjs`. Between
+// them all there was no pin — so a rename of the slug, or adding a route on
+// one side only, read as green until the panel 404'd. Every spelling is
+// scanned as text and expanded to its literal form, so the check proves the
+// CLIENT side really is a template off NS, the HOST side really is derived,
+// the two slugs agree, and every test file quotes only paths both declare.
 {
   const clientSrc = readFileSync(join(here, "..", "src", "client", "const.ts"), "utf8");
   const hostSrc = readFileSync(join(here, "..", "src", "host", "routes.ts"), "utf8");
   const suiteSrc = readFileSync(join(here, "..", "test", "routes.test.mjs"), "utf8");
+  // Every .mjs under test/ re-spells some resolved `/api/<slug>/<resource>`
+  // literal. Scan them all, so a path quoted in wiring.test.mjs or e2e.mjs is
+  // pinned to the same declaration set, not just the top-of-file constants.
+  const testSrcs = readdirSync(join(here, "..", "test"))
+    .filter((file) => file.endsWith(".mjs"))
+    .map((file) => readFileSync(join(here, "..", "test", file), "utf8"))
+    .join("\n");
 
   // The client spells the whole path as a template off its own NS
   // (`\`/api/${NS}/snapshot\``); the host derives the same one off the
@@ -220,6 +228,14 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
   const suitePaths = [...suiteSrc.matchAll(/(?:const|,)\s*([A-Z_]+_PATH)\s*=\s*"(?:https?:)?\/api\/([^"\s]+)"/g)]
     .map((m) => `/api/${m[2]}`)
     .sort();
+  // The resolved literal as a quoted `/api/<slug>/<resource>` anywhere under
+  // test/. Anchored to the client's own slug so a sibling plugin's `/api/web/…`
+  // (the DSH shell's own endpoints) never pollutes the set.
+  const slugEscaped = clientNs.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const testPaths = [...testSrcs.matchAll(new RegExp(`"\\/api\\/${slugEscaped}\\/([^"\\s]+)"`, "g"))]
+    .map((m) => `/api/${clientNs}/${m[1]}`)
+    .sort();
+  const uniqueTestPaths = [...new Set(testPaths)].sort();
 
   check("client/const.ts NS literal equals the host slug",
     clientNs !== "" && clientNs === name, `client NS: ${clientNs} | host name: ${name}`);
@@ -229,6 +245,12 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
   check("the client, the host and the suite agree path for path",
     JSON.stringify(clientPaths) === JSON.stringify(hostPaths) && JSON.stringify(hostPaths) === JSON.stringify(suitePaths),
     `client: ${clientPaths.join(", ")} | host: ${hostPaths.join(", ")} | suite: ${suitePaths.join(", ")}`);
+  // The fourth (and fifth) copy: any path a test file quotes must be one the
+  // client and host both declare — a slug rename that leaves wiring.test.mjs's
+  // 20 mentions or e2e.mjs's live paths behind now turns this red too.
+  check("every test file quotes only declared routes",
+    uniqueTestPaths.length === clientPaths.length && uniqueTestPaths.every((path) => clientPaths.includes(path)),
+    `test: ${uniqueTestPaths.join(", ")}`);
 }
 
 // --- 7. trendMultipliers sanitization ----------------------------------
