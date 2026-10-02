@@ -86,7 +86,23 @@ function optionalNum(value) {
   return Number.isFinite(number) && number > 0 ? number : undefined;
 }
 
-/** Reject an endpoint that is not an absolute http(s) URL. */
+/** Whether a host is loopback — the only place plain http is tolerable. */
+function isLoopback(hostname) {
+  // Strip IPv6 brackets (`[::1]`) before comparing; the e2e fake platform
+  // serves `http://127.0.0.1`, and plain http has no man-in-the-middle
+  // corridor on the loopback interface itself.
+  const host = String(hostname ?? "").replace(/^\[|\]$/g, "");
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
+/**
+ * Reject an endpoint that is not an absolute https URL.
+ *
+ * https is mandatory for any non-loopback host: the token endpoint answers
+ * with the LIVE access/refresh pair in plaintext, so a typo'd `http://` for a
+ * real host quietly downgrades the session credentials to cleartext. The
+ * loopback exception keeps the e2e fake platform (http://127.0.0.1) reachable.
+ */
 function checkEndpoint(value, field) {
   let parsed;
   try {
@@ -94,8 +110,9 @@ function checkEndpoint(value, field) {
   } catch {
     throw pluginError(CODE.CONFIG,`${field} is not an absolute URL: ${value}`);
   }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw pluginError(CODE.CONFIG,`${field} must be http(s), got ${parsed.protocol}`);
+  if (parsed.protocol !== "https:") {
+    if (parsed.protocol === "http:" && isLoopback(parsed.hostname)) return value;
+    throw pluginError(CODE.CONFIG,`${field} must be https (plain http is allowed only for loopback, e.g. the e2e fake platform), got ${parsed.protocol}//${parsed.host}`);
   }
   return value;
 }

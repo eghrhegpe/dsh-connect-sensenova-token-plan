@@ -769,6 +769,25 @@ check("empty token yields null expiry", readJwtExpiry("") === null);
   }
 }
 
+// --- 7c. endpoint overrides must be https except loopback ------------------
+// The token endpoint answers in plaintext with the LIVE access/refresh pair,
+// so a typo'd http:// must fail loudly for a real host — but the e2e fake
+// platform runs on this machine's http://127.0.0.1, which is loopback and
+// has no man-in-the-middle corridor. checkEndpoint enforces exactly that.
+{
+  const cases = [
+    ["http://evil.example", "config", "a foreign http endpoint is refused"],
+    ["http://127.0.0.1:8080", null, "a loopback http endpoint is allowed (e2e fake platform)"],
+    ["http://localhost:8080", null, "a localhost http endpoint is allowed"],
+    ["https://api.example", null, "a plain https endpoint is still allowed"]
+  ];
+  for (const [endpoint, expect, label] of cases) {
+    let code = null;
+    try { createAuth({ iamOrigin: endpoint }); } catch (error) { code = error?.code; }
+    check(label, code === expect, `iamOrigin=${endpoint} code=${String(code)}`);
+  }
+}
+
 // --- 8. the whole suite stayed offline -----------------------------------
 // The point of the guard: a check that forgets its stub fails HERE, loudly,
 // instead of reaching the platform and — for a login-shaped call — counting
