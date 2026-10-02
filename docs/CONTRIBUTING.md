@@ -117,12 +117,13 @@ description:
 - 仓库创建满 24 小时（CI 按 GitHub `created_at` 自动卡）；本仓 2026-09-28T05:03:11Z 建仓；
 - 真实可用代码、非占位——已满足；仓库需公开且处于活跃维护。
 
-已发布 npm 包 `dsh-connect-sensenova-token-plan`（**0.4.5 于 2026-10-01 发布**；2026-09-28 首发 0.2.0；
-0.4.1 与 0.4.2 打了 git tag 但**未发布到 npm**，其内容随 **0.4.3** 一并发布。`repository` 指回本仓，列表会
-自动按下载量关联，yml 里无需任何 npm 字段）。注意本机默认 registry 是 npmmirror 镜像，登录与发布都
-必须显式带 `--registry=https://registry.npmjs.org`；发新版前先在 package.json 升版本号（已发布版本
-不可覆盖）。**完整发布清单见根目录 [RELEASING.md](../RELEASING.md)**——尤其第 6 步 GitHub Release
-没有任何自动化，漏掉时不会有任何东西报错。
+已发布 npm 包 `dsh-connect-sensenova-token-plan`（2026-09-28 首发 0.2.0；0.4.1 与 0.4.2 打了 git tag 但
+**未发布到 npm**，其内容随 **0.4.3** 一并发布。**这里刻意不钉「当前是哪个版本」**——那是个会过期的数字，
+以 `npm view dsh-connect-sensenova-token-plan version --registry=https://registry.npmjs.org` 为准。
+`repository` 指回本仓，列表会自动按下载量关联，yml 里无需任何 npm 字段）。注意本机默认 registry 是
+npmmirror 镜像，登录与发布都必须显式带 `--registry=https://registry.npmjs.org`；发新版前先在 package.json
+升版本号（已发布版本不可覆盖）。**完整发布清单见根目录 [RELEASING.md](../RELEASING.md)**——尤其第 6 步
+GitHub Release 没有任何自动化，漏掉时不会有任何东西报错。
 
 > **已发布 ⇒ tag 不可移**（2026-10-01 实测，别踩）：`v0.4.3` 已同时存在于 npm 与 GitHub Release，
 > 因此**不能**按 RELEASING §4 的告警去「删除并强制移动 tag」来补齐后来的提交——那会让 npm 上的
@@ -135,6 +136,11 @@ description:
 > **发布后**再抓为 1 处、4 处，且与仓库 `README.md` **逐字相同**。剩下的那 1 处是刻意写的否定句
 > （「面板是页内的内联卡片，**不在侧边栏**」），不是残留。**修好的 README 在发新版前对用户不存在**；
 > 这条命令是唯一能证实「用户此刻读到的到底是哪一版」的手段。
+>
+> **别把它与 S2′ 混为一谈**：「不该移 tag」的前提是 **tag 已经存在**——移动它才会让 npm 内容与 tag 错位；
+> 而 `v0.4.7` 遇到的是另一种形态：**npm 已发、tag 还不存在**。此时补建 tag 不但合法，而且是唯一正解，
+> 前提是先按 [RELEASING.md](../RELEASING.md) §5.5 证明「npm 上那一版 == 某个提交的构建产物」，再让 tag 指到那个提交
+> （`main` 上的版本提交也要一并推上去）。一句话：**已存在的 tag 不能移；不存在的 tag 必须补，只是要先取证。**
 
 **市场收录状态（2026-10-01 实测）**：投稿 PR 已提且**仍处于 open、未合并**——
 [awesome-dsh-plugin#6139](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/6139)
