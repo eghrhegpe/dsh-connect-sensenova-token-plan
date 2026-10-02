@@ -509,6 +509,23 @@ const healthy = {
     familyMissing.length === 0,
     familyMissing.length > 0 ? familyMissing.join(", ") : `${familyKeys.length} keys checked`);
 
+  // The detail a hit on this closed list must say HOW to fix it, not just that
+  // it broke. A new table-driven `tt` identifier is a legitimate change; the
+  // right action is to register it here (plus the i18n keys), not to weaken the
+  // check. Without this line the first hit reads as "some suite went red" and
+  // costs a round trip to interpret — which is exactly what happened when
+  // `DrawSwitch` introduced `tt(absentKey)`.
+  const tableDrivenDetail = (found) => {
+    const expected = "absentKey,guidanceKey,open,quotaGuidanceKey,refusalKey".split(",");
+    const foundIds = [...found].sort().join(",");
+    if (foundIds === expected.join(",")) {
+      return `identifiers: ${foundIds} | conditions: ${[...conditions].sort().join(", ")}`;
+    }
+    const added = [...found].filter((id) => !expected.includes(id)).join(", ");
+    const missing = expected.filter((id) => !found.has(id)).join(", ");
+    return `新增 table-driven tt 标识符: ${added || "无"}; 缺失: ${missing || "无"} —— 把新标识符补进本检查的期望清单（并确保 i18n 中英都有对应键），别放宽或删除本检查`;
+  };
+
   // F6b: the table-driven arguments. `GUIDANCE_BY_CODE` values and
   // `REFUSAL_TEXT` values are the keys those sites pass to `tt`, and they are
   // only as good as the dictionary behind them. `refusalKey` is the account
@@ -522,7 +539,7 @@ const healthy = {
   // time.
   check("the table-driven tt sites are the ones expected",
     [...deferred].sort().join(",") === "absentKey,guidanceKey,open,quotaGuidanceKey,refusalKey",
-    `identifiers: ${[...deferred].sort().join(",")} | conditions: ${[...conditions].sort().join(", ")}`);
+    tableDrivenDetail(deferred));
   const tableKeys = [...Object.values(tables.GUIDANCE_BY_CODE ?? {}), ...Object.values(tables.REFUSAL_TEXT ?? {})];
   const tableMissing = [...new Set(tableKeys)].filter((key) => !(key in zh) || !(key in en));
   check("every table value the panel can hand to tt is a real key in both languages",
@@ -547,3 +564,5 @@ if (failedChecks.length > 0) {
   process.exit(1);
 }
 console.log(`\nall ${results.length} checks passed`);
+
+
