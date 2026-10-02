@@ -22,7 +22,7 @@
  */
 import { defineDrawTool } from "./draw.ts";
 import { seedPublisherFromCatalog, catalogSignature } from "./provider-publish.ts";
-import { retryBounded, errMsg } from "./util.ts";
+import { retryBounded, errMsg, degrade } from "./util.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
@@ -128,7 +128,7 @@ type DrawFetchResponse = {
  * whole bag.
  *
  * This function is exported so a test can mount the tool standalone, and the
- * fields it actually touches are seven of the twenty-two. Declaring the
+ * fields it actually touches are eight of the twenty-two. Declaring the
  * subset as a type (rather than naming it in prose) is what lets the compiler
  * catch a field that stopped being read, or a new one that starts being read
  * without a declaration.
@@ -141,6 +141,7 @@ export type DrawToolWiring = Pick<Wiring,
   | "resolveApiKey"
   | "publisher"
   | "drawStore"
+  | "logger"
 >;
 
 /**
@@ -187,8 +188,12 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
     const mod = await Promise.resolve(loadToolsModule());
     defineTool = (mod as { defineTool?: (definition: object) => unknown; default?: { defineTool?: (definition: object) => unknown } })?.defineTool
       ?? (mod as { default?: { defineTool?: (definition: object) => unknown } })?.default?.defineTool ?? null;
-  } catch {
-    // No tools peer on this Host: the draw tool stays absent, nothing logs.
+  } catch (error) {
+    // No tools peer on this Host: the draw tool stays absent and the panel is
+    // untouched — but not silent. Before `degrade` this catch was empty, so a
+    // Host whose bundled peer could not be imported lost the tool with the
+    // switch visibly on and no log line anywhere.
+    degrade("draw: tools peer module failed to load", error, wiring.logger, null);
     return;
   }
   if (typeof defineTool !== "function") return;
@@ -215,8 +220,10 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
         isDisposed: () => publisher.isDisposed()
       })
     );
-  } catch {
-    // A refusing registry degrades identically: tool absent, panel fine.
+  } catch (error) {
+    // A registry that refuses the tool degrades identically — tool absent,
+    // panel fine — and is a Host problem, not a config one: say it.
+    degrade("draw: tools registry refused the registration", error, wiring.logger, null);
   }
 }
 

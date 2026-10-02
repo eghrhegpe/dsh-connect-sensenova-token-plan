@@ -81,6 +81,35 @@ export function redactSecrets(text: unknown) {
   );
 }
 
+/**
+ * Swallow a failure, but leave a trace.
+ *
+ * The opt-in modules degrade by design: a refused tool registration or a peer
+ * that fails to load must leave the panel and the quota read working, so these
+ * paths swallow. What they must NOT swallow is the reason — before this helper
+ * those catches were empty, so "面板照常用、模块缺席" produced exactly zero logs
+ * and a deployment that lost the draw tool had no line anywhere naming why.
+ *
+ * Logs at `warn`, deliberately NOT `debug`: a debug line is filtered on a
+ * default Host, so it would still be zero logs. `reason` is caller-supplied and
+ * static; the error message is redacted first (AGENTS.md red line 1 — a
+ * credential never enters a log).
+ *
+ * Returns `fallback`, so one call serves both shapes a silent catch appears
+ * in:
+ *   try { … } catch (e) { return degrade("draw: tools peer module failed to load", e, logger, null); }
+ *   … .catch((e) => degrade("draw: catalog list", e, logger, []))
+ * @param {string} reason - what degraded, module-prefixed ("draw: …").
+ * @param {unknown} error - the caught value.
+ * @param {{ warn?: (message: string) => void } | undefined} logger - `ctx.logger`.
+ * @param {T} fallback - the value standing in for the absent result.
+ * @returns {T}
+ */
+export function degrade<T>(reason: string, error: unknown, logger: { warn?: (message: string) => void } | undefined, fallback: T): T {
+  logger?.warn?.(`degraded: ${reason}: ${redactSecrets(errMsg(error))}`);
+  return fallback;
+}
+
 /** Read a plain object, else `{}`. */
 export function obj(value?: any): any {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};

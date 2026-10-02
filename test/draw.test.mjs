@@ -16,6 +16,7 @@
  *
  * Nothing here imports a Host peer or opens a socket.
  */
+import { readFileSync } from "node:fs";
 import {
   DRAW_TOOL_NAME,
   DRAW_COOLDOWN_MS,
@@ -477,6 +478,21 @@ async function rejects(fn) {
   } catch (error) {
     fail("the mount-time service seam", error);
   }
+}
+
+// --- 12. the two silent draw-path catches must keep calling `degrade` ----
+// A regression here has no test that would catch it behaviourally: both paths
+// end in "tool absent, panel fine", so the failure mode is absence, not a
+// throw. Grep the source for the markers instead — a bare `catch {` on either
+// path is a real bug this repo has already shipped once.
+{
+  const lifecycleSrc = readFileSync(new URL("../src/host/lifecycle.ts", import.meta.url), "utf8");
+  check("draw peer-load failure is not silent (degrade marker present)",
+    lifecycleSrc.includes('degrade("draw: tools peer module failed to load"'),
+    "lifecycle.ts tools-peer load catch");
+  check("draw registry refusal is not silent (degrade marker present)",
+    lifecycleSrc.includes('degrade("draw: tools registry refused the registration"'),
+    "lifecycle.ts registry-refusal catch");
 }
 
 console.log(JSON.stringify(results, null, 2));
