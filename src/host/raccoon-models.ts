@@ -60,19 +60,20 @@ export function raccoonRequestHeaders(officeIdentity = "") {
  * @param {object[]|null} [catalog] - the `fetchRaccoonCatalog` result.
  * @returns {object[]} the Raccoon model rows.
  */
-export function raccoonRoster(catalog) {
+export function raccoonRoster(catalog: object[] | null | undefined): object[] {
   const rows = Array.isArray(catalog) && catalog.length > 0 ? catalog : RACCOON_FALLBACK_MODELS;
   const out: object[] = [];
   for (const row of rows) {
-    const id = str(row?.id, "");
+    const source = row as { id?: unknown; name?: unknown; vision?: unknown; multiplier?: unknown; contextWindow?: unknown; maxOutputLength?: unknown };
+    const id = str(source.id, "");
     if (id === "") continue;
     out.push({
       id,
-      name: str(row?.name, id),
-      vision: row?.vision === true,
-      multiplier: typeof row?.multiplier === "number" ? row.multiplier : undefined,
-      contextWindow: num(row?.contextWindow),
-      maxOutputLength: num(row?.maxOutputLength)
+      name: str(source.name, id),
+      vision: source.vision === true,
+      multiplier: typeof source.multiplier === "number" ? source.multiplier : undefined,
+      contextWindow: num(source.contextWindow),
+      maxOutputLength: num(source.maxOutputLength)
     });
   }
   return out;
@@ -89,7 +90,7 @@ export function raccoonRoster(catalog) {
  * @param {string[]|null} [enabledIds] - the curated ids, or `null`.
  * @returns {object[]} the filtered roster.
  */
-export function filterRaccoonRows(rows, enabledIds) {
+export function filterRaccoonRows(rows: unknown, enabledIds: string[] | null | undefined): object[] {
   const list = Array.isArray(rows) ? rows : [];
   if (!Array.isArray(enabledIds)) return list;
   const wanted = new Set(enabledIds);

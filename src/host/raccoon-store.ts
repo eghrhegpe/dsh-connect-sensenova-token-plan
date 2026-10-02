@@ -41,7 +41,7 @@ export const RACCOON_CREDENTIAL_REF = "RACCOON_CREDENTIAL";
  * @param {unknown} value - the reference value.
  * @returns {object|null} `{ accessToken, refreshToken, expiresAtMs, officeIdentity, nickname }` or `null`.
  */
-export function parseRaccoonCredential(value) {
+export function parseRaccoonCredential(value: unknown): { accessToken: string; refreshToken: string; expiresAtMs?: number; officeIdentity: string; nickname: string } | null {
   if (typeof value !== "string" || value.trim() === "") return null;
   let parsed;
   try {
@@ -68,7 +68,7 @@ export function parseRaccoonCredential(value) {
  * @param {object} credential - `{ accessToken, refreshToken?, expiresAtMs?, officeIdentity?, nickname? }`.
  * @returns {string} the JSON document.
  */
-export function serializeRaccoonCredential(credential) {
+export function serializeRaccoonCredential(credential: { accessToken?: unknown; refreshToken?: unknown; expiresAtMs?: unknown; officeIdentity?: unknown; nickname?: unknown }): string {
   const source = obj(credential);
   const out = {
     version: 1,
@@ -102,7 +102,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
     return value ?? null;
   };
 
-  const storeNow = async (credential) => {
+  const storeNow = async (credential: { accessToken?: unknown; refreshToken?: unknown; expiresAtMs?: unknown; officeIdentity?: unknown; nickname?: unknown }) => {
     const serialized = serializeRaccoonCredential(credential);
     const service = resolveService();
     if (service !== null && typeof service.set === "function") {
@@ -118,7 +118,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
      * Persist a freshly-logged-in credential pair.
      * @param {object} credential - `{ accessToken, refreshToken?, ... }`.
      */
-    async save(credential) {
+    async save(credential: { accessToken?: unknown; refreshToken?: unknown; expiresAtMs?: unknown; officeIdentity?: unknown; nickname?: unknown }) {
       const accessToken = str(credential?.accessToken, "");
       if (accessToken === "") throw new Error("a Raccoon access token is required");
       await storeNow(credential);

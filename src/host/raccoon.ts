@@ -61,7 +61,7 @@ export const RACCOON_QR_POLL_INTERVAL_MS = 2_000;
 export const RACCOON_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** The WeChat-QR login page the phone opens after a scan. */
-export function raccoonQrLoginUrl(code) {
+export function raccoonQrLoginUrl(code: string): string {
   const params = new URLSearchParams({ code: str(code, ""), appname: "商汤小浣熊官网" });
   return `${RACCOON_API_BASE}/login/mp?${params.toString()}`;
 }
@@ -145,7 +145,7 @@ export function extractRaccoonNickname(data: any, accessToken = ""): string {
 }
 
 /** Decode a JWT's `exp` claim to MILLISECONDS; `undefined` on any failure. */
-export function decodeRaccoonJwtExpMs(token) {
+export function decodeRaccoonJwtExpMs(token: string): number | undefined {
   if (typeof token !== "string" || token.length === 0) return undefined;
   const parts = token.split(".");
   if (parts.length < 2) return undefined;
@@ -184,7 +184,7 @@ export function decodeRaccoonJwtExpMs(token) {
  */
 export function raccoonHeaders(credential: any, options: { platform?: string; version?: string } = {}) {
   const source = obj(credential);
-  const headers = {
+  const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
     Authorization: `Bearer ${str(source.access_token ?? source.accessToken, "")}`,
@@ -212,7 +212,7 @@ export function raccoonHeaders(credential: any, options: { platform?: string; ve
  * @param {number} [status] - the HTTP status, for a machine-readable detail.
  * @returns {{code: number, message: string, data: object|null, status?: number}}
  */
-export function parseRaccoonEnvelope(raw, status) {
+export function parseRaccoonEnvelope(raw: unknown, status?: number): { code: number; message: string; data: Record<string, unknown> | null; status?: number } {
   const body = obj(raw);
   const parsedCode = Number(body.code);
   const code = Number.isFinite(parsedCode) ? parsedCode : -1;
@@ -446,7 +446,7 @@ export async function fetchRaccoonBalance(credential: any, fetcher?: typeof fetc
 }
 
 /** Read a finite number (0 counts), else `null`. */
-function numOrNullSafe(value) {
+function numOrNullSafe(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
@@ -483,7 +483,7 @@ export const RACCOON_FALLBACK_MODELS = Object.freeze([
  *   = thinking on); `"off"` = disabled; anything else = enabled.
  * @returns {object|undefined} the `extra_body` value, or `undefined`.
  */
-export function raccoonThinkingExtraBody(effort) {
+export function raccoonThinkingExtraBody(effort: string | undefined): object | undefined {
   if (effort === undefined || effort.length === 0) return undefined;
   const type = effort === "off" ? "disabled" : "enabled";
   return { thinking: { type } };

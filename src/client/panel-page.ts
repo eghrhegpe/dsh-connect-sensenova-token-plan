@@ -99,7 +99,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
   }, [localeSubscribe]);
 
   const toggleSection = useCallback((key: string) => {
-    setOpenSections((current) => ({ ...current, [key]: !current[key] }));
+    setOpenSections((current) => ({ ...current, [key]: !current[key as keyof typeof current] }));
   }, []);
 
   const pools = data?.pools;

@@ -17,7 +17,7 @@
  */
 import { name } from "../host-config.ts";
 import { createCoalescedFetch } from "../coalesced-fetch.ts";
-import { optional, errMsg } from "../util.ts";
+import { optional, errMsg, str } from "../util.ts";
 import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, wantsDiagnostics, MAX_ENABLED_MODEL_IDS, MAX_RACCOON_BODY_BYTES } from "./http.ts";
 import type { Wiring } from "../types.ts";
 import {
@@ -77,7 +77,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Wiring) {
         // A freshly-scanned token: the read lands in the same cache under its
         // own fingerprint, so the first GET after login reuses it instead of
         // re-fetching what this very call just fetched.
-        const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(catalogToken)}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS));
+        const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(str(catalogToken, ""))}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS));
         if (live !== null && live.length > 0) rows = live;
       } else if (credential?.accessToken) {
         const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(credential.accessToken)}`, () => fetchRaccoonCatalog(credential), RACCOON_CATALOG_TTL_MS));

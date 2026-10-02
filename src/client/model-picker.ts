@@ -261,7 +261,7 @@ export function ModelPicker({ llm, onDone, tt }: {
                 // One row is toggled against the WHOLE roster, not the
                 // filtered view, so an edit survives a later change of the
                 // search box.
-                onToggle: (id) => {
+                onToggle: (id: string) => {
                   touchedRef.current = true;
                   setIds(toggleModelIn(ids, models.map((model) => String(model?.id ?? "")), id));
                   setNotice(null);

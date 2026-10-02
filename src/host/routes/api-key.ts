@@ -65,7 +65,7 @@ export function registerApiKeyRoute(ctx: any, wiring: Wiring) {
           // answer success, but record it — silently losing it would make a
           // "forgot the key but old models still offered" report undebuggable.
           await catalogStore.clear()
-            .catch((error) => logger?.warn?.(`${name}: catalog cache clear failed after api-key forget`, error));
+            .catch((error: unknown) => logger?.warn?.(`${name}: catalog cache clear failed after api-key forget`, error));
           clearCoalescedFetch(cache, inflight);
           await publishProvider([], [], []);
           // The signatures must not keep claiming a stale offer after the teardown:

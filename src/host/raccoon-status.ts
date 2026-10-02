@@ -59,7 +59,7 @@ const PROXY_ENV_KEYS = [
  * @param {string} token - the access token (never stored, never logged).
  * @returns {string} a 12-hex-character digest prefix.
  */
-export function tokenFingerprint(token) {
+export function tokenFingerprint(token: string): string {
   return createHash("sha256").update(typeof token === "string" ? token : "", "utf8").digest("hex").slice(0, 12);
 }
 
@@ -80,7 +80,7 @@ export function tokenFingerprint(token) {
  * @param {string|undefined} value - its value.
  * @returns {string} the `KEY=value` pair, with any userinfo replaced by `***`.
  */
-export function maskProxyUserinfo(key, value) {
+export function maskProxyUserinfo(key: string, value: string | undefined): string {
   const text = str(value, "");
   // `[^/@]*@` cannot cross a `/`, so a path-borne `@` is never mistaken for
   // userinfo; the optional leading group covers `scheme://` and `//`.
@@ -275,7 +275,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
       // Fingerprint of the SHADOWING document (the serialized reference value,
       // not a token): lets the panel side diff which copy this host actually
       // serves without printing either document.
-      envCredentialFingerprint = tokenFingerprint(process.env.RACCOON_CREDENTIAL);
+      envCredentialFingerprint = tokenFingerprint(process.env.RACCOON_CREDENTIAL ?? "");
     }
     // Proxy env is the other per-process difference a fresh probe can't see:
     // a route through a corporate hop can drop or mangle the Authorization the

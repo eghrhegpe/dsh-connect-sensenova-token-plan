@@ -207,7 +207,7 @@ export function PoolExhaustionNotice({ pools, tt }: { pools?: PoolsData | null; 
   let earliest = 0;
   let anyExhausted = false;
   for (const pool of list) {
-    for (const key of ["window5h", "window7d"]) {
+    for (const key of ["window5h", "window7d"] as const) {
       const win = pool?.[key] as QuotaWindow | undefined;
       if (win && Number(win.remaining) <= 0) {
         anyExhausted = true;
