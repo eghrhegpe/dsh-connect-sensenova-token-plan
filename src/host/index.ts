@@ -162,7 +162,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // "own state file beats the config default" discipline as the provider
   // switch). A value saved from the panel overrides the patch's
   // `drawEnabled`; an untouched state file falls back to it.
-  const drawStore = createFileDrawStore({ profile });
+  const drawStore = createFileDrawStore({ profile, logger: ctx.logger });
 
   /** Read an optional service without throwing on a Host that lacks it. */
   const getService = (service: string) => {

@@ -934,6 +934,66 @@ const BASE_URL = "https://token.sensenova.cn/v1";
   }
 }
 
+// --- 10c. ADR-006 (draw): all four writers refuse a foreign version --------
+// draw.json has FOUR writers (save / forget / saveModel / forgetModel) instead
+// of the provider switch's two, so the guard has to sit in the single
+// writePayload and every writer must respect its refusal — otherwise saveModel
+// would be the side door that still stomps a newer build's file.
+{
+  const restoreEnv = isolateHostEnv();
+  const restoreHome = isolateStateDir();
+  try {
+    const dir = join(process.env.DSH_HOME, "state", "dsh-connect-sensenova-token-plan");
+    const file = join(dir, "draw.json");
+    mkdirSync(dir, { recursive: true });
+    const foreignPayload = { version: 999, enabled: false, futureField: "x" };
+
+    const seedForeign = () => writeFileSync(file, JSON.stringify(foreignPayload, null, 2), "utf8");
+    const intact = () => {
+      const raw = JSON.parse(readFileSync(file, "utf8"));
+      return raw.version === 999 && raw.futureField === "x";
+    };
+
+    seedForeign();
+    let warnings = [];
+    const a = createFileDrawStore({ dir, logger: { warn: (m) => warnings.push(m) } });
+    await a.save(true);
+    check("draw save() does not overwrite a foreign version", intact(), readFileSync(file, "utf8"));
+    check("draw refusal is logged, not silent",
+      warnings.some((w) => w.includes("refusing to overwrite draw.json") && w.includes("version 999")),
+      warnings.join(" | "));
+
+    seedForeign();
+    await createFileDrawStore({ dir }).forget();
+    check("draw forget() does not overwrite a foreign version", intact());
+
+    seedForeign();
+    await createFileDrawStore({ dir }).saveModel("sn-sensenova-6-8-flash");
+    check("draw saveModel() does not overwrite a foreign version", intact());
+
+    seedForeign();
+    await createFileDrawStore({ dir }).forgetModel();
+    check("draw forgetModel() does not overwrite a foreign version", intact());
+
+    // The guard must not trip on the file's own version.
+    writeFileSync(file, JSON.stringify({ version: DRAW_STORE_VERSION, enabled: false }, null, 2), "utf8");
+    await createFileDrawStore({ dir }).save(true);
+    const afterNormal = JSON.parse(readFileSync(file, "utf8"));
+    check("a known draw version still writes normally",
+      afterNormal.version === DRAW_STORE_VERSION && afterNormal.enabled === true, JSON.stringify(afterNormal));
+
+    // The reason string is load-bearing, same as the provider guard.
+    const source = readFileSync(new URL("../src/host/draw-store.ts", import.meta.url), "utf8");
+    check("the draw refusal marker stays in the source",
+      source.includes("draw: refusing to overwrite draw.json holding version"), "");
+  } catch (error) {
+    fail("ADR-006 draw write-side version guard", error);
+  } finally {
+    restoreHome();
+    restoreEnv();
+  }
+}
+
 // --- 11. api key store: env fallback with no service ------------------------
 {
   const restoreEnv = isolateHostEnv();

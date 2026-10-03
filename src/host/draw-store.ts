@@ -24,14 +24,22 @@
  *
  * @module dsh-connect-sensenova-token-plan/draw-store
  */
-import { obj } from "./util.ts";
+import { obj, degrade } from "./util.ts";
 import { join } from "node:path";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
+import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
 import type { StoreOptions } from "./types.ts";
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
 export const DRAW_STORE_VERSION = 1;
+
+/**
+ * Every persisted shape THIS build can read (current + history). Bumping
+ * {@link DRAW_STORE_VERSION} means adding the new number here too — the ADR-006
+ * write-side guard's whitelist (see {@link writePayload}). Mirrors
+ * `provider-store.ts`'s `KNOWN_PROVIDER_VERSIONS`.
+ */
+export const KNOWN_DRAW_VERSIONS: readonly number[] = [1];
 
 /**
  * The directory this plugin's state lives in — per-profile when the Host names
@@ -73,20 +81,36 @@ export function normalizeDrawModelId(raw: unknown): string | null {
  * @returns {object} the store.
  */
 export function createFileDrawStore(options: StoreOptions = {}) {
-  const { dir, profile = null, ttlMs = STATE_READ_TTL_MS } = options;
+  const { dir, profile = null, ttlMs = STATE_READ_TTL_MS, logger } = options;
   const stateDir = dir ?? drawStoreDir(profile);
   const filePath = join(stateDir, "draw.json");
 
   /**
    * Write one payload atomically to this switch's own file — the single writer
-   * for save / forget / the §23 legacy adoption (see `provider-store.ts`).
+   * for save / forget / saveModel / forgetModel / the §23 legacy adoption (see
+   * `provider-store.ts`).
+   *
+   * ADR-006 write-side guard (mirrors `provider-store.ts`): never overwrite a
+   * state file this build cannot read. An unknown NUMERIC version means a NEWER
+   * build wrote it; clobbering it destroys data we cannot see. Refuse with a
+   * `degrade` signal, not a silent no-op — PITFALLS §37: swallow the failure,
+   * not the reason.
    * @param {object} body - the JSON body to persist.
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>} true when written, false when refused.
    */
-  const writePayload = async (body: object) => {
+  const writePayload = async (body: object): Promise<boolean> => {
+    const existing = await readStateVersion(filePath);
+    if (!isKnownStateVersion(existing, KNOWN_DRAW_VERSIONS)) {
+      degrade(
+        `draw: refusing to overwrite draw.json holding version ${existing} (this build knows ${KNOWN_DRAW_VERSIONS.join("/")})`,
+        null, logger, null
+      );
+      return false;
+    }
     const temporary = temporaryOf(stateDir, "draw.json");
     await ensureStateDir(stateDir);
     await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
+    return true;
   };
 
   // Pre-§23 machines kept this switch in the SHARED directory; a profile-scoped
@@ -155,19 +179,24 @@ export function createFileDrawStore(options: StoreOptions = {}) {
     async save(value: boolean) {
       const enabled = normalizeDrawEnabled(value);
       if (enabled === null) throw new TypeError("draw switch expects a boolean");
-      // Write failures PROPAGATE on purpose: a switch the panel ordered must
-      // not silently stay off because the state file could not be written.
-      await writePayload({ version: DRAW_STORE_VERSION, enabled, drawModelId: (await saved()).modelId ?? undefined, updatedAt: new Date().toISOString() });
-      cache.remember({ enabled, modelId: (await saved()).modelId });
+      // Write failures PROPAGATE on purpose; a refused write (ADR-006) does NOT —
+      // the file is intact, only the cache must not be told a value that never
+      // reached disk.
+      const modelId = (await saved()).modelId;
+      if (await writePayload({ version: DRAW_STORE_VERSION, enabled, drawModelId: modelId ?? undefined, updatedAt: new Date().toISOString() })) {
+        cache.remember({ enabled, modelId });
+      }
     },
     /**
      * Forget the panel-saved value: the config default rules again.
      * @returns {Promise<void>}
      */
     async forget() {
-      cache.remember({ enabled: null, modelId: (await saved()).modelId });
       // No `enabled` key: "not set" is the absence of an answer, not `false`.
-      await writePayload({ version: DRAW_STORE_VERSION, drawModelId: (await saved()).modelId ?? undefined, updatedAt: new Date().toISOString() });
+      const modelId = (await saved()).modelId;
+      if (await writePayload({ version: DRAW_STORE_VERSION, drawModelId: modelId ?? undefined, updatedAt: new Date().toISOString() })) {
+        cache.remember({ enabled: null, modelId });
+      }
     },
     /**
      * Persist a draw-model preference (the panel's picker). `null` clears it.
@@ -178,8 +207,9 @@ export function createFileDrawStore(options: StoreOptions = {}) {
       const modelId = normalizeDrawModelId(value);
       if (modelId === null && value != null) throw new TypeError("draw model expects a non-empty string or null");
       const enabled = (await saved()).enabled;
-      await writePayload({ version: DRAW_STORE_VERSION, ...(enabled !== null ? { enabled } : {}), ...(modelId !== null ? { drawModelId: modelId } : {}), updatedAt: new Date().toISOString() });
-      cache.remember({ enabled, modelId });
+      if (await writePayload({ version: DRAW_STORE_VERSION, ...(enabled !== null ? { enabled } : {}), ...(modelId !== null ? { drawModelId: modelId } : {}), updatedAt: new Date().toISOString() })) {
+        cache.remember({ enabled, modelId });
+      }
     },
     /**
      * Forget the draw-model preference: the config default (usually auto) rules again.
@@ -187,8 +217,9 @@ export function createFileDrawStore(options: StoreOptions = {}) {
      */
     async forgetModel() {
       const enabled = (await saved()).enabled;
-      cache.remember({ enabled, modelId: null });
-      await writePayload({ version: DRAW_STORE_VERSION, ...(enabled !== null ? { enabled } : {}), updatedAt: new Date().toISOString() });
+      if (await writePayload({ version: DRAW_STORE_VERSION, ...(enabled !== null ? { enabled } : {}), updatedAt: new Date().toISOString() })) {
+        cache.remember({ enabled, modelId: null });
+      }
     }
   };
 }
