@@ -68,7 +68,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
   // own switch reads as "this does nothing". Only the API key editor stays
   // closed — it holds a secret field, and it is a prerequisite the two
   // cards above point at rather than the thing being configured.
-  const [openSections, setOpenSections] = useState({ pools: true, trend: true, account: false, provider: true, draw: true, llm: false });
+  const [openSections, setOpenSections] = useState({ pools: true, trend: true, account: false, provider: true, draw: true, llm: false, raccoon: true });
   // Three fixed perspectives: "quota" is the daily reading (pools, trend,
   // account), "api" is the Token Plan wiring (key, provider push, draw), and
   // "raccoon" is the SECOND upstream provider (ROADMAP §6.1) — an independent
@@ -271,14 +271,17 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
 
   // The Raccoon tab (ROADMAP §6.1) is a SECOND upstream with its own
   // credential and data source (the /raccoon route this tab polls) — it never
-  // touches the Token Plan snapshot, so it renders from its own card.
+  // touches the Token Plan snapshot, so it renders from its own card. The
+  // header's chevron folds it like every other section: it used to be wired to
+  // a no-op, so the one control that promised to collapse this tab did nothing
+  // when clicked — a fake affordance, which reads as "broken", not "expanded".
   const raccoonBody = () =>
     h(
       "div",
       { style: { marginTop: 22 } },
       h(
         SectionCard,
-        { title: tt("raccoon.title"), open: true, onToggle: () => {}, tt },
+        { title: tt("raccoon.title"), open: openSections.raccoon, onToggle: () => toggleSection("raccoon"), tt },
         h(RaccoonTab, { tt, onReportStatus: setRaccoonStatus })
       )
     );

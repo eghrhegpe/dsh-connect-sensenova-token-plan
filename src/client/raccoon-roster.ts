@@ -79,13 +79,15 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
   return h(
     "div",
     { style: { ...S.modelPanel, marginTop: 10 } },
+    // The header row is a title and its state chip, nothing else. The
+    // provenance note ("以下为内置备用模型") used to ride inline here and
+    // shoved the count and the chip apart — but WHERE the rows came from is a
+    // principle the reader absorbs on the side, not an action, so it now sits
+    // as a footnote under the list (same stop as the trend chart's legend).
     h(
       "div",
       { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 } },
       h("span", { style: { ...S.muted, fontSize: 12, fontWeight: 600 } }, format(tt("raccoon.models"), { count: count(rows.length) })),
-      fallbackNote !== null
-        ? h("span", { style: { ...S.muted, fontSize: 11 } }, fallbackNote)
-        : null,
       h("span", { style: S.spacer }),
       // The registration chip: the switch says "wants", this says "is", in the
       // spot the eye scans for state — the header's right edge.
@@ -131,6 +133,13 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
           onToggle
         });
       })
-    )
+    ),
+    // The provenance footnote, under the list it explains: when the gateway
+    // served nothing and these are the built-in fallbacks, say so here — the
+    // quietest layer, read after the rows rather than competing with the
+    // header's count and state chip. Same stop as the trend chart's legend.
+    fallbackNote !== null
+      ? h("div", { style: S.trendLegend }, fallbackNote)
+      : null
   );
 }

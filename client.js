@@ -887,6 +887,20 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				fontWeight: 500,
 				color: "var(--dsw-alias-label-secondary)"
 			},
+			statHeadline: {
+				fontSize: 18,
+				lineHeight: "22px",
+				fontWeight: 650,
+				letterSpacing: "-0.02em",
+				fontVariantNumeric: "tabular-nums"
+			},
+			statCaption: {
+				fontSize: 11,
+				lineHeight: "15px",
+				color: "var(--dsw-alias-label-secondary)",
+				fontVariantNumeric: "tabular-nums"
+			},
+			statError: { color: "var(--dsw-alias-state-error-primary)" },
 			quotaReset: {
 				fontSize: 11,
 				color: "var(--dsw-alias-label-secondary)"
@@ -3016,10 +3030,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			...S.muted,
 			fontSize: 12,
 			fontWeight: 600
-		} }, format(tt("raccoon.models"), { count: count(rows.length) })), fallbackNote !== null ? h("span", { style: {
-			...S.muted,
-			fontSize: 11
-		} }, fallbackNote) : null, h("span", { style: S.spacer }), h("span", { style: {
+		} }, format(tt("raccoon.models"), { count: count(rows.length) })), h("span", { style: S.spacer }), h("span", { style: {
 			...S.modelBadge,
 			...registered === true ? { color: "var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary))" } : {}
 		} }, registered === true ? tt("raccoon.registeredChip") : tt("raccoon.unregisteredChip"))), h("div", { style: {
@@ -3050,7 +3061,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				meta,
 				onToggle
 			});
-		})));
+		})), fallbackNote !== null ? h("div", { style: S.trendLegend }, fallbackNote) : null);
 	}
 	var init_raccoon_roster = __esmMin((() => {
 		init_format();
@@ -3126,17 +3137,14 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			breakdown?.topup !== void 0 ? format(tt("raccoon.partTopup"), { n: count(breakdown.topup) }) : null
 		].filter(Boolean).join(" · ");
 		const balanceText = typeof state?.balance === "number" ? format(tt("raccoon.balance"), { balance: count(state.balance) }) : state?.balanceDetail !== void 0 && state?.balanceDetail !== "" ? format(tt("raccoon.balanceUnknownDetail"), { detail: state.balanceDetail }) : tt("raccoon.balanceUnknown");
-		const metaLine = [];
+		const balanceTone = typeof state?.balance === "number" && state.balance <= 0 ? S.statError : null;
+		const captionParts = [];
 		if (loggedIn) {
-			metaLine.push(h("span", { key: "balance" }, balanceText));
-			if (breakdownParts !== "") metaLine.push(h("span", {
-				key: "breakdown",
-				style: { fontSize: 11 }
-			}, `（${breakdownParts}）`));
-			if (expiresAt !== null) metaLine.push(h("span", { key: "exp" }, ` · ${format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })}`));
+			if (breakdownParts !== "") captionParts.push(h("span", { key: "breakdown" }, breakdownParts));
+			if (expiresAt !== null) captionParts.push(h("span", { key: "exp" }, `${breakdownParts !== "" ? " · " : ""}${format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })}`));
 			if (refreshAt !== null) {
 				const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
-				metaLine.push(h("span", {
+				captionParts.push(h("span", {
 					key: "refresh",
 					title: format(tt("raccoon.refreshTip"), { days })
 				}, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
@@ -3193,26 +3201,35 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			gap: 8,
 			alignItems: "center",
 			margin: "12px 0 0",
+			padding: "8px 14px",
+			borderRadius: 8,
+			background: "var(--dsw-alias-bg-layer-1)",
 			cursor: waiting ? "wait" : "pointer"
 		} }, h("input", {
 			type: "checkbox",
 			checked: enabled,
 			disabled: waiting,
-			onChange: () => onSwitch(!enabled)
+			onChange: () => onSwitch(!enabled),
+			style: {
+				accentColor: "var(--sensenova-brand, #6C5CE7)",
+				margin: 0
+			}
 		}), h("span", { style: {
 			fontSize: 12,
 			color: "var(--dsw-alias-label-secondary)"
 		} }, tt("raccoon.switch"))), state !== null && state.providerError !== void 0 && state.providerError !== "" ? h("div", {
 			style: S.formError,
 			role: "alert"
-		}, state.providerError) : null, metaLine.length > 0 ? h("div", {
-			style: {
-				...S.muted,
-				fontSize: 12,
-				marginTop: 10
-			},
+		}, state.providerError) : null, loggedIn ? h("div", {
+			style: { marginTop: 12 },
 			role: "status"
-		}, ...metaLine) : null, modelsNote !== null ? h("div", {
+		}, h("div", { style: {
+			...S.statHeadline,
+			...balanceTone ?? {}
+		} }, balanceText), captionParts.length > 0 ? h("div", { style: {
+			...S.statCaption,
+			marginTop: 2
+		} }, ...captionParts) : null) : null, modelsNote !== null ? h("div", {
 			style: {
 				...S.formNote,
 				fontSize: 12,
@@ -3558,7 +3575,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			account: false,
 			provider: true,
 			draw: true,
-			llm: false
+			llm: false,
+			raccoon: true
 		});
 		const [activeTab, setActiveTab] = useState("quota");
 		const [raccoonStatus, setRaccoonStatus] = useState(null);
@@ -3691,8 +3709,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		})));
 		const raccoonBody = () => h("div", { style: { marginTop: 22 } }, h(SectionCard, {
 			title: tt("raccoon.title"),
-			open: true,
-			onToggle: () => {},
+			open: openSections.raccoon,
+			onToggle: () => toggleSection("raccoon"),
 			tt
 		}, h(RaccoonTab, {
 			tt,

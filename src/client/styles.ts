@@ -79,6 +79,25 @@ export const S = {
   // the one part of the line that must never be clipped.
   quotaTop: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" },
   quotaLabel: { fontSize: 12, fontWeight: 500, color: "var(--dsw-alias-label-secondary)" },
+  // The second upstream's balance is the same KIND of fact a quota headline is
+  // — the number the user came to read — so it borrows the quota headline's
+  // weight (18 / 650 / tabular) rather than the run-on meta line it used to
+  // ride in. The Raccoon tab is a SEPARATE credential and data source, so it
+  // owns its own card; that independence was never a licence to skip the type
+  // scale, and a headline spelled in 12px secondary text is how a tab reads as
+  // unfinished next to its siblings.
+  statHeadline: { fontSize: 18, lineHeight: "22px", fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" },
+  // A quiet secondary label for a headline's own caption line (the declared
+  // split, the credential clocks). It is the same stop `quotaLabel` uses, so a
+  // number and its caption read as one unit across both upstreams.
+  statCaption: { fontSize: 11, lineHeight: "15px", color: "var(--dsw-alias-label-secondary)", fontVariantNumeric: "tabular-nums" },
+  // A headline figure that IS the alarm, not decoration: a balance at zero
+  // must say so at the same weight the bar's error tone does. There is no warn
+  // band here on purpose — the quota headline has one because a PERCENTAGE has
+  // honest thresholds, while an absolute credit figure's normal magnitude is
+  // not something this client is told, so any "low" cut would be a number
+  // invented below the wire.
+  statError: { color: "var(--dsw-alias-state-error-primary)" },
   quotaReset: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" },
   // The remaining PERCENTAGE is the headline — tabular figures keep it
   // still while polling.

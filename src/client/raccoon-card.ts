@@ -135,28 +135,39 @@ export function RaccoonCard({
     breakdown?.topup !== undefined ? format(tt("raccoon.partTopup"), { n: count(breakdown.topup) }) : null
   ].filter(Boolean).join(" · ");
 
-  // The logged-in frame's whole bookkeeping folds into ONE quiet meta line:
-  // balance, its declared split, and both credential clocks. These are facts
-  // the user glances at, not a form — three stacked lines of secondary text
-  // read as clutter, not as diligence (the same lesson the quota tab's
-  // "构成并入余额行" pass taught).
+  // The signed-in frame's bookkeeping is ONE status element (the render suite
+  // pins `meta.length === 1` on it), but one element is not one flat line: the
+  // balance is the headline the user came to read and the declared split plus
+  // the two credential clocks are its supporting detail. They used to be four
+  // same-weight spans concatenated into a 12px run-on sentence, which is how a
+  // tab reads as unfinished beside its siblings — the quota tab leads the same
+  // KIND of fact with a 18px/650 tabular figure (S.quotaRemaining). So the
+  // balance now takes that weight and the rest drops to a caption under it, all
+  // still inside the single `role="status"` node the fold requires.
   const balanceText = typeof state?.balance === "number"
     ? format(tt("raccoon.balance"), { balance: count(state.balance) })
     : state?.balanceDetail !== undefined && state?.balanceDetail !== ""
       ? format(tt("raccoon.balanceUnknownDetail"), { detail: state.balanceDetail })
       : tt("raccoon.balanceUnknown");
-  const metaLine: unknown[] = [];
+  // A drained balance is the alarm, not decoration — the same rule the quota
+  // headline applies at its error threshold. Only zero/negative is asserted:
+  // the warn band a percentage has (70/90) has no honest equivalent for an
+  // absolute credit figure whose normal magnitude this client is not told, so
+  // a guessed "low" threshold would be a number invented below the wire.
+  const balanceTone = typeof state?.balance === "number" && state.balance <= 0
+    ? S.statError
+    : null;
+  const captionParts: unknown[] = [];
   if (loggedIn) {
-    metaLine.push(h("span", { key: "balance" }, balanceText));
     if (breakdownParts !== "") {
-      metaLine.push(h("span", { key: "breakdown", style: { fontSize: 11 } }, `（${breakdownParts}）`));
+      captionParts.push(h("span", { key: "breakdown" }, breakdownParts));
     }
     if (expiresAt !== null) {
-      metaLine.push(h("span", { key: "exp" }, ` · ${format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })}`));
+      captionParts.push(h("span", { key: "exp" }, `${breakdownParts !== "" ? " · " : ""}${format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })}`));
     }
     if (refreshAt !== null) {
       const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
-      metaLine.push(h("span", {
+      captionParts.push(h("span", {
         key: "refresh",
         title: format(tt("raccoon.refreshTip"), { days })
       }, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
@@ -229,10 +240,19 @@ export function RaccoonCard({
       : null,
     // The provider switch (opt-in, default off). It decides whether the Raccoon
     // models are registered with DSH at all — the second step, after signing in.
+    // It used to be a bare label floating in the column gap between the login
+    // card and the balance line, with no surface of its own: a control with no
+    // home. It now sits on a quiet inset row so it reads as a deliberate
+    // setting, aligned to the card content it governs.
     h(
       "label",
-      { style: { display: "flex", gap: 8, alignItems: "center", margin: "12px 0 0", cursor: waiting ? "wait" : "pointer" } },
-      h("input", { type: "checkbox", checked: enabled, disabled: waiting, onChange: () => onSwitch(!enabled) }),
+      {
+        style: {
+          display: "flex", gap: 8, alignItems: "center", margin: "12px 0 0", padding: "8px 14px",
+          borderRadius: 8, background: "var(--dsw-alias-bg-layer-1)", cursor: waiting ? "wait" : "pointer"
+        }
+      },
+      h("input", { type: "checkbox", checked: enabled, disabled: waiting, onChange: () => onSwitch(!enabled), style: { accentColor: "var(--sensenova-brand, #6C5CE7)", margin: 0 } }),
       h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" } }, tt("raccoon.switch"))
     ),
     // A registration failure stays visible even while the switch is OFF —
@@ -241,9 +261,19 @@ export function RaccoonCard({
     state !== null && state.providerError !== undefined && state.providerError !== ""
       ? h("div", { style: S.formError, role: "alert" }, state.providerError)
       : null,
-    // The one meta line, then the roster the adapter offers.
-    metaLine.length > 0
-      ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 10 }, role: "status" }, ...metaLine)
+    // The balance is the headline the user came to read (one `role="status"`
+    // node, as the render suite pins), with the declared split and the two
+    // credential clocks folded into a caption under it — the quota tab's
+    // headline-over-caption shape, applied to the second upstream.
+    loggedIn
+      ? h(
+          "div",
+          { style: { marginTop: 12 }, role: "status" },
+          h("div", { style: { ...S.statHeadline, ...(balanceTone ?? {}) } }, balanceText),
+          captionParts.length > 0
+            ? h("div", { style: { ...S.statCaption, marginTop: 2 } }, ...captionParts)
+            : null
+        )
       : null,
     modelsNote !== null
       ? h("div", { style: { ...S.formNote, fontSize: 12, marginTop: 6 }, role: "status" }, modelsNote)
