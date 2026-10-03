@@ -109,7 +109,7 @@ IAM 拒绝登录时返回 `google.rpc.Status` 信封：顶层 `message` 是泛�
 | `tooManyAttempts` / `rateLimitExceeded` / `tooManyRequests` | `rate_limited` | 时间型：退避等待 |
 | `verificationRequired` / `captchaRequired` | `verification_required` | 凭据型：需人工验证，停车等待用户 |
 
-- 等待窗口来源优先级：`Retry-After` 头（秒）→ 消息正文（中英文都匹配，如 `try again after 8 minutes` / `请 8 分钟后重试`）；`分` 读作分钟（不是秒）。
+- 等待窗口来源优先级：`Retry-After` 头（秒）→ 消息正文（中英文都匹配，如 `try again after 8 minutes` / `请 8 分钟后重试`）；`分` 读作分钟（不是秒）。`Retry-After` 头除秒数外也接受 RFC 7231 的 HTTP-date 形式（如 `Wed, 21 Oct 2026 07:28:00 GMT`），插件会解析为「等到该时刻为止」的退避，而非丢弃。
 - **平台声明的窗口永不截断**（哪怕 2 小时）；只有本插件自己发明的退避才受 `MAX_LOGIN_BACKOFF_MS`(默认 30 分钟) 上限。
 
 ---

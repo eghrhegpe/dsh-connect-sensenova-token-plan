@@ -349,6 +349,13 @@ function createTrace() {
  * message ("try again after 8 minutes"). Honouring it is the difference
  * between waiting out a lockout and extending one with every poll.
  *
+ * RFC 7231 §7.1.3 lets `Retry-After` be either a delta-seconds integer OR an
+ * HTTP-date. The platform docs only mention the seconds form, but a future
+ * date must still be honoured: `Number("Wed, 21 Oct 2026 ...")` is `NaN`, and
+ * letting that fall through to a guess would re-probe a lock the platform has
+ * told us to back off until — so a date-shaped header is parsed and returned
+ * as the wait until then.
+ *
  * The prose is matched in both languages the platform uses, because a window
  * that goes unread becomes a refusal with no stated deadline — which falls
  * back to a local backoff and so probes a lock that is still in force.
@@ -358,8 +365,20 @@ function createTrace() {
  */
 function retryWindowMs(body: unknown, response: { status?: number; headers?: { get?: (name: string) => string | null } }): number | undefined {
   // A Retry-After in seconds is the authoritative form when present.
-  const header = Number(response?.headers?.get?.("retry-after"));
-  if (Number.isFinite(header) && header > 0) return Math.ceil(header * 1000);
+  const header = response?.headers?.get?.("retry-after");
+  const headerSeconds = Number(header);
+  if (typeof header === "string" && Number.isFinite(headerSeconds) && headerSeconds > 0) {
+    return Math.ceil(headerSeconds * 1000);
+  }
+  // An HTTP-date ("Wed, 21 Oct 2026 07:28:00 GMT") is the other RFC 7231 form.
+  // A past or unparseable date yields no wait; a future one does.
+  if (typeof header === "string") {
+    const dateMs = Date.parse(header);
+    if (Number.isFinite(dateMs)) {
+      const delta = dateMs - Date.now();
+      if (delta > 0) return delta;
+    }
+  }
 
   // Otherwise read the duration out of the human message.
   const text = `${str(obj(body).message, "")} ${rejectionDetail(body, response?.status ?? 0)}`;

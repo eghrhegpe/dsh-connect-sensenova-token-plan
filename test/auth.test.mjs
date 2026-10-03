@@ -492,6 +492,47 @@ check("empty token yields null expiry", readJwtExpiry("") === null);
       globalThis.fetch = realFetch;
     }
   }
+
+  // Retry-After may also be an HTTP-date (RFC 7231 §7.1.3), not just seconds.
+  // A date-shaped header must be honoured as the wait until then, not dropped
+  // (Number("Wed, ...") is NaN and would otherwise fall through to a guess).
+  {
+    const realFetch = globalThis.fetch;
+    const future = new Date(Date.now() + 90_000).toUTCString();
+    globalThis.fetch = async (url) => {
+      const target = String(url);
+      if (target.includes("jwks.json")) {
+        return new Response(JSON.stringify({ keys: [{ ...jwk, kid: "public:hydra.openid.id-token", use: "sig" }] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (target.includes("/oauth2/auth")) {
+        return new Response("", {
+          status: 302,
+          headers: {
+            location: "https://platform.sensenova.cn/login?login_challenge=chal",
+            "set-cookie": "oauth2_authentication_csrf=abc; Path=/"
+          }
+        });
+      }
+      if (target.includes("iam.sensecoreapi.cn")) {
+        return new Response(JSON.stringify({ code: 9, message: "TooManyRequests", details: [{ reason: "tooManyAttempts" }] }), {
+          status: 429, headers: { "content-type": "application/json", "retry-after": future }
+        });
+      }
+      return new Response("{}", { status: 500, headers: { "content-type": "application/json" } });
+    };
+    try {
+      const mod = await import(`../src/host/sensenova-auth.ts?httpdate=${Date.now()}-${Math.random()}`);
+      let retryAfterMs;
+      try { await mod.createAuth().login({ username: "u", password: "p" }); } catch (error) { retryAfterMs = error?.retryAfterMs; }
+      check("a Retry-After HTTP-date is honoured as the wait until then",
+        typeof retryAfterMs === "number" && retryAfterMs > 0 && retryAfterMs <= 90_000 + 5000, String(retryAfterMs));
+    } catch (error) {
+      fail("a Retry-After HTTP-date is honoured as the wait until then", error);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
 }
 
 // --- 6. login refuses empty credentials without any network --------------
