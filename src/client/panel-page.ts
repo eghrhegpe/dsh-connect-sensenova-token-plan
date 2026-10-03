@@ -8,7 +8,7 @@ import {
 } from "./account-form.ts";
 import { ApiKeyForm, ProviderForm } from "./api-key-form.ts";
 import { PANEL_ID } from "./const.ts";
-import { clock, format } from "./format.ts";
+import { format, when } from "./format.ts";
 import { FORM_EXCLUDED_CODES, GUIDANCE_BY_CODE, viewOf } from "./snapshot.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import { h, useCallback, useEffect, useState } from "./runtime.ts";
@@ -221,13 +221,13 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
             ),
             h(
               SectionCard,
-              { title: format(tt("section.trend"), { hours: trend?.hours ?? 24 }), open: openSections.trend, onToggle: () => toggleSection("trend"), tt },
+              // The cache age is quoted from the snapshot, not written down
+              // here: a note that says 60 while the Host caches for 300 is a
+              // lie the reader has no way to catch. It lives in THIS card's
+              // title because the cache belongs to the data it ages.
+              { title: format(tt("section.trend"), { hours: trend?.hours ?? 24, cache: data?.cacheSeconds ?? 60 }), open: openSections.trend, onToggle: () => toggleSection("trend"), tt },
               h(TrendTable, { trend, tt })
             ),
-            // The cache age is quoted from the snapshot, not written down here:
-            // a note that says 60 while the Host caches for 300 is a lie the
-            // reader has no way to catch.
-            h("div", { style: S.note }, format(tt("note"), { cache: data?.cacheSeconds ?? 60 })),
             // The login state stays visible while everything works — and
             // while nothing does: a collapsed section (unlike the content
             // sections) keeps the editor one click away without cluttering
@@ -390,7 +390,7 @@ export function HeaderStatus({
       "span",
       { style: S.cluster },
       status.updatedAt > 0
-        ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: clock(status.updatedAt / 1000) }))
+        ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: when(status.updatedAt / 1000) }))
         : null,
       // The raccoon upstream's own failure. It used to be reported by the tab
       // and rendered by NOBODY, so an unreachable Host left the last timestamp
@@ -407,7 +407,9 @@ export function HeaderStatus({
   return h(
     "span",
     { style: S.cluster },
-    hasData ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: clock(updatedAt / 1000) })) : null,
+    // `when` not `clock`: the header survives across days — a panel opened
+    // the next morning must not read "更新于 20:39" as "20 minutes ago".
+    hasData ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: when(updatedAt / 1000) })) : null,
     // The renewal chip is quota-ONLY: gated on `activeTab === "quota"`, never on
     // `hasData` alone, so the api tab (an API key, not a console grant) and the
     // raccoon tab (a separate credential) never show "令牌自动续期中".

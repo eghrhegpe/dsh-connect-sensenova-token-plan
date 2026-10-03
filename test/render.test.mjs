@@ -46,9 +46,12 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
   const meta = texts(tree).join("\n");
   check("the used figure is the USED count against the limit",
     meta.includes("pool.used 12,345 / 60,000"), meta);
-  check("the headline is the REMAINING percentage",
-    meta.includes("79.4%"), meta);
-  check("the used percentage is not shown as the headline", !meta.includes("20.6%"), meta);
+  // The headline and the bar point the SAME way: both are the bare used
+  // percentage, so a filled bar and a big figure can never contradict each
+  // other (the old "remaining %" headline over a usage bar read as "drained"
+  // at 100.0%). No "已用" prefix — four sibling cards would repeat it.
+  check("the headline is the bare used percentage",
+    meta.includes("20.6%") && !meta.includes("79.4%"), meta);
   check("the raw remaining count is not on the card — the percentage implies it",
     !meta.includes("47,655"), meta);
 
@@ -127,12 +130,14 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     tree.props?.style?.background === S.card.background && tree.props?.style?.borderRadius === S.card.borderRadius,
     JSON.stringify(tree.props?.style ?? {}));
   const bars = findAll(tree, (props) => props["aria-valuenow"] !== undefined);
-  check("each model row carries its own bar", bars.length === 2, `found ${bars.length}`);
+  // Sub-1% rows draw NO bar: on a linear scale relative to the top consumer
+  // their bar is a 1px sliver — a shape carrying no readable information.
+  // The name and the absolute number stay (block E pins both).
+  check("sub-1% rows draw no bar", bars.length === 1, `found ${bars.length}`);
   const widths = bars.map((bar) => findElement(bar, (p) => typeof p.style?.width === "string")?.props.style?.width);
   check("the biggest consumer fills the track", widths.includes("100%"), JSON.stringify(widths));
-  check("a zero-credit model gets an empty track", widths.includes("0%"), JSON.stringify(widths));
   check("the bars report the same fractions to assistive tech",
-    bars[0]?.props["aria-valuenow"] === 100 && bars[1]?.props["aria-valuenow"] === 0,
+    bars[0]?.props["aria-valuenow"] === 100,
     bars.map((bar) => bar.props["aria-valuenow"]).join(", "));
   check("the absolute amount still sits beside the model name",
     texts(tree).includes("42.5") && texts(tree).includes("0"), texts(tree).join("\n"));

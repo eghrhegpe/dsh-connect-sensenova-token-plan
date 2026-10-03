@@ -35,14 +35,14 @@ export function usageTone(pct: number): { fill: Record<string, unknown>; color: 
 }
 
 /**
- * One quota window as a compact sub-card. The REMAINING PERCENTAGE is the
- * headline figure — raw credit counts in the tens of thousands are hard to
- * judge, while "79.4%" answers "还剩多少" at a glance (the shell's own
- * quota cards lead with a percentage for the same reason). The only raw
- * figures left are the used/limit caption under the bar: the percentage
- * already implies the balance, so a third number would be noise. The
- * headline carries the usage tone (70 warn / 90 error) because a tiny
- * remaining percentage is the alarm.
+ * One quota window as a compact sub-card. The headline and the bar point the
+ * SAME way — both read "已用", from 0 to 100 — so a filled bar and a big
+ * percentage can never contradict each other the way the old "remaining %"
+ * headline over a usage bar did (100.0% remaining next to a full-looking bar
+ * read as "drained"). The product semantics: a free-tier quota FILLS as you
+ * spend (encouragement), and the warn/error tones ride that same usage
+ * percentage (70 warn / 90 error). The only absolute figures left are the
+ * used/limit caption under the bar.
  *
  * A window that is not an object at all (a pool row the Host flagged as
  * shape-drifted, or a window field simply absent) renders NOTHING instead
@@ -65,7 +65,11 @@ export function QuotaCard({ label, window, tt }: { label: string; window: QuotaW
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : null;
   const tone = usageTone(pct ?? 0);
   const pctColor = tone.color;
-  const headline = pct === null ? "—" : `${(100 - pct).toFixed(1)}%`;
+  // The bare used percentage — no "已用" prefix. The prefix earned its keep
+  // only while the headline could point the opposite way from the bar; now
+  // headline and bar are the same number, and four sibling cards repeating
+  // the same two characters is noise the reader pays on every glance.
+  const headline = pct === null ? "—" : `${pct.toFixed(1)}%`;
   return h(
     "div",
     { style: S.quota },
@@ -81,9 +85,8 @@ export function QuotaCard({ label, window, tt }: { label: string; window: QuotaW
         : null
     ),
     h("div", { style: { ...S.quotaRemaining, color: pctColor } }, headline),
-    // The bar tracks USAGE (it fills as the window drains), so its width
-    // and its assistive value both carry the used percentage, while the
-    // headline above carries the remaining one: two views of one number.
+    // The bar and the headline both carry the used percentage: one number,
+    // one shape, no room for the two to disagree.
     h(
       "div",
       { style: S.bar, role: "progressbar", "aria-label": `${label} ${tt("pool.used")} ${pct === null ? "—" : `${pct.toFixed(1)}%`}`, "aria-valuenow": pct === null ? 0 : pct.toFixed(1), "aria-valuemin": 0, "aria-valuemax": 100 },
@@ -236,6 +239,11 @@ export function TrendTable({ trend, tt }: { trend?: TrendData | null; tt: Tt }):
     trend.models.map((row) => {
       const credits = Math.max(0, Number(row.credits) || 0);
       const pct = max > 0 ? (credits / max) * 100 : 0;
+      // A row below 1% of the top consumer draws NO bar: on a linear scale
+      // relative to the top figure its bar is a 1px sliver — a shape that
+      // occupies a row while carrying no readable information. The name and
+      // the absolute number stay; the legend says small rows draw no bar.
+      const drawsBar = pct >= 1;
       return h(
         "div",
         { key: row.model, style: S.trendRow },
@@ -248,11 +256,13 @@ export function TrendTable({ trend, tt }: { trend?: TrendData | null; tt: Tt }):
           h("span", { style: S.trendModel, title: row.model }, row.model, typeof row.multiplier === "number" && row.multiplier !== 1 ? h("span", { style: S.chip, title: tt("trend.multiplierLegend") }, `×${row.multiplier}`) : null),
           h("span", { style: S.trendCredits }, count(credits))
         ),
-        h(
-          "div",
-          { style: S.trendBar, role: "progressbar", "aria-label": `${row.model} ${Math.round(pct)}%`, "aria-valuenow": Math.round(pct), "aria-valuemin": 0, "aria-valuemax": 100 },
-          h("div", { style: { ...S.barFill, width: `${pct}%` } })
-        )
+        drawsBar
+          ? h(
+              "div",
+              { style: S.trendBar, role: "progressbar", "aria-label": `${row.model} ${Math.round(pct)}%`, "aria-valuenow": Math.round(pct), "aria-valuemin": 0, "aria-valuemax": 100 },
+              h("div", { style: { ...S.barFill, width: `${pct}%` } })
+            )
+          : null
       );
     }),
     // The bars above are scaled to the LARGEST consumer, so the top model

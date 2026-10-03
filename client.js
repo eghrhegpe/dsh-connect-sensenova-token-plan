@@ -89,13 +89,13 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"pool.visionInferred": "（按模型名推断，平台未声明）",
 			"shape.api": "接口",
 			"shape.missing": "缺少字段",
-			"section.trend": "每模型消耗（近 {hours} 小时）",
+			"section.trend": "每模型消耗（近 {hours} 小时 · 缓存 {cache} 秒）",
 			"section.collapse": "收起",
 			"section.expand": "展开",
 			"trend.model": "模型",
 			"trend.credits": "积分",
 			"trend.none": "该区间内没有消耗记录。",
-			"trend.legend": "柱长按最高消耗相对显示，非占总额度比例。",
+			"trend.legend": "柱长按最高消耗相对显示，非占总额度比例；消耗不足最高值 1% 的行不画柱。",
 			"trend.multiplierLegend": "×N 为插件配置的自定义倍率（非官方数据），仅供跨模型对比；未标注的模型没有配置倍率。",
 			"llm.contextBadge": "{ctx} 上下文",
 			"auth.selfRenew": "令牌自动续期中",
@@ -178,7 +178,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.needsKey": "尚未配置 API Key；保存后即可出图。",
 			"draw.noCandidates": "当前 API Key 目录里暂无出图模型；出图不可用。",
 			"draw.modelFallback": "第一个可用模型",
-			"note": "数据来自商汤控制台 API（pool-usage / credit-usage-trend），Host 侧缓存 {cache} 秒；控制台令牌到期后由 Host 用 refresh_token 静默续期。",
 			"tab.quota": "积分额度",
 			"tab.api": "接入 API",
 			"tab.raccoon": "小浣熊",
@@ -282,13 +281,13 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"pool.visionInferred": "(inferred from model names; not declared by the platform)",
 			"shape.api": "endpoint",
 			"shape.missing": "missing field",
-			"section.trend": "Per-model consumption (last {hours} h)",
+			"section.trend": "Per-model consumption (last {hours} h · cached {cache} s)",
 			"section.collapse": "Collapse",
 			"section.expand": "Expand",
 			"trend.model": "Model",
 			"trend.credits": "Credits",
 			"trend.none": "No consumption in this range.",
-			"trend.legend": "Bars are scaled relative to the top consumer, not to the total quota.",
+			"trend.legend": "Bars are scaled relative to the top consumer, not to the total quota; rows below 1% of the top figure draw no bar.",
 			"trend.multiplierLegend": "×N marks a custom multiplier configured in the plugin (not official data), for cross-model comparison only; unlabelled models have no configured multiplier.",
 			"llm.contextBadge": "{ctx} context",
 			"auth.selfRenew": "Token renews itself",
@@ -371,7 +370,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.needsKey": "No API key yet; save one to start generating images.",
 			"draw.noCandidates": "This API key's catalogue has no image model; drawing is unavailable.",
 			"draw.modelFallback": "the first available model",
-			"note": "Data from the SenseNova console API (pool-usage / credit-usage-trend), cached {cache}s on the Host; the Host renews the console token silently from a refresh token.",
 			"tab.quota": "Quota & Usage",
 			"tab.api": "API Integration",
 			"tab.raccoon": "Raccoon",
@@ -757,7 +755,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				padding: "8px 12px",
 				fontSize: 13,
 				color: "var(--dsw-alias-label-secondary)",
-				cursor: "pointer"
+				cursor: "pointer",
+				outline: "none"
 			},
 			tabActive: {
 				color: "var(--dsw-alias-label-primary)",
@@ -1046,12 +1045,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			},
 			muted: { color: "var(--dsw-alias-label-secondary)" },
 			error: { color: "var(--dsw-alias-state-error-primary)" },
-			note: {
-				marginTop: 24,
-				color: "var(--dsw-alias-label-secondary)",
-				fontSize: 12,
-				lineHeight: "18px"
-			},
 			empty: {
 				color: "var(--dsw-alias-label-secondary)",
 				padding: "18px 0"
@@ -2429,14 +2422,14 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		};
 	}
 	/**
-	* One quota window as a compact sub-card. The REMAINING PERCENTAGE is the
-	* headline figure — raw credit counts in the tens of thousands are hard to
-	* judge, while "79.4%" answers "还剩多少" at a glance (the shell's own
-	* quota cards lead with a percentage for the same reason). The only raw
-	* figures left are the used/limit caption under the bar: the percentage
-	* already implies the balance, so a third number would be noise. The
-	* headline carries the usage tone (70 warn / 90 error) because a tiny
-	* remaining percentage is the alarm.
+	* One quota window as a compact sub-card. The headline and the bar point the
+	* SAME way — both read "已用", from 0 to 100 — so a filled bar and a big
+	* percentage can never contradict each other the way the old "remaining %"
+	* headline over a usage bar did (100.0% remaining next to a full-looking bar
+	* read as "drained"). The product semantics: a free-tier quota FILLS as you
+	* spend (encouragement), and the warn/error tones ride that same usage
+	* percentage (70 warn / 90 error). The only absolute figures left are the
+	* used/limit caption under the bar.
 	*
 	* A window that is not an object at all (a pool row the Host flagged as
 	* shape-drifted, or a window field simply absent) renders NOTHING instead
@@ -2449,7 +2442,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const pct = limit > 0 ? Math.min(100, used / limit * 100) : null;
 		const tone = usageTone(pct ?? 0);
 		const pctColor = tone.color;
-		const headline = pct === null ? "—" : `${(100 - pct).toFixed(1)}%`;
+		const headline = pct === null ? "—" : `${pct.toFixed(1)}%`;
 		return h("div", { style: S.quota }, h("div", { style: S.quotaTop }, h("span", { style: S.quotaLabel }, label), typeof remaining === "number" && remaining <= 0 ? h("span", { style: {
 			...S.chip,
 			color: "var(--dsw-alias-state-error-primary)",
@@ -2568,6 +2561,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		} }, tt("trend.credits"))), trend.models.map((row) => {
 			const credits = Math.max(0, Number(row.credits) || 0);
 			const pct = max > 0 ? credits / max * 100 : 0;
+			const drawsBar = pct >= 1;
 			return h("div", {
 				key: row.model,
 				style: S.trendRow
@@ -2577,7 +2571,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			}, row.model, typeof row.multiplier === "number" && row.multiplier !== 1 ? h("span", {
 				style: S.chip,
 				title: tt("trend.multiplierLegend")
-			}, `×${row.multiplier}`) : null), h("span", { style: S.trendCredits }, count(credits))), h("div", {
+			}, `×${row.multiplier}`) : null), h("span", { style: S.trendCredits }, count(credits))), drawsBar ? h("div", {
 				style: S.trendBar,
 				role: "progressbar",
 				"aria-label": `${row.model} ${Math.round(pct)}%`,
@@ -2587,7 +2581,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			}, h("div", { style: {
 				...S.barFill,
 				width: `${pct}%`
-			} })));
+			} })) : null);
 		}), h("div", { style: S.trendLegend }, tt("trend.legend")), anyMultiplier ? h("div", { style: S.trendLegend }, tt("trend.multiplierLegend")) : null);
 	}
 	/**
@@ -3763,14 +3757,17 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				marginTop: -4,
 				marginBottom: 4
 			} }, format(tt("pool.vision"), { models: data.visionModels.map((entry) => entry.id).join(" · ") + (data.visionModels.every((entry) => entry.source === "name") ? tt("pool.visionInferred") : "") })) : null), h(SectionCard, {
-				title: format(tt("section.trend"), { hours: trend?.hours ?? 24 }),
+				title: format(tt("section.trend"), {
+					hours: trend?.hours ?? 24,
+					cache: data?.cacheSeconds ?? 60
+				}),
 				open: openSections.trend,
 				onToggle: () => toggleSection("trend"),
 				tt
 			}, h(TrendTable, {
 				trend,
 				tt
-			})), h("div", { style: S.note }, format(tt("note"), { cache: data?.cacheSeconds ?? 60 })), authManage ? h(SectionCard, {
+			})), authManage ? h(SectionCard, {
 				title: tt("auth.title"),
 				open: openSections.account,
 				onToggle: () => toggleSection("account"),
@@ -3891,7 +3888,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		if (activeTab === "raccoon") {
 			const status = raccoonStatus;
 			if (status === null) return null;
-			return h("span", { style: S.cluster }, status.updatedAt > 0 ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: clock(status.updatedAt / 1e3) })) : null, status.error !== null ? h("span", {
+			return h("span", { style: S.cluster }, status.updatedAt > 0 ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: when(status.updatedAt / 1e3) })) : null, status.error !== null ? h("span", {
 				style: S.error,
 				role: "status",
 				title: status.error
@@ -3901,7 +3898,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				onClick: () => status.onRefresh()
 			}, tt("panel.refresh")));
 		}
-		return h("span", { style: S.cluster }, hasData ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: clock(updatedAt / 1e3) })) : null, activeTab === "quota" ? authChip : null, activeTab === "quota" && failure !== null && hasData ? h("span", {
+		return h("span", { style: S.cluster }, hasData ? h("span", { style: S.updated }, format(tt("panel.updated"), { time: when(updatedAt / 1e3) })) : null, activeTab === "quota" ? authChip : null, activeTab === "quota" && failure !== null && hasData ? h("span", {
 			style: S.error,
 			role: "status",
 			title: failure.message

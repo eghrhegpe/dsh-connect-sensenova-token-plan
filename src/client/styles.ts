@@ -29,7 +29,12 @@ export const S = {
   // Two fixed perspectives — daily quota reading vs. one-off API wiring —
   // so the setup cards stop crowding the numbers the panel exists for.
   tabBar: { display: "flex", gap: 4, borderBottom: "1px solid var(--dsw-alias-border-l1)", marginBottom: 4 },
-  tab: { appearance: "none", background: "none", border: "none", borderBottom: "2px solid transparent", padding: "8px 12px", fontSize: 13, color: "var(--dsw-alias-label-secondary)", cursor: "pointer" },
+  // `outline: none` because the shell stamps its own white focus ring on
+  // every clicked button — a second "active" language that fought this one:
+  // the raccoon tab showed a clean underline while the two other tabs wore
+  // a white box. The underline + weight below IS the active state, visible
+  // without a ring; keyboard users keep the aria-selected semantics.
+  tab: { appearance: "none", background: "none", border: "none", borderBottom: "2px solid transparent", padding: "8px 12px", fontSize: 13, color: "var(--dsw-alias-label-secondary)", cursor: "pointer", outline: "none" },
   tabActive: { color: "var(--dsw-alias-label-primary)", fontWeight: 600, borderBottom: `2px solid ${BRAND}` },
   title: { margin: 0, fontSize: 20, fontWeight: 600, lineHeight: "28px" },
   updated: { color: "var(--dsw-alias-label-secondary)", fontSize: 12 },
@@ -114,8 +119,9 @@ export const S = {
   // so the big number leads and the label never competes with it.
   statValue: { fontSize: 16, fontWeight: 600, lineHeight: "20px", fontVariantNumeric: "tabular-nums" },
   quotaReset: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" },
-  // The remaining PERCENTAGE is the headline — tabular figures keep it
-  // still while polling.
+  // The usage PERCENTAGE is the headline — the same number the bar below
+  // draws, so the pair can never point in opposite directions. Tabular
+  // figures keep it still while polling.
   quotaRemaining: { fontSize: 18, lineHeight: "22px", fontWeight: 650, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" },
   // used/limit is a single quiet caption under the bar (its own full row,
   // so the figures row never wraps on a narrow twin card).
@@ -151,7 +157,6 @@ export const S = {
   trendLegend: { marginTop: 10, fontSize: 11, lineHeight: "16px", color: "var(--dsw-alias-label-secondary)" },
   muted: { color: "var(--dsw-alias-label-secondary)" },
   error: { color: "var(--dsw-alias-state-error-primary)" },
-  note: { marginTop: 24, color: "var(--dsw-alias-label-secondary)", fontSize: 12, lineHeight: "18px" },
   empty: { color: "var(--dsw-alias-label-secondary)", padding: "18px 0" },
   field: { display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 },
   fieldLabel: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" },
