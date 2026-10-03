@@ -897,6 +897,9 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     check("the refusal is logged, not silent",
       warnings.some((w) => w.includes("refusing to overwrite provider.json") && w.includes("version 999")),
       warnings.join(" | "));
+    check("a refusal with no underlying error does not log a bogus ': null'",
+      warnings.every((w) => !w.includes(": null")),
+      warnings.join(" | "));
 
     // forget() is the second writer; it must pass through the same guard.
     const warnings2 = [];
