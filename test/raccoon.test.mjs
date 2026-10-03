@@ -861,21 +861,26 @@ function section(title) {
       return raw.version === 999 && raw.futureField === "x";
     };
 
+    const refusalOf = async (fn) => {
+      try { await fn(); return null; } catch (error) { return String(error?.message ?? error); }
+    };
+    const surfaced = (raw) => raw !== null && /refusing to overwrite raccoon-provider\.json/.test(raw);
+
     seedForeign();
     const warnings = [];
     const a = createFileRaccoonStore({ dir, logger: { warn: (m) => warnings.push(m) } });
-    await a.save(true);
+    check("raccoon save() refuses out loud, not silently", surfaced(await refusalOf(() => a.save(true))));
     check("raccoon save() does not overwrite a foreign version", intact(), readFileSync(file, "utf8"));
     check("the raccoon refusal is logged, not silent",
       warnings.some((w) => w.includes("refusing to overwrite raccoon-provider.json") && w.includes("version 999")),
       warnings.join(" | "));
 
     seedForeign();
-    await createFileRaccoonStore({ dir }).saveIds(["sn-raccoon-1"]);
+    check("raccoon saveIds() surfaces the refusal too", surfaced(await refusalOf(() => createFileRaccoonStore({ dir }).saveIds(["sn-raccoon-1"]))));
     check("raccoon saveIds() does not overwrite a foreign version", intact());
 
     seedForeign();
-    await createFileRaccoonStore({ dir }).forget();
+    check("raccoon forget() surfaces the refusal too", surfaced(await refusalOf(() => createFileRaccoonStore({ dir }).forget())));
     check("raccoon forget() does not overwrite a foreign version", intact());
 
     // The guard must not trip on the file's own version.

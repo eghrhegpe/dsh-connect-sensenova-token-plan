@@ -883,11 +883,22 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     const foreignPayload = { version: 999, enabled: false, futureField: "x" };
 
     // save() on a foreign-version file must be refused: the file is intact, the
-    // switch stays unset, and the refusal is visible in the log.
+    // switch stays unset, the refusal is logged, AND it surfaces to the caller
+    // — this is an explicit user action, so the route answers `ok:false` and
+    // the panel shows why (the audit's support trap: silence once left a
+    // switch that appeared to work).
     writeFileSync(file, JSON.stringify(foreignPayload, null, 2), "utf8");
     const warnings = [];
     const guarded = createFileProviderStore({ dir, logger: { warn: (m) => warnings.push(m) } });
-    await guarded.save(true);
+    let saveRefused = null;
+    try {
+      await guarded.save(true);
+    } catch (error) {
+      saveRefused = String(error?.message ?? error);
+    }
+    check("save() refuses a foreign version out loud, not silently",
+      saveRefused !== null && saveRefused.includes("refusing to overwrite provider.json") && saveRefused.includes("version 999"),
+      String(saveRefused));
 
     const afterSave = JSON.parse(readFileSync(file, "utf8"));
     check("save() does not overwrite a foreign version", afterSave.version === 999 && afterSave.futureField === "x",
@@ -904,10 +915,18 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     // forget() is the second writer; it must pass through the same guard.
     const warnings2 = [];
     const guarded2 = createFileProviderStore({ dir, logger: { warn: (m) => warnings2.push(m) } });
-    await guarded2.forget();
+    let forgetRefused = null;
+    try {
+      await guarded2.forget();
+    } catch (error) {
+      forgetRefused = String(error?.message ?? error);
+    }
     const afterForget = JSON.parse(readFileSync(file, "utf8"));
     check("forget() does not overwrite a foreign version",
       afterForget.version === 999 && afterForget.futureField === "x", JSON.stringify(afterForget));
+    check("forget() surfaces the refusal too",
+      forgetRefused !== null && forgetRefused.includes("refusing to overwrite provider.json"),
+      String(forgetRefused));
 
     // The guard must not trip on the file's own (known) version: a normal write
     // still lands, so the switch keeps working for every build that owns the
@@ -1013,26 +1032,32 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       const raw = JSON.parse(readFileSync(file, "utf8"));
       return raw.version === 999 && raw.futureField === "x";
     };
+    // A refused write must SURFACE (the audit's support trap), so every writer
+    // below both refuses AND throws — and the file stays intact.
+    const refusalOf = async (fn) => {
+      try { await fn(); return null; } catch (error) { return String(error?.message ?? error); }
+    };
+    const surfaced = (raw) => raw !== null && /refusing to overwrite draw\.json/.test(raw);
 
     seedForeign();
     let warnings = [];
     const a = createFileDrawStore({ dir, logger: { warn: (m) => warnings.push(m) } });
-    await a.save(true);
+    check("draw save() refuses out loud, not silently", surfaced(await refusalOf(() => a.save(true))));
     check("draw save() does not overwrite a foreign version", intact(), readFileSync(file, "utf8"));
     check("draw refusal is logged, not silent",
       warnings.some((w) => w.includes("refusing to overwrite draw.json") && w.includes("version 999")),
       warnings.join(" | "));
 
     seedForeign();
-    await createFileDrawStore({ dir }).forget();
+    check("draw forget() surfaces the refusal too", surfaced(await refusalOf(() => createFileDrawStore({ dir }).forget())));
     check("draw forget() does not overwrite a foreign version", intact());
 
     seedForeign();
-    await createFileDrawStore({ dir }).saveModel("sn-sensenova-6-8-flash");
+    check("draw saveModel() surfaces the refusal too", surfaced(await refusalOf(() => createFileDrawStore({ dir }).saveModel("sn-sensenova-6-8-flash"))));
     check("draw saveModel() does not overwrite a foreign version", intact());
 
     seedForeign();
-    await createFileDrawStore({ dir }).forgetModel();
+    check("draw forgetModel() surfaces the refusal too", surfaced(await refusalOf(() => createFileDrawStore({ dir }).forgetModel())));
     check("draw forgetModel() does not overwrite a foreign version", intact());
 
     // The guard must not trip on the file's own version.

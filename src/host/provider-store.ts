@@ -91,21 +91,21 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * write is refused with a `degrade` signal, not a silent no-op — the PITFALLS
    * §37 discipline: swallow the failure, not the reason.
    * @param {object} body - the JSON body to persist.
-   * @returns {Promise<boolean>} true when written, false when refused.
+   * @returns {Promise<string|null>} the refusal reason when the write was
+   *   refused (already `degrade`-logged), or `null` when it landed — the caller
+   *   decides whether to surface the refusal to a user.
    */
-  const writePayload = async (body: object): Promise<boolean> => {
+  const writePayload = async (body: object): Promise<string | null> => {
     const existing = await readStateVersion(filePath);
     if (!isKnownStateVersion(existing, KNOWN_PROVIDER_VERSIONS)) {
-      degrade(
-        `provider: refusing to overwrite provider.json holding version ${existing} (this build knows ${KNOWN_PROVIDER_VERSIONS.join("/")})`,
-        null, logger, null
-      );
-      return false;
+      const reason = `provider: refusing to overwrite provider.json holding version ${existing} (this build knows ${KNOWN_PROVIDER_VERSIONS.join("/")})`;
+      degrade(reason, null, logger, null);
+      return reason;
     }
     const temporary = temporaryOf(stateDir, "provider.json");
     await ensureStateDir(stateDir);
     await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
-    return true;
+    return null;
   };
 
   // Pre-§23 machines kept this switch in the SHARED directory. A profile-scoped
@@ -164,12 +164,13 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       if (enabled === null) throw new TypeError("provider switch expects a boolean");
       // Write failures PROPAGATE on purpose: a switch the panel ordered must
       // not silently stay off because the state file could not be written.
-      // A refused write (ADR-006) does NOT propagate — the file is intact, so
-      // the switch simply stays where it was; only the cache must not be told
-      // a value that never reached disk.
-      if (await writePayload({ version: PROVIDER_VERSION, enabled, updatedAt: new Date().toISOString() })) {
-        cache.remember(enabled);
-      }
+      // An ADR-006 refusal SURFACES, not just logs: this is an explicit user
+      // action, and the route re-reads the value on the same request — silence
+      // here left the panel showing an unchanged switch with no reason to act
+      // on (the audit's support trap).
+      const refusal = await writePayload({ version: PROVIDER_VERSION, enabled, updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember(enabled);
     },
     /**
      * Forget the panel-saved value: the config default rules again.
@@ -178,10 +179,11 @@ export function createFileProviderStore(options: StoreOptions = {}) {
     async forget() {
       // No `enabled` key: "not set" is the absence of an answer, not `false`.
       // Remember only once the write landed — a refused write (ADR-006) leaves
-      // the file, and therefore this switch, exactly as it was.
-      if (await writePayload({ version: PROVIDER_VERSION, updatedAt: new Date().toISOString() })) {
-        cache.remember(null);
-      }
+      // the file, and therefore this switch, exactly as it was. Same surfacing
+      // rule as `save`: silence here is a button that appears to work.
+      const refusal = await writePayload({ version: PROVIDER_VERSION, updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember(null);
     }
   };
 }

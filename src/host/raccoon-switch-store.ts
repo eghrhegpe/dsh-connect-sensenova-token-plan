@@ -85,21 +85,21 @@ export function createFileRaccoonStore(options: StoreOptions = {}) {
    * `degrade` signal, not a silent no-op — PITFALLS §37: swallow the failure,
    * not the reason.
    * @param {object} body - the JSON body to persist.
-   * @returns {Promise<boolean>} true when written, false when refused.
+   * @returns {Promise<string|null>} the refusal reason when the write was
+   *   refused (already `degrade`-logged), or `null` when it landed — the caller
+   *   decides whether to surface the refusal to a user.
    */
-  const writePayload = async (body: object): Promise<boolean> => {
+  const writePayload = async (body: object): Promise<string | null> => {
     const existing = await readStateVersion(filePath);
     if (!isKnownStateVersion(existing, KNOWN_RACCOON_SWITCH_VERSIONS)) {
-      degrade(
-        `raccoon-switch: refusing to overwrite raccoon-provider.json holding version ${existing} (this build knows ${KNOWN_RACCOON_SWITCH_VERSIONS.join("/")})`,
-        null, logger, null
-      );
-      return false;
+      const reason = `raccoon-switch: refusing to overwrite raccoon-provider.json holding version ${existing} (this build knows ${KNOWN_RACCOON_SWITCH_VERSIONS.join("/")})`;
+      degrade(reason, null, logger, null);
+      return reason;
     }
     const temporary = temporaryOf(stateDir, "raccoon-provider.json");
     await ensureStateDir(stateDir);
     await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
-    return true;
+    return null;
   };
 
   const legacyFile = dir === undefined && profile ? join(sharedStateDir(name), "raccoon-provider.json") : null;
@@ -144,9 +144,9 @@ export function createFileRaccoonStore(options: StoreOptions = {}) {
       const enabled = normalizeRaccoonEnabled(value);
       if (enabled === null) throw new TypeError("the raccoon switch expects a boolean");
       const current = (await read())?.enabledModelIds ?? null;
-      if (await writePayload({ version: RACCOON_SWITCH_VERSION, enabled, ...(current !== null ? { enabledModelIds: current } : {}), updatedAt: new Date().toISOString() })) {
-        cache.remember({ enabled, enabledModelIds: current });
-      }
+      const refusal = await writePayload({ version: RACCOON_SWITCH_VERSION, enabled, ...(current !== null ? { enabledModelIds: current } : {}), updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember({ enabled, enabledModelIds: current });
     },
     /** Persist the pushed-model list (atomic), preserving the saved switch. */
     async saveIds(value: string[]) {
@@ -156,15 +156,15 @@ export function createFileRaccoonStore(options: StoreOptions = {}) {
       // An EMPTY list is a real curation ("push nothing"), not "not set" —
       // it must persist, or the next read would widen back to the whole
       // roster. Only `null` means uncurated, and `saveIds` never takes it.
-      if (await writePayload({ version: RACCOON_SWITCH_VERSION, ...(enabled !== null ? { enabled } : {}), enabledModelIds: ids, updatedAt: new Date().toISOString() })) {
-        cache.remember({ enabled, enabledModelIds: ids });
-      }
+      const refusal = await writePayload({ version: RACCOON_SWITCH_VERSION, ...(enabled !== null ? { enabled } : {}), enabledModelIds: ids, updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember({ enabled, enabledModelIds: ids });
     },
     /** Forget the panel-saved value. */
     async forget() {
-      if (await writePayload({ version: RACCOON_SWITCH_VERSION, updatedAt: new Date().toISOString() })) {
-        cache.remember(null);
-      }
+      const refusal = await writePayload({ version: RACCOON_SWITCH_VERSION, updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember(null);
     }
   };
 }

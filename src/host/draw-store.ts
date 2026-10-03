@@ -96,21 +96,21 @@ export function createFileDrawStore(options: StoreOptions = {}) {
    * `degrade` signal, not a silent no-op — PITFALLS §37: swallow the failure,
    * not the reason.
    * @param {object} body - the JSON body to persist.
-   * @returns {Promise<boolean>} true when written, false when refused.
+   * @returns {Promise<string|null>} the refusal reason when the write was
+   *   refused (already `degrade`-logged), or `null` when it landed — the caller
+   *   decides whether to surface the refusal to a user.
    */
-  const writePayload = async (body: object): Promise<boolean> => {
+  const writePayload = async (body: object): Promise<string | null> => {
     const existing = await readStateVersion(filePath);
     if (!isKnownStateVersion(existing, KNOWN_DRAW_VERSIONS)) {
-      degrade(
-        `draw: refusing to overwrite draw.json holding version ${existing} (this build knows ${KNOWN_DRAW_VERSIONS.join("/")})`,
-        null, logger, null
-      );
-      return false;
+      const reason = `draw: refusing to overwrite draw.json holding version ${existing} (this build knows ${KNOWN_DRAW_VERSIONS.join("/")})`;
+      degrade(reason, null, logger, null);
+      return reason;
     }
     const temporary = temporaryOf(stateDir, "draw.json");
     await ensureStateDir(stateDir);
     await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
-    return true;
+    return null;
   };
 
   // Pre-§23 machines kept this switch in the SHARED directory; a profile-scoped
@@ -179,13 +179,14 @@ export function createFileDrawStore(options: StoreOptions = {}) {
     async save(value: boolean) {
       const enabled = normalizeDrawEnabled(value);
       if (enabled === null) throw new TypeError("draw switch expects a boolean");
-      // Write failures PROPAGATE on purpose; a refused write (ADR-006) does NOT —
-      // the file is intact, only the cache must not be told a value that never
-      // reached disk.
+      // Write failures PROPAGATE on purpose; an ADR-006 refusal SURFACES (not
+      // just logs) — this is an explicit user action, and the route re-reads the
+      // value on the same request: silence left the panel showing an unchanged
+      // switch with no reason to act on.
       const modelId = (await saved()).modelId;
-      if (await writePayload({ version: DRAW_STORE_VERSION, enabled, drawModelId: modelId ?? undefined, updatedAt: new Date().toISOString() })) {
-        cache.remember({ enabled, modelId });
-      }
+      const refusal = await writePayload({ version: DRAW_STORE_VERSION, enabled, drawModelId: modelId ?? undefined, updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember({ enabled, modelId });
     },
     /**
      * Forget the panel-saved value: the config default rules again.
@@ -194,9 +195,9 @@ export function createFileDrawStore(options: StoreOptions = {}) {
     async forget() {
       // No `enabled` key: "not set" is the absence of an answer, not `false`.
       const modelId = (await saved()).modelId;
-      if (await writePayload({ version: DRAW_STORE_VERSION, drawModelId: modelId ?? undefined, updatedAt: new Date().toISOString() })) {
-        cache.remember({ enabled: null, modelId });
-      }
+      const refusal = await writePayload({ version: DRAW_STORE_VERSION, drawModelId: modelId ?? undefined, updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember({ enabled: null, modelId });
     },
     /**
      * Persist a draw-model preference (the panel's picker). `null` clears it.
@@ -207,9 +208,9 @@ export function createFileDrawStore(options: StoreOptions = {}) {
       const modelId = normalizeDrawModelId(value);
       if (modelId === null && value != null) throw new TypeError("draw model expects a non-empty string or null");
       const enabled = (await saved()).enabled;
-      if (await writePayload({ version: DRAW_STORE_VERSION, ...(enabled !== null ? { enabled } : {}), ...(modelId !== null ? { drawModelId: modelId } : {}), updatedAt: new Date().toISOString() })) {
-        cache.remember({ enabled, modelId });
-      }
+      const refusal = await writePayload({ version: DRAW_STORE_VERSION, ...(enabled !== null ? { enabled } : {}), ...(modelId !== null ? { drawModelId: modelId } : {}), updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember({ enabled, modelId });
     },
     /**
      * Forget the draw-model preference: the config default (usually auto) rules again.
@@ -217,9 +218,9 @@ export function createFileDrawStore(options: StoreOptions = {}) {
      */
     async forgetModel() {
       const enabled = (await saved()).enabled;
-      if (await writePayload({ version: DRAW_STORE_VERSION, ...(enabled !== null ? { enabled } : {}), updatedAt: new Date().toISOString() })) {
-        cache.remember({ enabled, modelId: null });
-      }
+      const refusal = await writePayload({ version: DRAW_STORE_VERSION, ...(enabled !== null ? { enabled } : {}), updatedAt: new Date().toISOString() });
+      if (refusal !== null) throw new Error(refusal);
+      cache.remember({ enabled, modelId: null });
     }
   };
 }

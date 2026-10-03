@@ -14,6 +14,8 @@
 import { loadPeer, installNetworkGuard, isolateHostEnv, isolateStateDir } from "./peer-roots.mjs";
 import { createFileThrottleStore } from "../src/host/throttle-store.ts";
 import { RACCOON_CREDENTIAL_REF, serializeRaccoonCredential } from "../src/host/raccoon-store.ts";
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -1084,6 +1086,26 @@ async function withNetwork(stub, body) {
     const other = await call2(PROVIDER_PATH, makePost({ forget: true }));
     check("P7 an unrelated body is refused",
       other.statusCode === 400 && other.payload.ok === false, JSON.stringify(other.payload));
+
+    // P8 the ADR-006 support trap: if the state file holds a version this build
+    // does not read, a POST must NOT answer ok:true with a silently-unchanged
+    // switch — the panel has to be able to say "that did not land" instead of
+    // leaving a toggle that appears to work.
+    const pluginDir = join(process.env.DSH_HOME, "state", "dsh-connect-sensenova-token-plan");
+    mkdirSync(pluginDir, { recursive: true });
+    const providerFile = join(pluginDir, "provider.json");
+    writeFileSync(providerFile, JSON.stringify({ version: 999, enabled: true, futureField: "x" }, null, 2), "utf8");
+    const refusedPost = await call2(PROVIDER_PATH, makePost({ enabled: true }));
+    const afterRefusal = JSON.parse(readFileSync(providerFile, "utf8"));
+    check("P8 a foreign-version file makes POST answer ok:false with the reason",
+      refusedPost.payload.ok === false && typeof refusedPost.payload.error === "string" &&
+      refusedPost.payload.error.includes("refusing to overwrite provider.json"),
+      JSON.stringify(refusedPost.payload));
+    check("P8 the foreign file is left intact",
+      afterRefusal.version === 999 && afterRefusal.futureField === "x", JSON.stringify(afterRefusal));
+    // Restore a clean slate: the foreign file must not leak into the groups
+    // after this one, whose own POSTs expect to write normally.
+    rmSync(providerFile, { force: true });
   } catch (error) { fail("P: the provider switch route", error); }
 }
 
