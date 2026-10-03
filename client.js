@@ -3122,7 +3122,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			alignItems: "center",
 			gap: 8,
 			flexWrap: "wrap",
-			marginBottom: 4
+			marginBottom: 8
 		} }, h("span", { style: {
 			...S.muted,
 			fontSize: 12,
@@ -3130,11 +3130,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		} }, format(tt("raccoon.models"), { count: count(rows.length) })), h("span", { style: S.spacer }), h("span", { style: {
 			...S.modelBadge,
 			...registered === true ? { color: "var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary))" } : {}
-		} }, registered === true ? tt("raccoon.registeredChip") : tt("raccoon.unregisteredChip"))), h("div", { style: {
-			...S.muted,
-			fontSize: 11,
-			marginBottom: 6
-		} }, tt("raccoon.pushHint")), h("ul", {
+		} }, registered === true ? tt("raccoon.registeredChip") : tt("raccoon.unregisteredChip"))), h("ul", {
 			style: S.modelList,
 			role: "list"
 		}, rows.map((row) => {
@@ -3158,7 +3154,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				meta,
 				onToggle
 			});
-		})), fallbackNote !== null ? h("div", { style: S.trendLegend }, fallbackNote) : null);
+		})), h("div", { style: {
+			...S.trendLegend,
+			marginTop: 8
+		} }, tt("raccoon.pushHint")), fallbackNote !== null ? h("div", { style: S.trendLegend }, fallbackNote) : null);
 	}
 	var init_raccoon_roster = __esmMin((() => {
 		init_format();

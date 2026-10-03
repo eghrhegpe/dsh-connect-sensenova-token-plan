@@ -79,14 +79,17 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
   return h(
     "div",
     { style: { ...S.modelPanel, marginTop: 10 } },
-    // The header row is a title and its state chip, nothing else. The
-    // provenance note ("以下为内置备用模型") used to ride inline here and
-    // shoved the count and the chip apart — but WHERE the rows came from is a
-    // principle the reader absorbs on the side, not an action, so it now sits
-    // as a footnote under the list (same stop as the trend chart's legend).
+    // The header row is a title and its state chip, nothing else. Two
+    // explanations used to sit between the header and the rows — the provenance
+    // note ("以下为内置备用模型") and the push rule ("勾选决定哪些模型推送…") —
+    // so the list opened with two same-weight captions and no rows. WHERE the
+    // rows came from and WHAT ticking a box does are principles the reader
+    // absorbs on the side, not actions, so both now sit as footnotes under the
+    // list (same stop as the trend chart's legend), leaving the count and the
+    // chip to stand on their own.
     h(
       "div",
-      { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 } },
+      { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 } },
       h("span", { style: { ...S.muted, fontSize: 12, fontWeight: 600 } }, format(tt("raccoon.models"), { count: count(rows.length) })),
       h("span", { style: S.spacer }),
       // The registration chip: the switch says "wants", this says "is", in the
@@ -98,7 +101,6 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
         }
       }, registered === true ? tt("raccoon.registeredChip") : tt("raccoon.unregisteredChip"))
     ),
-    h("div", { style: { ...S.muted, fontSize: 11, marginBottom: 6 } }, tt("raccoon.pushHint")),
     h(
       "ul",
       { style: S.modelList, role: "list" },
@@ -134,6 +136,9 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
         });
       })
     ),
+    // The push rule, under the rows it governs: what ticking a box does is
+    // read after the list, not before it.
+    h("div", { style: { ...S.trendLegend, marginTop: 8 } }, tt("raccoon.pushHint")),
     // The provenance footnote, under the list it explains: when the gateway
     // served nothing and these are the built-in fallbacks, say so here — the
     // quietest layer, read after the rows rather than competing with the
