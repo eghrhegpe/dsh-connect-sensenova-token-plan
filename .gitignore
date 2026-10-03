@@ -21,6 +21,10 @@ node_modules/
 package-lock.json
 dist/
 build/
+# 注意是 `.build/` 而不是 `build/`：上面那条模式匹配不到带点的目录名，所以
+# `.build/` 下的会话临时文件（比对脚本、发版正文草稿）曾被原样提交进仓库。
+# 那两个 scratch 文件已在 0.4.10 前清理，这条规则防止复发。
+.build/
 *.tsbuildinfo
 
 # lib/ 与根 client.js 是**受版本管理的产物**（与兄弟插件 dsh-connect-qoder
