@@ -1119,6 +1119,11 @@
           },
           {
             "via": "credentials",
+            "op": "readRecord",
+            "key": "$SCOPE/$GRANT"
+          },
+          {
+            "via": "credentials",
             "op": "deleteRecord",
             "key": "$SCOPE/$GRANT"
           }

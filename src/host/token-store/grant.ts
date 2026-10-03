@@ -180,6 +180,24 @@ export async function purgeGrant(wiring: StoreContextWiring, state: TokenStoreSt
   const { backend, key } = wiring;
   state.cached = null;
   if (accessToken !== undefined) state.rejected.delete(accessToken);
+  // Compare-and-reap: the grant this build is about to delete must still be the
+  // dead token it failed on. A second Host process sharing this credentials
+  // document (PITFALLS §22: desktop dir copy + web symlink) may have already
+  // rotated the refresh token and written a *healthy* grant with a different
+  // access token. Deleting that unconditionally — the old behaviour — would
+  // silently log the other process out and defeat silent renewal. So when a
+  // specific dead token is named, only reap the on-disk grant if it is still
+  // that token; otherwise adopt the newer pair into our in-memory cache (the
+  // next poll reads it fresh) and leave the document alone. The `accessToken`
+  // is `undefined` only on the explicit "forget account" path, where the only
+  // correct action is to delete whatever is stored.
+  if (accessToken !== undefined) {
+    const onDisk = parseGrant(await backend().readRecord(key).catch(() => undefined));
+    if (onDisk !== undefined && onDisk.accessToken !== accessToken) {
+      state.cached = onDisk;
+      return;
+    }
+  }
   await backend().deleteRecord(key).catch(() => {});
 }
 

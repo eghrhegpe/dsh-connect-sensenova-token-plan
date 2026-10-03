@@ -19,7 +19,7 @@
 import { readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { str, num, degrade } from "./util.ts";
+import { str, num } from "./util.ts";
 import { name } from "./host-config.ts";
 import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, stateDir as pluginStateDir } from "./state-store.ts";
 import type { HeldThrottle } from "./token-store/state.ts";
@@ -160,6 +160,17 @@ export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } 
     },
     async write(state: HeldThrottle) {
       await adoptLegacyFile();
+      // ADR-006 write-side guard (mirrors catalog/provider/draw/raccoon-switch):
+      // never overwrite a throttle file this build cannot read. An unknown
+      // NUMERIC version means a NEWER build wrote it; clobbering it would
+      // destroy the one thing the red line says must survive — a parked
+      // wrong-password refusal — and let the next poll retry it into a lock.
+      // This store is intentionally logger-less (called with no args,
+      // see state-segmentation.test.mjs), so the refusal is silent: the
+      // in-memory record keeps serving this process, which is exactly the
+      // "degrade, not error" behaviour the other stores log.
+      const existing = await readStateVersion(file);
+      if (!isKnownStateVersion(existing, KNOWN_THROTTLE_VERSIONS)) return;
       const temporary = temporaryOf(dir, "throttle.json");
       try {
         await ensureStateDir(dir);
