@@ -98,6 +98,21 @@ export const S = {
   // not something this client is told, so any "low" cut would be a number
   // invented below the wire.
   statError: { color: "var(--dsw-alias-state-error-primary)" },
+  // The gateway's split of the raccoon balance, as a deck of min-width cards:
+  // the same responsive rule `poolsGrid` and `quotas` own (auto-fit, each
+  // column at least N px, row reflows instead of overflowing). 110px is the
+  // floor that fits the longest label ("奖励") beside its figure without
+  // dropping it to a second line, and it stacks to 2×2 or a single column on a
+  // narrow panel. One run-on `每日 600 · 奖励 8344 · 月度 0 · 充值 0` line read as
+  // a comma list of four different facts with no place to separate them.
+  statGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 110px), 1fr))", gap: 10, marginTop: 12 },
+  // A grid card rides on the card's own step — the raccoon balance card gives
+  // the deck the same layer-2 the quota twin gets, so a part reads by
+  // background alone rather than as a fourth nested border.
+  statCard: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0, padding: "10px 12px", borderRadius: 10, background: "var(--dsw-alias-bg-layer-2)" },
+  // The part's figure is the point of the card; the name under it is the label,
+  // so the big number leads and the label never competes with it.
+  statValue: { fontSize: 16, fontWeight: 600, lineHeight: "20px", fontVariantNumeric: "tabular-nums" },
   quotaReset: { fontSize: 11, color: "var(--dsw-alias-label-secondary)" },
   // The remaining PERCENTAGE is the headline — tabular figures keep it
   // still while polling.

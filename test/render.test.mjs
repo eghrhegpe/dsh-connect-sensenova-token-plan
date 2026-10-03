@@ -1032,8 +1032,8 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       meta.length === 1, JSON.stringify(statusLines));
     const line = meta[0] ?? "";
     check("that line keeps the split the gateway declared, zero part included",
-      line.includes("raccoon.partDaily") && line.includes("raccoon.partReward")
-        && line.includes("raccoon.partMonthly") && !line.includes("raccoon.partTopup"),
+      line.includes("raccoon.partNameDaily") && line.includes("raccoon.partNameReward")
+        && line.includes("raccoon.partNameMonthly") && !line.includes("raccoon.partNameTopup"),
       line);
     check("that line keeps both credential clocks",
       line.includes("raccoon.expiresAt") && line.includes("raccoon.refreshUntil"), line);

@@ -126,25 +126,43 @@ export function RaccoonCard({
   // The refresh token's window: the deadline after which ONLY a re-scan gets
   // back in. `when()` carries the day across midnight.
   const refreshAt = typeof state?.refreshExpiresAtMs === "number" ? state.refreshExpiresAtMs : null;
-  // The gateway's split of the total, as parts it actually declared. A zero
-  // part is still a figure worth showing (it is a fact, not a gap).
+  // The gateway's split of the total, as the parts it actually declared. A
+  // zero part is still a figure worth showing (it is a fact, not a gap), and
+  // each part gets its own card so a reader can tell which number is which
+  // without parsing a bullet list. The label and the figure are kept separate
+  // — `count(value)` supplies the number, the `{name}` key the word beside it —
+  // because a quota window card pairs its label with a big figure the same way.
   const breakdown = state?.balanceBreakdown;
-  const breakdownParts = [
-    breakdown?.daily !== undefined ? format(tt("raccoon.partDaily"), { n: count(breakdown.daily) }) : null,
-    breakdown?.reward !== undefined ? format(tt("raccoon.partReward"), { n: count(breakdown.reward) }) : null,
-    breakdown?.monthly !== undefined ? format(tt("raccoon.partMonthly"), { n: count(breakdown.monthly) }) : null,
-    breakdown?.topup !== undefined ? format(tt("raccoon.partTopup"), { n: count(breakdown.topup) }) : null
-  ].filter(Boolean).join(" · ");
+  const breakdownParts: { key: string; label: string; value: string }[] = [];
+  // `tt` takes a literal key here, not a bare identifier: a variable in key
+  // position reads as a table-driven site to the F6 scan and would need
+  // registering in its closed list. The four parts are fixed, so four direct
+  // calls are the honest shape.
+  if (breakdown?.daily !== undefined) {
+    breakdownParts.push({ key: "daily", label: tt("raccoon.partNameDaily"), value: count(breakdown.daily) });
+  }
+  if (breakdown?.reward !== undefined) {
+    breakdownParts.push({ key: "reward", label: tt("raccoon.partNameReward"), value: count(breakdown.reward) });
+  }
+  if (breakdown?.monthly !== undefined) {
+    breakdownParts.push({ key: "monthly", label: tt("raccoon.partNameMonthly"), value: count(breakdown.monthly) });
+  }
+  if (breakdown?.topup !== undefined) {
+    breakdownParts.push({ key: "topup", label: tt("raccoon.partNameTopup"), value: count(breakdown.topup) });
+  }
 
   // The signed-in frame's bookkeeping is ONE status element (the render suite
   // pins `meta.length === 1` on it), but one element is not one flat line: the
-  // balance is the headline the user came to read and the declared split plus
-  // the two credential clocks are its supporting detail. They used to be four
-  // same-weight spans concatenated into a 12px run-on sentence, which is how a
-  // tab reads as unfinished beside its siblings — the quota tab leads the same
-  // KIND of fact with a 18px/650 tabular figure (S.quotaRemaining). So the
-  // balance now takes that weight and the rest drops to a caption under it, all
-  // still inside the single `role="status"` node the fold requires.
+  // balance is the headline the user came to read, the declared split is a deck
+  // of cards beside it, and the two credential clocks are a quiet footnote under
+  // the lot. They used to be six same-weight spans concatenated into a 12px
+  // run-on sentence ("每日 600 · 奖励 8344 · 月度 0 · 充值 0 · 凭据有效至 21:19 ·
+  // 续期至 11-02 18:19") — six facts with no room to breathe, and the balance
+  // lost to the noise. The split now takes the 通用积分池 card-deck treatment
+  // (`S.quotas` / `S.poolsGrid` are the same rule, `auto-fit, minmax(min(100%,
+  // Npx), 1fr)`), each part its own card at a min width so the row reflows
+  // instead of overflowing, and all of it still inside the single
+  // `role="status"` node the fold requires.
   const balanceText = typeof state?.balance === "number"
     ? format(tt("raccoon.balance"), { balance: count(state.balance) })
     : state?.balanceDetail !== undefined && state?.balanceDetail !== ""
@@ -158,17 +176,16 @@ export function RaccoonCard({
   const balanceTone = typeof state?.balance === "number" && state.balance <= 0
     ? S.statError
     : null;
-  const captionParts: unknown[] = [];
+  // The clocks stay a footnote — they are time-stamps, not figures, and the
+  // split cards above already carry the weight the balance deserves.
+  const clockParts: unknown[] = [];
   if (loggedIn) {
-    if (breakdownParts !== "") {
-      captionParts.push(h("span", { key: "breakdown" }, breakdownParts));
-    }
     if (expiresAt !== null) {
-      captionParts.push(h("span", { key: "exp" }, `${breakdownParts !== "" ? " · " : ""}${format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })}`));
+      clockParts.push(h("span", { key: "exp" }, format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })));
     }
     if (refreshAt !== null) {
       const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
-      captionParts.push(h("span", {
+      clockParts.push(h("span", {
         key: "refresh",
         title: format(tt("raccoon.refreshTip"), { days })
       }, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
@@ -269,16 +286,26 @@ export function RaccoonCard({
       ? h("div", { style: S.formError, role: "alert" }, state.providerError)
       : null,
     // The balance is the headline the user came to read (one `role="status"`
-    // node, as the render suite pins), with the declared split and the two
-    // credential clocks folded into a caption under it — the quota tab's
-    // headline-over-caption shape, applied to the second upstream.
+    // node, as the render suite pins), with the declared split as a deck of
+    // cards beside it and the two credential clocks as a quiet footnote under
+    // the lot — the 通用积分池 card-deck treatment, all still inside the single
+    // `role="status"` node the fold requires.
     loggedIn
       ? h(
           "div",
           { style: { marginTop: 12 }, role: "status" },
           h("div", { style: { ...S.statHeadline, ...(balanceTone ?? {}) } }, balanceText),
-          captionParts.length > 0
-            ? h("div", { style: { ...S.statCaption, marginTop: 2 } }, ...captionParts)
+          breakdownParts.length > 0
+            ? h("div", { style: S.statGrid },
+                breakdownParts.map((part) => h(
+                  "div",
+                  { key: part.key, style: S.statCard },
+                  h("span", { style: S.statCaption }, part.label),
+                  h("span", { style: { ...S.statValue, ...(balanceTone ?? {}) } }, part.value)
+                )))
+            : null,
+          clockParts.length > 0
+            ? h("div", { style: { ...S.statCaption, marginTop: 10 } }, ...clockParts)
             : null
         )
       : null,

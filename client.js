@@ -201,10 +201,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.balance": "积分余额 {balance}",
 			"raccoon.balanceUnknown": "积分余额 未知",
 			"raccoon.balanceUnknownDetail": "积分余额 未知——{detail}",
-			"raccoon.partDaily": "每日 {n}",
-			"raccoon.partReward": "奖励 {n}",
-			"raccoon.partMonthly": "月度 {n}",
-			"raccoon.partTopup": "充值 {n}",
+			"raccoon.partNameDaily": "每日",
+			"raccoon.partNameReward": "奖励",
+			"raccoon.partNameMonthly": "月度",
+			"raccoon.partNameTopup": "充值",
 			"raccoon.expiresAt": "凭据有效至 {date}",
 			"raccoon.refreshUntil": "续期至 {date}",
 			"raccoon.refreshTip": "{days} 天内免重扫",
@@ -394,10 +394,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.balance": "Balance {balance}",
 			"raccoon.balanceUnknown": "Balance unknown",
 			"raccoon.balanceUnknownDetail": "Balance unknown — {detail}",
-			"raccoon.partDaily": "daily {n}",
-			"raccoon.partReward": "reward {n}",
-			"raccoon.partMonthly": "monthly {n}",
-			"raccoon.partTopup": "top-up {n}",
+			"raccoon.partNameDaily": "Daily",
+			"raccoon.partNameReward": "Reward",
+			"raccoon.partNameMonthly": "Monthly",
+			"raccoon.partNameTopup": "Top-up",
 			"raccoon.expiresAt": "Credential valid until {date}",
 			"raccoon.refreshUntil": "Refresh until {date}",
 			"raccoon.refreshTip": "No re-scan for {days} days",
@@ -907,6 +907,27 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				fontVariantNumeric: "tabular-nums"
 			},
 			statError: { color: "var(--dsw-alias-state-error-primary)" },
+			statGrid: {
+				display: "grid",
+				gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 110px), 1fr))",
+				gap: 10,
+				marginTop: 12
+			},
+			statCard: {
+				display: "flex",
+				flexDirection: "column",
+				gap: 4,
+				minWidth: 0,
+				padding: "10px 12px",
+				borderRadius: 10,
+				background: "var(--dsw-alias-bg-layer-2)"
+			},
+			statValue: {
+				fontSize: 16,
+				fontWeight: 600,
+				lineHeight: "20px",
+				fontVariantNumeric: "tabular-nums"
+			},
 			quotaReset: {
 				fontSize: 11,
 				color: "var(--dsw-alias-label-secondary)"
@@ -3206,21 +3227,35 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const expiresAt = typeof state?.expiresAtMs === "number" ? state.expiresAtMs : null;
 		const refreshAt = typeof state?.refreshExpiresAtMs === "number" ? state.refreshExpiresAtMs : null;
 		const breakdown = state?.balanceBreakdown;
-		const breakdownParts = [
-			breakdown?.daily !== void 0 ? format(tt("raccoon.partDaily"), { n: count(breakdown.daily) }) : null,
-			breakdown?.reward !== void 0 ? format(tt("raccoon.partReward"), { n: count(breakdown.reward) }) : null,
-			breakdown?.monthly !== void 0 ? format(tt("raccoon.partMonthly"), { n: count(breakdown.monthly) }) : null,
-			breakdown?.topup !== void 0 ? format(tt("raccoon.partTopup"), { n: count(breakdown.topup) }) : null
-		].filter(Boolean).join(" · ");
+		const breakdownParts = [];
+		if (breakdown?.daily !== void 0) breakdownParts.push({
+			key: "daily",
+			label: tt("raccoon.partNameDaily"),
+			value: count(breakdown.daily)
+		});
+		if (breakdown?.reward !== void 0) breakdownParts.push({
+			key: "reward",
+			label: tt("raccoon.partNameReward"),
+			value: count(breakdown.reward)
+		});
+		if (breakdown?.monthly !== void 0) breakdownParts.push({
+			key: "monthly",
+			label: tt("raccoon.partNameMonthly"),
+			value: count(breakdown.monthly)
+		});
+		if (breakdown?.topup !== void 0) breakdownParts.push({
+			key: "topup",
+			label: tt("raccoon.partNameTopup"),
+			value: count(breakdown.topup)
+		});
 		const balanceText = typeof state?.balance === "number" ? format(tt("raccoon.balance"), { balance: count(state.balance) }) : state?.balanceDetail !== void 0 && state?.balanceDetail !== "" ? format(tt("raccoon.balanceUnknownDetail"), { detail: state.balanceDetail }) : tt("raccoon.balanceUnknown");
 		const balanceTone = typeof state?.balance === "number" && state.balance <= 0 ? S.statError : null;
-		const captionParts = [];
+		const clockParts = [];
 		if (loggedIn) {
-			if (breakdownParts !== "") captionParts.push(h("span", { key: "breakdown" }, breakdownParts));
-			if (expiresAt !== null) captionParts.push(h("span", { key: "exp" }, `${breakdownParts !== "" ? " · " : ""}${format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })}`));
+			if (expiresAt !== null) clockParts.push(h("span", { key: "exp" }, format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })));
 			if (refreshAt !== null) {
 				const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
-				captionParts.push(h("span", {
+				clockParts.push(h("span", {
 					key: "refresh",
 					title: format(tt("raccoon.refreshTip"), { days })
 				}, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
@@ -3294,10 +3329,16 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		}, h("div", { style: {
 			...S.statHeadline,
 			...balanceTone ?? {}
-		} }, balanceText), captionParts.length > 0 ? h("div", { style: {
+		} }, balanceText), breakdownParts.length > 0 ? h("div", { style: S.statGrid }, breakdownParts.map((part) => h("div", {
+			key: part.key,
+			style: S.statCard
+		}, h("span", { style: S.statCaption }, part.label), h("span", { style: {
+			...S.statValue,
+			...balanceTone ?? {}
+		} }, part.value)))) : null, clockParts.length > 0 ? h("div", { style: {
 			...S.statCaption,
-			marginTop: 2
-		} }, ...captionParts) : null) : null, modelsNote !== null ? h("div", {
+			marginTop: 10
+		} }, ...clockParts) : null) : null, modelsNote !== null ? h("div", {
 			style: {
 				...S.formNote,
 				fontSize: 12,
