@@ -157,7 +157,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // saved from the panel overrides the patch's `registerProvider`; an untouched
   // state file falls back to it, so configuration-driven deployments keep
   // working unchanged.
-  const providerStore = createFileProviderStore({ profile });
+  const providerStore = createFileProviderStore({ profile, logger: ctx.logger });
   // The panel's live draw-tool switch (docs/PROVIDER-HOT-RELOAD.md, same
   // "own state file beats the config default" discipline as the provider
   // switch). A value saved from the panel overrides the patch's

@@ -23,14 +23,25 @@
  *
  * @module dsh-connect-sensenova-token-plan/provider-store
  */
-import { obj } from "./util.ts";
+import { obj, degrade } from "./util.ts";
 import { join } from "node:path";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
+import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
 import type { StoreOptions } from "./types.ts";
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
 export const PROVIDER_VERSION = 1;
+
+/**
+ * Every persisted shape THIS build can read: the current version plus any
+ * historical ones. Bumping {@link PROVIDER_VERSION} means adding the new number
+ * here too — otherwise this build would refuse its own newest files.
+ *
+ * This is the ADR-006 write-side guard's whitelist: an on-disk version not in
+ * this list was written by a NEWER build, and must not be clobbered (see
+ * {@link writePayload}).
+ */
+export const KNOWN_PROVIDER_VERSIONS: readonly number[] = [1];
 
 /**
  * The directory this plugin's state lives in — per-profile when the Host names
@@ -63,7 +74,7 @@ export function normalizeEnabled(raw: unknown): boolean | null {
  * @returns {object} the store.
  */
 export function createFileProviderStore(options: StoreOptions = {}) {
-  const { dir, profile = null, ttlMs = STATE_READ_TTL_MS } = options;
+  const { dir, profile = null, ttlMs = STATE_READ_TTL_MS, logger } = options;
   const stateDir = dir ?? providerDir(profile);
   const filePath = join(stateDir, "provider.json");
 
@@ -73,13 +84,28 @@ export function createFileProviderStore(options: StoreOptions = {}) {
    * The single writer for all three callers (save / forget / the §23 legacy
    * adoption) — three copies of this is exactly the drift this module keeps
    * getting bitten by.
+   *
+   * ADR-006 write-side guard: never overwrite a state file this build cannot
+   * read. An unknown NUMERIC version means a NEWER build wrote it; clobbering
+   * it destroys data we cannot even see (see the `tmp/` ADR-006 draft). So the
+   * write is refused with a `degrade` signal, not a silent no-op — the PITFALLS
+   * §37 discipline: swallow the failure, not the reason.
    * @param {object} body - the JSON body to persist.
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>} true when written, false when refused.
    */
-  const writePayload = async (body: object) => {
+  const writePayload = async (body: object): Promise<boolean> => {
+    const existing = await readStateVersion(filePath);
+    if (!isKnownStateVersion(existing, KNOWN_PROVIDER_VERSIONS)) {
+      degrade(
+        `provider: refusing to overwrite provider.json holding version ${existing} (this build knows ${KNOWN_PROVIDER_VERSIONS.join("/")})`,
+        null, logger, null
+      );
+      return false;
+    }
     const temporary = temporaryOf(stateDir, "provider.json");
     await ensureStateDir(stateDir);
     await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
+    return true;
   };
 
   // Pre-§23 machines kept this switch in the SHARED directory. A profile-scoped
@@ -138,17 +164,24 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       if (enabled === null) throw new TypeError("provider switch expects a boolean");
       // Write failures PROPAGATE on purpose: a switch the panel ordered must
       // not silently stay off because the state file could not be written.
-      await writePayload({ version: PROVIDER_VERSION, enabled, updatedAt: new Date().toISOString() });
-      cache.remember(enabled);
+      // A refused write (ADR-006) does NOT propagate — the file is intact, so
+      // the switch simply stays where it was; only the cache must not be told
+      // a value that never reached disk.
+      if (await writePayload({ version: PROVIDER_VERSION, enabled, updatedAt: new Date().toISOString() })) {
+        cache.remember(enabled);
+      }
     },
     /**
      * Forget the panel-saved value: the config default rules again.
      * @returns {Promise<void>}
      */
     async forget() {
-      cache.remember(null);
       // No `enabled` key: "not set" is the absence of an answer, not `false`.
-      await writePayload({ version: PROVIDER_VERSION, updatedAt: new Date().toISOString() });
+      // Remember only once the write landed — a refused write (ADR-006) leaves
+      // the file, and therefore this switch, exactly as it was.
+      if (await writePayload({ version: PROVIDER_VERSION, updatedAt: new Date().toISOString() })) {
+        cache.remember(null);
+      }
     }
   };
 }

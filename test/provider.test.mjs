@@ -807,6 +807,72 @@ const BASE_URL = "https://token.sensenova.cn/v1";
   }
 }
 
+// --- 10a. ADR-006: the write side never clobbers a foreign version ---------
+// Group 10 proved the READ side treats a foreign version as unset. This is the
+// other half: the WRITE side must refuse to overwrite a file it cannot read,
+// and it must say so (a `degrade` marker, not a silent no-op). Without this, a
+// build running an OLDER store format would read a NEWER build's file as
+// "unset", then save() and stomp the newer data we cannot even see.
+{
+  const restoreEnv = isolateHostEnv();
+  const restoreHome = isolateStateDir();
+  try {
+    const dir = join(process.env.DSH_HOME, "state", "dsh-connect-sensenova-token-plan");
+    const file = join(dir, "provider.json");
+    // Unlike group 10, the very first act here is a write, so the state dir does
+    // not exist yet (group 10 reached its writes only after a save() had
+    // created it). Create it up front.
+    mkdirSync(dir, { recursive: true });
+    const foreignPayload = { version: 999, enabled: false, futureField: "x" };
+
+    // save() on a foreign-version file must be refused: the file is intact, the
+    // switch stays unset, and the refusal is visible in the log.
+    writeFileSync(file, JSON.stringify(foreignPayload, null, 2), "utf8");
+    const warnings = [];
+    const guarded = createFileProviderStore({ dir, logger: { warn: (m) => warnings.push(m) } });
+    await guarded.save(true);
+
+    const afterSave = JSON.parse(readFileSync(file, "utf8"));
+    check("save() does not overwrite a foreign version", afterSave.version === 999 && afterSave.futureField === "x",
+      JSON.stringify(afterSave));
+    check("save() leaves the switch unset after a refusal",
+      (await guarded.enabled()) === null && (await guarded.isSet()) === false);
+    check("the refusal is logged, not silent",
+      warnings.some((w) => w.includes("refusing to overwrite provider.json") && w.includes("version 999")),
+      warnings.join(" | "));
+
+    // forget() is the second writer; it must pass through the same guard.
+    const warnings2 = [];
+    const guarded2 = createFileProviderStore({ dir, logger: { warn: (m) => warnings2.push(m) } });
+    await guarded2.forget();
+    const afterForget = JSON.parse(readFileSync(file, "utf8"));
+    check("forget() does not overwrite a foreign version",
+      afterForget.version === 999 && afterForget.futureField === "x", JSON.stringify(afterForget));
+
+    // The guard must not trip on the file's own (known) version: a normal write
+    // still lands, so the switch keeps working for every build that owns the
+    // current format.
+    writeFileSync(file, JSON.stringify({ version: PROVIDER_VERSION, enabled: false }, null, 2), "utf8");
+    const normal = createFileProviderStore({ dir });
+    await normal.save(true);
+    const afterNormal = JSON.parse(readFileSync(file, "utf8"));
+    check("a known version still writes normally",
+      afterNormal.version === PROVIDER_VERSION && afterNormal.enabled === true, JSON.stringify(afterNormal));
+
+    // The guard's reason string is load-bearing: a rename would silently drop
+    // it and turn the refusal back into a no-op. Pin the literal in the source
+    // the same way draw.test.mjs pins its `degrade` markers.
+    const source = readFileSync(new URL("../src/host/provider-store.ts", import.meta.url), "utf8");
+    check("the refusal marker stays in the source",
+      source.includes("provider: refusing to overwrite provider.json holding version"), "");
+  } catch (error) {
+    fail("ADR-006 write-side version guard", error);
+  } finally {
+    restoreHome();
+    restoreEnv();
+  }
+}
+
 // --- 10b. draw switch store: the panel value beats the config default ------
 // Same shape as group 10 for the provider switch: versioned payload, atomic
 // round trip, corruption reads unset, forget returns to the config default.

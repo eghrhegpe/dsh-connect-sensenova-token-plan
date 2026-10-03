@@ -342,3 +342,39 @@ export async function readStateJson(file: string) {
     return null;
   }
 }
+
+/**
+ * Read the persisted `version` field of one state file, or `null` when it is
+ * absent, unreadable, non-JSON, or carries no numeric `version`.
+ *
+ * This is the ADR-006 write-side guard's probe: a writer must know what it is
+ * about to overwrite. "No version" is the same as "no record" (nothing to
+ * protect), while a NUMERIC version this build does not recognise means the
+ * file was written by a NEWER build and must not be clobbered.
+ *
+ * Kept apart from `readStateJson` on purpose: the guard needs the version even
+ * when the rest of the payload is unparseable, and it must not depend on any
+ * store's parse semantics.
+ * @param {string} file - the state file path.
+ * @returns {Promise<number|null>} the persisted version, or `null`.
+ */
+export async function readStateVersion(file: string): Promise<number | null> {
+  const raw = await readStateJson(file);
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const version = (raw as Record<string, unknown>).version;
+  return typeof version === "number" ? version : null;
+}
+
+/**
+ * Whether a writer may proceed given the version currently on disk.
+ *
+ * `null` (no file / no version) is always safe to write. A numeric version is
+ * safe only when this build declares it known — anything else is a NEWER build
+ * that this build cannot read, so the write must be refused.
+ * @param {number|null} version - the on-disk version, from {@link readStateVersion}.
+ * @param {readonly number[]} known - the versions this build understands.
+ * @returns {boolean} true when writing may proceed.
+ */
+export function isKnownStateVersion(version: number | null, known: readonly number[]): boolean {
+  return version === null || known.includes(version);
+}

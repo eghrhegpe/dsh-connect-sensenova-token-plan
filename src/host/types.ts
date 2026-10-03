@@ -81,6 +81,8 @@ export interface StoreOptions {
   ttlMs?: number;
   /** Directory the store persists into. */
   dir?: string;
+  /** `ctx.logger`, for the ADR-006 write-side version-guard degrade signal. */
+  logger?: { warn?: (message: string) => void };
 }
 
 /** A draw (image generation) request body. */
