@@ -121,6 +121,12 @@ export function raccoonToDescriptor(row: any, options: { officeIdentity?: string
   const multiplier = typeof row?.multiplier === "number" ? row.multiplier : undefined;
   const name = str(row?.name, id);
   const displayName = multiplier === undefined ? name : `${name} · x${multiplier.toFixed(2)}`;
+  // Read each window value ONCE. The ADR-004 fix spelled `num(row?.x)` in both
+  // the condition and the value of the same spread — a doubled parse of the
+  // same input, and an asymmetry a later edit could "fix" on one side only.
+  // The local is the single source the spread keys off.
+  const contextWindow = num(row?.contextWindow);
+  const maxOutputLength = num(row?.maxOutputLength);
   return {
     id,
     name: displayName,
@@ -143,8 +149,8 @@ export function raccoonToDescriptor(row: any, options: { officeIdentity?: string
     // pi-ai's arithmetic, but the harness default is the correct floor — a
     // guessed hard number would just be wrong for whichever model lost its
     // field, and would contradict the directory-first rule.
-    ...(num(row?.contextWindow) === undefined ? {} : { contextWindow: num(row?.contextWindow) as number }),
-    ...(num(row?.maxOutputLength) === undefined ? {} : { maxTokens: num(row?.maxOutputLength) as number }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxOutputLength === undefined ? {} : { maxTokens: maxOutputLength }),
     headers: raccoonRequestHeaders(options.officeIdentity),
     // SenseNova-family: the OpenAI-compat gateway does not speak the
     // developer role, so pin it false (the same fix the qoder route proved).
