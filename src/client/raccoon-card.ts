@@ -176,8 +176,10 @@ export function RaccoonCard({
   const balanceTone = typeof state?.balance === "number" && state.balance <= 0
     ? S.statError
     : null;
-  // The clocks stay a footnote — they are time-stamps, not figures, and the
-  // split cards above already carry the weight the balance deserves.
+  // The two credential clocks, rendered only for a signed-in account. They are
+  // time-stamps of THIS login — the access token's expiry and the refresh
+  // window — so they render in the account card beside the status they
+  // describe, not under the balance they fund.
   const clockParts: unknown[] = [];
   if (loggedIn) {
     if (expiresAt !== null) {
@@ -217,9 +219,13 @@ export function RaccoonCard({
   return h(
     "div",
     null,
-    // The login half: one compact card — the status text and its button share
-    // a row (a one-line status never earned a full-width block), with the QR
-    // riding below only while a scan is in flight.
+    // The account card: everything about WHO is signed in and WHAT that
+    // unlocks. Status and button share a row; the credential clocks are a quiet
+    // footnote under them; the opt-in switch decides whether this account's
+    // models are published to DSH, so it belongs with the credential it
+    // governs. Keeping the clocks and the switch with the balance instead meant
+    // one card held a question about credentials and the other held facts about
+    // them — the reader had to stitch them back together.
     h(
       "div",
       { style: { ...S.card, padding: "10px 14px" } },
@@ -251,34 +257,43 @@ export function RaccoonCard({
       // re-issues one per login; the tab's poll picks it up in `state.scanUrl`).
       !loggedIn && state?.scanUrl !== undefined && state?.scanUrl !== ""
         ? qrImageOf(state.scanUrl)
-        : null
+        : null,
+      // The credential clocks sit under the status they time-stamp: both are
+      // properties of this account's login, not of the credit figure it funds.
+      // They carry their own `role="status"` — a group of facts, not a
+      // decoration — but that keeps them OUT of the login status node the
+      // render suite pins as `loginLineOf` (which must stay exactly the status
+      // text, so the nickname suffix can be asserted by equality).
+      clockParts.length > 0
+        ? h("div", { style: { ...S.statCaption, marginTop: 8 }, role: "status" }, ...clockParts)
+        : null,
+      // The provider switch (opt-in, default off) — the second step, after
+      // signing in. It was once a bare label floating in the column gap with no
+      // surface of its own; the inset row gives it a home. It lives in this
+      // card rather than the balance card because it governs the credential,
+      // not the credit figure. It stays visible when signed out too: that is
+      // where the "tick this first" and "sign in first" wordings point, and
+      // hiding the control the wording names would strand the instruction.
+      h(
+        "div",
+        {
+          style: {
+            display: "flex", alignItems: "center", marginTop: 8, padding: "8px 12px",
+            borderRadius: 8, background: "var(--dsw-alias-bg-layer-2)"
+          }
+        },
+        h(ToggleSwitch, {
+          checked: enabled,
+          onChange: () => onSwitch(!enabled),
+          busy: waiting,
+          label: tt("raccoon.switch"),
+          title: tt("raccoon.switchTitle")
+        })
+      )
     ),
     loginNote !== null
       ? h("div", { style: { ...S.formNote, fontSize: 12, marginTop: 8 }, role: "status" }, loginNote)
       : null,
-    // The provider switch (opt-in, default off). It decides whether the Raccoon
-    // models are registered with DSH at all — the second step, after signing in.
-    // It used to be a bare label floating in the column gap between the login
-    // card and the balance line, with no surface of its own: a control with no
-    // home. The inset row gives it that home, and the shared ToggleSwitch makes
-    // it read as a switch: the label is a few words and the sentence about what
-    // registering does lives in the tooltip, not in the label.
-    h(
-      "div",
-      {
-        style: {
-          display: "flex", alignItems: "center", margin: "12px 0 0", padding: "8px 14px",
-          borderRadius: 8, background: "var(--dsw-alias-bg-layer-1)"
-        }
-      },
-      h(ToggleSwitch, {
-        checked: enabled,
-        onChange: () => onSwitch(!enabled),
-        busy: waiting,
-        label: tt("raccoon.switch"),
-        title: tt("raccoon.switchTitle")
-      })
-    ),
     // A registration failure stays visible even while the switch is OFF —
     // hiding it behind `enabled` is the same dead-end as the account editor
     // used to be: a failed state with no visible affordance to act on it.
@@ -287,9 +302,9 @@ export function RaccoonCard({
       : null,
     // The balance is the headline the user came to read (one `role="status"`
     // node, as the render suite pins), with the declared split as a deck of
-    // cards beside it and the two credential clocks as a quiet footnote under
-    // the lot — the 通用积分池 card-deck treatment, all still inside the single
-    // `role="status"` node the fold requires.
+    // cards beside it — the 通用积分池 card-deck treatment. The credential
+    // clocks live in the account card above, where the facts they time-stamp
+    // are.
     loggedIn
       ? h(
           "div",
@@ -303,9 +318,6 @@ export function RaccoonCard({
                   h("span", { style: S.statCaption }, part.label),
                   h("span", { style: { ...S.statValue, ...(balanceTone ?? {}) } }, part.value)
                 )))
-            : null,
-          clockParts.length > 0
-            ? h("div", { style: { ...S.statCaption, marginTop: 10 } }, ...clockParts)
             : null
         )
       : null,

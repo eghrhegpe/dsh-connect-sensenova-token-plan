@@ -3299,27 +3299,33 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			style: S.button,
 			onClick: onLogin,
 			disabled: waiting
-		}, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login"))), !loggedIn && state?.scanUrl !== void 0 && state?.scanUrl !== "" ? qrImageOf(state.scanUrl) : null), loginNote !== null ? h("div", {
+		}, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login"))), !loggedIn && state?.scanUrl !== void 0 && state?.scanUrl !== "" ? qrImageOf(state.scanUrl) : null, clockParts.length > 0 ? h("div", {
 			style: {
-				...S.formNote,
-				fontSize: 12,
+				...S.statCaption,
 				marginTop: 8
 			},
 			role: "status"
-		}, loginNote) : null, h("div", { style: {
+		}, ...clockParts) : null, h("div", { style: {
 			display: "flex",
 			alignItems: "center",
-			margin: "12px 0 0",
-			padding: "8px 14px",
+			marginTop: 8,
+			padding: "8px 12px",
 			borderRadius: 8,
-			background: "var(--dsw-alias-bg-layer-1)"
+			background: "var(--dsw-alias-bg-layer-2)"
 		} }, h(ToggleSwitch, {
 			checked: enabled,
 			onChange: () => onSwitch(!enabled),
 			busy: waiting,
 			label: tt("raccoon.switch"),
 			title: tt("raccoon.switchTitle")
-		})), state !== null && state.providerError !== void 0 && state.providerError !== "" ? h("div", {
+		}))), loginNote !== null ? h("div", {
+			style: {
+				...S.formNote,
+				fontSize: 12,
+				marginTop: 8
+			},
+			role: "status"
+		}, loginNote) : null, state !== null && state.providerError !== void 0 && state.providerError !== "" ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, state.providerError) : null, loggedIn ? h("div", {
@@ -3334,10 +3340,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		}, h("span", { style: S.statCaption }, part.label), h("span", { style: {
 			...S.statValue,
 			...balanceTone ?? {}
-		} }, part.value)))) : null, clockParts.length > 0 ? h("div", { style: {
-			...S.statCaption,
-			marginTop: 10
-		} }, ...clockParts) : null) : null, modelsNote !== null ? h("div", {
+		} }, part.value)))) : null) : null, modelsNote !== null ? h("div", {
 			style: {
 				...S.formNote,
 				fontSize: 12,

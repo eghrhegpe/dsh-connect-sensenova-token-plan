@@ -1015,10 +1015,12 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       texts(loginButton ?? {}).join(""));
   }
 
-  // The signed-in frame's whole bookkeeping is ONE line: balance, the split the
-  // gateway declared, and BOTH credential clocks. Three stacked lines read as
-  // clutter — but the facts must survive the fold, not be dropped by it, and a
-  // zero part is a declared fact rather than a gap.
+  // The signed-in frame splits by what each fact IS, not by where the reader
+  // happened to see it: the balance card holds the figure and the split the
+  // gateway declared, the account card holds the status line and the two
+  // credential clocks that time-stamp THAT login. A zero part is a declared
+  // fact rather than a gap, and the clocks must survive the fold, not be
+  // dropped by it.
   {
     const tree = card({
       ok: true, enabled: true, loggedIn: true, nickname: "小浣熊用户",
@@ -1028,15 +1030,21 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     });
     const statusLines = findAll(tree, (props) => props.role === "status").map((el) => texts(el).join(""));
     const meta = statusLines.filter((line) => line.includes("raccoon.balance"));
-    check("the signed-in bookkeeping folds into exactly one line",
+    check("the signed-in balance folds into exactly one line",
       meta.length === 1, JSON.stringify(statusLines));
     const line = meta[0] ?? "";
     check("that line keeps the split the gateway declared, zero part included",
       line.includes("raccoon.partNameDaily") && line.includes("raccoon.partNameReward")
         && line.includes("raccoon.partNameMonthly") && !line.includes("raccoon.partNameTopup"),
       line);
-    check("that line keeps both credential clocks",
-      line.includes("raccoon.expiresAt") && line.includes("raccoon.refreshUntil"), line);
+    // The clocks are account facts, not balance facts — they must NOT ride in
+    // the balance line, or the balance card holds a credential question again.
+    check("the balance line holds no credential clock",
+      !line.includes("raccoon.expiresAt") && !line.includes("raccoon.refreshUntil"), line);
+    const clockLine = statusLines.find((l) => l.includes("raccoon.expiresAt")) ?? "";
+    check("the credential clocks sit in their own account status line, both present",
+      clockLine.includes("raccoon.expiresAt") && clockLine.includes("raccoon.refreshUntil"),
+      clockLine);
     check("a healthy signed-in session raises no alert",
       alertsOf(tree).length === 0, JSON.stringify(alertsOf(tree).map((el) => texts(el).join(""))));
     check("a visible roster stands the old unregistered wording down",
