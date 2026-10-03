@@ -552,9 +552,17 @@ function numOrNullSafe(value: unknown): number | null {
 
 /**
  * The static fallback roster: the six `visible: true` chat models the gateway
- * listed at probe time (2026-09). Used ONLY when `fetchRaccoonCatalog` comes
- * back empty, so the provider still offers models; a fresh catalogue always
- * wins over this table.
+ * listed at probe time (2026-09), with the per-model `context_window` /
+ * `max_output_length` the catalogue then carried. Used ONLY when
+ * `fetchRaccoonCatalog` comes back empty, so the provider still offers models;
+ * a fresh catalogue always wins over this table.
+ *
+ * These numbers are a CATALOG SNAPSHOT (the directory-authoritative values as
+ * they read at probe time), not guessed defaults — see ADR-004 / docs/
+ * SENSENOVA-API.md: the descriptor must declare directory values and fall back
+ * to undeclared (harness fills 32768) when the field is truly absent. They are
+ * only reached when the live catalogue is unreachable, which is exactly the
+ * scenario where a slightly stale but real window beats an invented one.
  */
 export const RACCOON_FALLBACK_MODELS = Object.freeze([
   { id: "sn-sensenova-6-8-flash", name: "SenseNova 6.8 Flash", multiplier: 0, vision: true, contextWindow: 256_000, maxOutputLength: 63_999 },

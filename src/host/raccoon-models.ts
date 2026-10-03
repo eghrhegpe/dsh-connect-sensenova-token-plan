@@ -132,10 +132,19 @@ export function raccoonToDescriptor(row: any, options: { officeIdentity?: string
     // `extra_body.thinking`); the gateway defaults to thinking ON.
     reasoning: false,
     cost: { ...NO_COST },
-    // A positive window is required (pi-ai does arithmetic on it); the Raccoon
-    // roster always declares one, but guard against a shape drift.
-    contextWindow: num(row?.contextWindow) ?? 256_000,
-    maxTokens: num(row?.maxOutputLength) ?? 32_000,
+    // Declare the CATALOG authority value, never a guessed constant
+    // (ADR-004 + docs/SENSENOVA-API.md: "declare the directory value when
+    // present, fall back to UNDECLARED when absent so the harness fills its
+    // own 32768 default" — the same policy the Token Plan side `llm-models.ts`
+    // already follows). The Raccoon gateway returns `context_window` /
+    // `max_output_tokens` per model (`fetchRaccoonCatalog`), so when those are
+    // absent it is a SHAPE DRIFT, not a missing fact: we omit the field rather
+    // than invent 256_000 / 32_000. A positive window really is required by
+    // pi-ai's arithmetic, but the harness default is the correct floor — a
+    // guessed hard number would just be wrong for whichever model lost its
+    // field, and would contradict the directory-first rule.
+    ...(num(row?.contextWindow) === undefined ? {} : { contextWindow: num(row?.contextWindow) as number }),
+    ...(num(row?.maxOutputLength) === undefined ? {} : { maxTokens: num(row?.maxOutputLength) as number }),
     headers: raccoonRequestHeaders(options.officeIdentity),
     // SenseNova-family: the OpenAI-compat gateway does not speak the
     // developer role, so pin it false (the same fix the qoder route proved).

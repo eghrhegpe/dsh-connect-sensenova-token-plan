@@ -537,7 +537,10 @@ function section(title) {
     check("the descriptor carries the Raccoon request headers",
       descriptor.headers["X-Org-Code"] === "personal" && descriptor.headers["X-Raccoon-Language"] === "zh" && descriptor.headers["Content-Type"] === "application/json");
     check("the declared context window is honored", descriptor.contextWindow === 100_000);
-    check("a missing window falls back to a positive default", raccoonToDescriptor({ id: "m3" }).contextWindow > 0);
+    check("a missing window is OMITTED (harness fills its 32768 default), not guessed",
+      !("contextWindow" in raccoonToDescriptor({ id: "m3" })));
+    check("a missing output ceiling is OMITTED, not guessed",
+      !("maxTokens" in raccoonToDescriptor({ id: "m3" })));
     check("the declared output ceiling is honored as maxTokens", descriptor.maxTokens === 8_000);
     check("v1 pins reasoning:false (no thinking toggle)", descriptor.reasoning === false);
     check("the OpenAI-compat field is pinned to max_tokens", descriptor.compat?.maxTokensField === "max_tokens");
