@@ -116,6 +116,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 
 | 何时 | 查 |
 |---|---|
+| **排查问题（手里是症状，不是主题）** | `docs/TROUBLESHOOTING.md`——按现象组织，每条带稳定症状码；先 `npm run doctor --json` 取 `symptoms` 再跳条目。症状码真源是 `src/host/codes.ts` 的 `SYMPTOM`，与该页由 `test/doctor.test.mjs` 双向钉住 |
 | 排查登录失败 / 改 PKCE、JWE、续期、节流 | `docs/AUTH.md` → `docs/SENSENOVA-API.md` |
 | 动第二个上游（小浣熊 / `sensenova-raccoon`） | `docs/ROADMAP.md` §6.1.2（网关契约复测表）/ §6.1.4（接入面盘点：死常量、死负载、签到边界）→ `src/host/raccoon*.ts` |
 | 给用户看的文案（README / `cordis.patch.yml`）改了 | `test/docs.test.mjs` 检查 9/10（tab 全覆盖 + 槽位一致），两者都进 npm 包 |

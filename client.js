@@ -33,8 +33,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	var zh, en;
 	var init_i18n = __esmMin((() => {
 		zh = {
-			"entry.label": "商汤接入",
-			"panel.title": "商汤接入",
+			"panel.title": "商汤 Token Plan 接入全家桶",
 			"panel.back": "返回会话",
 			"panel.refresh": "刷新",
 			"panel.updated": "更新于 {time}",
@@ -224,8 +223,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.error": "小浣熊操作失败：{error}"
 		};
 		en = {
-			"entry.label": "SenseNova",
-			"panel.title": "SenseNova",
+			"panel.title": "SenseNova Token Plan Connect",
 			"panel.back": "Back to conversation",
 			"panel.refresh": "Refresh",
 			"panel.updated": "Updated {time}",
@@ -480,6 +478,30 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		let text = template;
 		for (const [key, value] of Object.entries(vars || {})) text = text.split(`{${key}}`).join(String(value));
 		return text;
+	}
+	/**
+	* A caught value as the one error string the panel shows.
+	*
+	* Every mutation surface (`ModelPicker`, `ProviderControls`, `RaccoonTab`)
+	* ends a `catch` with the same `why instanceof Error ? why.message : String(why)`
+	* template, and there were eight copies of it. That is the same drift the HTTP
+	* seam in `http.ts` was extracted to stop: a copy that handles a thrown string
+	* but not a rejected `{code}` object prints `[object Object]` in the panel's
+	* one error line, and no test catches it because each copy is trivial. One
+	* definition, so a fix lands everywhere at once.
+	* @param why - whatever the `catch` received.
+	* @returns {string} the Error's message, the string itself, or a JSON-ish
+	*   rendering of a thrown object (never `[object Object]`).
+	*/
+	function errorText(why) {
+		if (why instanceof Error) return why.message;
+		if (typeof why === "string") return why;
+		if (why === null || why === void 0) return String(why);
+		try {
+			return JSON.stringify(why) ?? String(why);
+		} catch {
+			return String(why);
+		}
 	}
 	/**
 	* A token count the way the platform names it: 1048576 → "1M", 65536 → "64K",
@@ -1423,7 +1445,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				await postJsonOrThrow(PROVIDER_PATH, { enabled: !enabled });
 				onDone?.();
 			} catch (error) {
-				setSwitchError(format(tt("llm.switchError"), { error: error instanceof Error ? error.message : String(error) }));
+				setSwitchError(format(tt("llm.switchError"), { error: errorText(error) }));
 			} finally {
 				setBusy(false);
 			}
@@ -1480,7 +1502,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				await postJsonOrThrow(DRAW_PATH, { enabled: !enabled });
 				onDone?.();
 			} catch (error) {
-				setSwitchError(format(tt("draw.switchError"), { error: error instanceof Error ? error.message : String(error) }));
+				setSwitchError(format(tt("draw.switchError"), { error: errorText(error) }));
 			} finally {
 				setBusy(false);
 			}
@@ -1502,7 +1524,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				await postJsonOrThrow(DRAW_PATH, { drawModelId: id });
 				onDone?.();
 			} catch (error) {
-				setSwitchError(format(tt("draw.switchError"), { error: error instanceof Error ? error.message : String(error) }));
+				setSwitchError(format(tt("draw.switchError"), { error: errorText(error) }));
 			} finally {
 				setBusy(false);
 			}
@@ -1855,7 +1877,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				setSavedKey(posted);
 				onDone?.();
 			} catch (error) {
-				setNotice(format(tt("llm.rosterError"), { error: error instanceof Error ? error.message : String(error) }));
+				setNotice(format(tt("llm.rosterError"), { error: errorText(error) }));
 			} finally {
 				setBusy(false);
 			}
@@ -2134,6 +2156,71 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	}));
 
 //#endregion
+//#region src/client/use-polling-interval.ts
+/**
+	* Run `run()` on an interval that stops while the page is hidden, and slows
+	* down while `failed` is true.
+	*
+	* @param run - the poll body; must be stable (wrap it in `useCallback`), since
+	*   it is an effect dependency and a fresh identity would restart the loop on
+	*   every render.
+	* @param intervalMs - the healthy cadence, in milliseconds.
+	* @param options - loop control.
+	* @param options.enabled - when false the loop does not run at all (the caller
+	*   has decided polling is not wanted); defaults to true.
+	* @param options.failed - when true the loop backs off to
+	*   {@link ERROR_BACKOFF_MS}, never faster than `intervalMs`.
+	*/
+	function usePollingInterval(run, intervalMs, options = {}) {
+		const { enabled = true, failed = false } = options;
+		const healthy = Math.max(1, Math.floor(intervalMs));
+		const effective = failed ? Math.max(healthy, ERROR_BACKOFF_MS) : healthy;
+		const runRef = useRef(run);
+		runRef.current = run;
+		useEffect(() => {
+			if (!enabled) return;
+			let alive = true;
+			let timer = null;
+			const fire = () => {
+				if (alive) runRef.current();
+			};
+			const start = () => {
+				if (timer === null) timer = setInterval(fire, effective);
+			};
+			const stop = () => {
+				if (timer !== null) {
+					clearInterval(timer);
+					timer = null;
+				}
+			};
+			const hidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+			if (!hidden()) {
+				fire();
+				start();
+			}
+			const onVisibility = () => {
+				if (!alive) return;
+				if (hidden()) stop();
+				else {
+					fire();
+					start();
+				}
+			};
+			if (typeof document !== "undefined" && "addEventListener" in document) document.addEventListener("visibilitychange", onVisibility);
+			return () => {
+				alive = false;
+				stop();
+				if (typeof document !== "undefined" && "addEventListener" in document) document.removeEventListener("visibilitychange", onVisibility);
+			};
+		}, [effective, enabled]);
+	}
+	var ERROR_BACKOFF_MS;
+	var init_use_polling_interval = __esmMin((() => {
+		init_runtime();
+		ERROR_BACKOFF_MS = 6e4;
+	}));
+
+//#endregion
 //#region src/client/use-snapshot-polling.ts
 /**
 	* Poll the Host snapshot, following its stated cadence and pausing when hidden.
@@ -2185,48 +2272,17 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				if (typeof stated === "number" && Number.isFinite(stated)) setCadenceMs(statedCadenceMs(stated, cadenceMs));
 			} catch (reason) {
 				if (!isCurrent()) return;
-				setError(reason instanceof Error ? reason.message : String(reason));
+				setError(errorText(reason));
 			} finally {
 				if (isCurrent()) setLoadedOnce(true);
 				if (inFlight.current === controller) inFlight.current = null;
 			}
 		}, [cadenceMs]);
-		useEffect(() => {
-			let alive = true;
-			let timer = null;
-			const run = () => {
-				if (alive) load();
-			};
-			const start = () => {
-				if (timer === null) timer = setInterval(run, cadenceMs);
-			};
-			const stop = () => {
-				if (timer !== null) {
-					clearInterval(timer);
-					timer = null;
-				}
-			};
-			if (typeof document === "undefined" || document.visibilityState !== "hidden") {
-				run();
-				start();
-			}
-			const onVisibility = () => {
-				if (!alive) return;
-				if (document.visibilityState === "hidden") stop();
-				else {
-					run();
-					start();
-				}
-			};
-			if (typeof document !== "undefined" && "addEventListener" in document) document.addEventListener("visibilitychange", onVisibility);
-			return () => {
-				alive = false;
-				stop();
-				generation.current += 1;
-				inFlight.current?.abort?.();
-				if (typeof document !== "undefined" && "addEventListener" in document) document.removeEventListener("visibilitychange", onVisibility);
-			};
-		}, [load, cadenceMs]);
+		usePollingInterval(load, cadenceMs, { failed: error !== null });
+		useEffect(() => () => {
+			generation.current += 1;
+			inFlight.current?.abort?.();
+		}, []);
 		return {
 			data,
 			error,
@@ -2240,6 +2296,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_runtime();
 		init_snapshot();
 		init_format();
+		init_use_polling_interval();
 		init_const();
 	}));
 
@@ -2457,7 +2514,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		}, open ? children : null));
 	}
 	var init_cards = __esmMin((() => {
-		init_const();
 		init_format();
 		init_runtime();
 		init_styles();
@@ -3226,7 +3282,37 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const [loginNote, setLoginNote] = useState(null);
 		const [modelsNote, setModelsNote] = useState(null);
 		const [idsBusy, setIdsBusy] = useState(false);
+		/**
+		* The last failed read, held as state so a failure ALWAYS re-renders.
+		*
+		* `lastError` (below) is the value the loop reads; this is the re-render
+		* trigger that makes a ref-based read observable. Keeping them separate is
+		* deliberate: the loop must not depend on a render it causes, yet a pure
+		* failure with no `onReportStatus` produces no other state change. See the
+		* note on `fail` and the H group in `test/render.test.mjs`.
+		*/
+		const [readFailure, setReadFailure] = useState(null);
 		const alive = useRef(true);
+		/**
+		* Whether the last read failed — the shared loop's back-off input.
+		*
+		* A ref, and that is load-bearing rather than lazy: the shared loop reads it
+		* DURING render to decide its cadence, so the back-off must not depend on the
+		* render it causes. A ref change is picked up on the NEXT render, and `load`
+		* guarantees one exists — every failure path calls `report(...)`, which calls
+		* `setLoginNote(...)` unconditionally and therefore re-renders. The record is
+		* written in exactly that one function, so it cannot drift from what the
+		* header shows.
+		*
+		* The unconditional part is the whole trick. An earlier draft could strand
+		* the back-off: with `onReportStatus` omitted there was no other state write
+		* on a pure-failure path (nothing about the data changed), so a tab talking
+		* to a dead Host kept polling at full speed. `setLoginNote` on every failure
+		* is what makes the ref version correct, so do not "optimise" it away — the
+		* H group in `test/render.test.mjs` drives this tab through a failing Host
+		* with NO `onReportStatus` and asserts the cadence backs off.
+		*/
+		const lastError = useRef(null);
 		/**
 		* Which read is allowed to write.
 		*
@@ -3269,6 +3355,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		*/
 		const loadRef = useRef(() => {});
 		const report = useCallback((err) => {
+			lastError.current = err;
 			if (onReportStatus !== void 0 && alive.current) onReportStatus({
 				updatedAt: lastGoodAt.current,
 				error: err,
@@ -3282,9 +3369,26 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			inFlight.current?.abort?.();
 			const controller = typeof AbortController === "function" ? new AbortController() : null;
 			inFlight.current = controller;
-			/** Record a failed read: forward it to the header, the only place that renders it. */
+			/**
+			* Record a failed read: forward it to the header, the only place that
+			* renders it, AND make sure a render happens.
+			*
+			* The second half is not decoration. The shared loop reads `lastError`
+			* during render to decide its cadence, so a failure that changed no state
+			* would never re-render — and with `onReportStatus` omitted (this tab
+			* mounted without a header) nothing else on the failure path writes state
+			* either: the data is unchanged, so there is genuinely nothing new to show.
+			* The tab would then keep polling a dead Host at full speed, which is the
+			* exact failure the back-off exists to prevent.
+			*
+			* `readFailure` is written on EVERY failure (even to the same string) so
+			* React sees a real state change; the header still renders the message via
+			* `report`, and this state only carries the same text for the tab's own
+			* use as the loop's back-off trigger.
+			*/
 			const fail = (message) => {
 				if (!isCurrent()) return;
+				setReadFailure(message);
 				report(message);
 			};
 			try {
@@ -3305,6 +3409,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 					return;
 				}
 				setState(body);
+				setReadFailure(null);
 				const outcome = typeof body.loginStatus === "string" ? body.loginStatus : null;
 				if (outcome === "timeout") setLoginNote(tt("raccoon.loginTimeout"));
 				else if (outcome === "canceled") setLoginNote(tt("raccoon.loginCanceled"));
@@ -3322,18 +3427,20 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const scanning = state?.loginStatus === "scanning";
 		const pollMs = statedCadenceMs(state?.pollSeconds, RACCOON_POLL_MS);
 		const scanPollMs = statedCadenceMs(state?.scanPollSeconds, RACCOON_SCAN_POLL_MS);
-		useEffect(() => {
+		const failed = readFailure !== null;
+		const fire = useCallback(() => {
 			alive.current = true;
-			let timer = null;
-			const run = () => {
-				if (alive.current) load();
-			};
-			run();
-			timer = setInterval(run, scanning ? scanPollMs : pollMs);
+			load();
+		}, [load]);
+		usePollingInterval(fire, scanning ? scanPollMs : pollMs, { failed });
+		useEffect(() => () => {
+			alive.current = false;
+			generation.current += 1;
+			inFlight.current?.abort?.();
+		}, []);
+		useEffect(() => {
 			return () => {
-				alive.current = false;
 				generation.current += 1;
-				if (timer !== null) clearInterval(timer);
 				inFlight.current?.abort?.();
 			};
 		}, [
@@ -3361,7 +3468,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 					providerRegistered: body.providerRegistered === true
 				} : current);
 			} catch (why) {
-				if (alive.current) setLoginNote(format(tt("raccoon.switchError"), { error: why instanceof Error ? why.message : String(why) }));
+				if (alive.current) setLoginNote(format(tt("raccoon.switchError"), { error: errorText(why) }));
 			}
 		}, [tt]);
 		const startLogin = useCallback(async () => {
@@ -3374,7 +3481,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 					else setLoginNote(body?.error ?? format(tt("raccoon.error"), { error: "login did not finish" }));
 				}
 			} catch (why) {
-				if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: why instanceof Error ? why.message : String(why) }));
+				if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: errorText(why) }));
 			} finally {
 				if (alive.current) setLoginBusy(false);
 			}
@@ -3385,7 +3492,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				await postJsonOrThrow(RACCOON_PATH, { action: "logout" });
 				if (alive.current) load();
 			} catch (why) {
-				if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: why instanceof Error ? why.message : String(why) }));
+				if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: errorText(why) }));
 			}
 		}, [load, tt]);
 		const saveIds = useCallback(async (ids) => {
@@ -3410,7 +3517,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 					setModelsNote(tt("raccoon.modelsSaved"));
 				}
 			} catch (why) {
-				if (alive.current) setModelsNote(format(tt("raccoon.modelsError"), { error: why instanceof Error ? why.message : String(why) }));
+				if (alive.current) setModelsNote(format(tt("raccoon.modelsError"), { error: errorText(why) }));
 			} finally {
 				if (alive.current) setIdsBusy(false);
 			}
@@ -3434,6 +3541,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_format();
 		init_http();
 		init_runtime();
+		init_use_polling_interval();
 		init_raccoon_card();
 		RACCOON_POLL_MS = 6e4;
 		RACCOON_SCAN_POLL_MS = 2e3;

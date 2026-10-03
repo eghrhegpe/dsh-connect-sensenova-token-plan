@@ -14,7 +14,7 @@
  * is the tree React would receive.
  */
 import { render, styles as S, texts, findElement, findAll } from "./panel-render.js";
-import { h, surface } from "./client-surface.js";
+import { h, surface, reactStandin } from "./client-surface.js";
 
 const results = [];
 function check(name, condition, detail = "") {
@@ -1169,6 +1169,302 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     const fromEmpty = click({ ok: true, enabled: true, loggedIn: true, models: roster, enabledModelIds: [] }, "b");
     check("a roster curated down to nothing can be turned back on",
       JSON.stringify(fromEmpty) === JSON.stringify(["b"]), JSON.stringify(fromEmpty));
+  }
+}
+
+// === H. the shared polling loop: visibility, back-off, teardown ===========
+// `use-polling-interval.ts` is the loop BOTH tabs drive, and two behaviours
+// were missing when each tab carried its own copy (PITFALLS §34/§36 — the
+// quota copy had learned to pause while hidden, the Raccoon copy never did):
+//
+//   - a hidden page must stop asking (nobody is watching, and every poll holds a
+//     Host connection open);
+//   - a failing read must back off, not keep asking at full speed (the Host is
+//     exactly the thing that is down when the panel cannot reach it).
+//
+// `client-surface.js`'s stand-in runs effects as no-ops, so this drives the REAL
+// module with a micro React that actually records and runs effects, plus a
+// controllable `document` and timer. No DOM library: the hook only ever asks
+// `document.visibilityState` and for `addEventListener`/`removeEventListener`.
+{
+  // A React stand-in that really runs effects: `useEffect` records its callback
+  // and cleanup, and `mount` runs the recorded effects (React's mount order).
+  const effects = [];
+  const hookReact = {
+    createElement: h,
+    Fragment: Symbol("Fragment"),
+    useState: (initial) => [typeof initial === "function" ? initial() : initial, () => {}],
+    useEffect: (effect) => { effects.push(effect); },
+    useCallback: (callback) => callback,
+    useMemo: (factory) => factory(),
+    useRef: (initial) => ({ current: initial })
+  };
+  const mount = () => {
+    // Run every recorded effect and collect its cleanup.
+    const cleanups = effects.map((effect) => effect());
+    effects.length = 0;
+    return () => { for (const cleanup of cleanups) if (typeof cleanup === "function") cleanup(); };
+  };
+
+  const fakeDocument = {
+    visibilityState: "visible",
+    listeners: new Map(),
+    addEventListener(type, fn) {
+      if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+      this.listeners.get(type).add(fn);
+    },
+    removeEventListener(type, fn) {
+      this.listeners.get(type)?.delete(fn);
+    },
+    fire(type) { for (const fn of this.listeners.get(type) ?? []) fn(); }
+  };
+  // A manual clock: the hook only calls setInterval/clearInterval, so a stub
+  // that records the cadence and lets a check "tick" makes the timing exact and
+  // the test instantaneous.
+  let scheduled = null;
+  let tickCount = 0;
+  const realSetInterval = globalThis.setInterval;
+  const realClearInterval = globalThis.clearInterval;
+  const fakeSetInterval = (fn, ms) => { scheduled = { fn, ms }; return { fake: true }; };
+  const fakeClearInterval = () => { scheduled = null; };
+  const tick = () => { tickCount += 1; scheduled?.fn(); };
+  const realDocument = globalThis.document;
+  globalThis.document = fakeDocument;
+  globalThis.setInterval = fakeSetInterval;
+  globalThis.clearInterval = fakeClearInterval;
+
+  try {
+    // The hook reaches React through `runtime.ts`'s seam, which
+    // `client-surface.js` already filled with its NO-OP stand-in. Hand it the
+    // recording one for the duration of this group, then put the original back
+    // so later groups (and any suite sharing this module) see what they expect.
+    const runtime = await import("../src/client/runtime.ts");
+    runtime.provideClientReact(hookReact);
+    const { usePollingInterval, ERROR_BACKOFF_MS } = await import("../src/client/use-polling-interval.ts");
+    check("the shared loop exports a back-off floor of at least a minute",
+      typeof ERROR_BACKOFF_MS === "number" && ERROR_BACKOFF_MS >= 60_000, String(ERROR_BACKOFF_MS));
+
+    // 1. happy path: it runs immediately, then on the STATED cadence.
+    {
+      let calls = 0;
+      effects.length = 0;
+      usePollingInterval(() => { calls += 1; }, 30_000, {});
+      const unmount = mount();
+      check("a visible page polls once on mount", calls === 1, `calls=${calls}`);
+      check("a visible page keeps the Host-stated cadence",
+        scheduled?.ms === 30_000, `interval=${scheduled?.ms}`);
+      tick();
+      check("the interval re-polls on its cadence", calls === 2, `calls=${calls}`);
+      unmount();
+      check("unmount clears the interval", scheduled === null);
+    }
+
+    // 2. the visibility pause — the behaviour the Raccoon tab never had.
+    {
+      let calls = 0;
+      effects.length = 0;
+      scheduled = null;
+      usePollingInterval(() => { calls += 1; }, 30_000, {});
+      const unmount = mount();
+      const afterMount = calls;
+      fakeDocument.visibilityState = "hidden";
+      fakeDocument.fire("visibilitychange");
+      check("hiding the page stops the interval", scheduled === null);
+      // Even if something still fires the old handle, the loop's own liveness
+      // gate must swallow it.
+      tick();
+      check("a hidden page does not poll", calls === afterMount, `calls=${calls}`);
+      fakeDocument.visibilityState = "visible";
+      fakeDocument.fire("visibilitychange");
+      check("coming back polls once immediately", calls === afterMount + 1, `calls=${calls}`);
+      check("coming back restarts the interval", scheduled?.ms === 30_000);
+      fakeDocument.visibilityState = "visible";
+      unmount();
+    }
+
+    // 3. mounting while already hidden must not even fire once.
+    {
+      let calls = 0;
+      fakeDocument.visibilityState = "hidden";
+      effects.length = 0;
+      scheduled = null;
+      usePollingInterval(() => { calls += 1; }, 30_000, {});
+      const unmount = mount();
+      check("a mount into a hidden page polls nothing", calls === 0, `calls=${calls}`);
+      fakeDocument.visibilityState = "visible";
+      unmount();
+    }
+
+    // 4. the error back-off — never faster than the healthy cadence.
+    {
+      effects.length = 0;
+      scheduled = null;
+      usePollingInterval(() => {}, 30_000, { failed: true });
+      const unmount = mount();
+      check("a failed read backs off to a minute",
+        scheduled?.ms === Math.max(30_000, ERROR_BACKOFF_MS), `interval=${scheduled?.ms}`);
+      unmount();
+    }
+    // …and a cadence faster than the floor (the Raccoon scan's 2 s) is not sped
+    // up by the back-off logic into something below the floor either.
+    {
+      effects.length = 0;
+      scheduled = null;
+      usePollingInterval(() => {}, 2_000, { failed: true });
+      const unmount = mount();
+      check("a failing fast poll still backs off to the floor, not below it",
+        scheduled?.ms === ERROR_BACKOFF_MS, `interval=${scheduled?.ms}`);
+      unmount();
+    }
+    // …while a cadence SLOWER than the floor is left alone (the floor is a
+    // minimum, not a new cadence).
+    {
+      effects.length = 0;
+      scheduled = null;
+      usePollingInterval(() => {}, 300_000, { failed: true });
+      const unmount = mount();
+      check("a slow cadence is not sped up or reset by the back-off",
+        scheduled?.ms === 300_000, `interval=${scheduled?.ms}`);
+      unmount();
+    }
+
+    // 5. `enabled: false` means no loop at all (a tab that must not poll yet).
+    {
+      let calls = 0;
+      effects.length = 0;
+      scheduled = null;
+      usePollingInterval(() => { calls += 1; }, 30_000, { enabled: false });
+      const unmount = mount();
+      check("a disabled loop neither polls nor schedules",
+        calls === 0 && scheduled === null, `calls=${calls} scheduled=${scheduled !== null}`);
+      unmount();
+    }
+
+    // 6. a degenerate cadence cannot become a busy loop.
+    {
+      effects.length = 0;
+      scheduled = null;
+      usePollingInterval(() => {}, 0, {});
+      const unmount = mount();
+      check("a zero cadence is clamped to 1 ms, never 0",
+        scheduled?.ms === 1, `interval=${scheduled?.ms}`);
+      unmount();
+    }
+  } finally {
+    // Hand the seam back to the surface's own stand-in so a later group (or a
+    // suite importing this file) mounts against what it expects.
+    const runtime = await import("../src/client/runtime.ts");
+    runtime.provideClientReact(reactStandin);
+    globalThis.setInterval = realSetInterval;
+    globalThis.clearInterval = realClearInterval;
+    if (realDocument === undefined) delete globalThis.document;
+    else globalThis.document = realDocument;
+  }
+}
+
+// === I. RaccoonTab: a failure backs off even with NO header mounted =======
+// The boundary that makes `failed` state rather than a bare ref: the shared
+// loop reads the failure DURING render to pick its cadence, so a pure failure
+// that changes no state would never re-render and the back-off would silently
+// not apply. With `onReportStatus` omitted there is genuinely nothing else to
+// write — the data did not change — so this drives the REAL component through
+// a failing Host with no header and asserts the cadence moves anyway.
+{
+  // A minimal re-rendering React: `useState` cells survive across renders, and
+  // a setter marks the component dirty so `rerender()` runs it again — which is
+  // the behaviour under test (a failure must produce a render).
+  const cells = [];
+  let cursor = 0;
+  let dirty = false;
+  const effects = [];
+  const react = {
+    createElement: h,
+    Fragment: Symbol("Fragment"),
+    useState: (initial) => {
+      const i = cursor++;
+      if (cells.length <= i) cells[i] = typeof initial === "function" ? initial() : initial;
+      const set = (next) => {
+        const value = typeof next === "function" ? next(cells[i]) : next;
+        if (!Object.is(value, cells[i])) { cells[i] = value; dirty = true; }
+      };
+      return [cells[i], set];
+    },
+    useEffect: (effect) => { effects.push(effect); },
+    useCallback: (callback) => callback,
+    useMemo: (factory) => factory(),
+    useRef: (initial) => ({ current: initial })
+  };
+
+  const realDocument = globalThis.document;
+  globalThis.document = {
+    visibilityState: "visible",
+    listeners: new Map(),
+    addEventListener(t, f) { (this.listeners.get(t) ?? this.listeners.set(t, new Set()).get(t)).add(f); },
+    removeEventListener(t, f) { this.listeners.get(t)?.delete(f); }
+  };
+  const realFetch = globalThis.fetch;
+  const realSetInterval = globalThis.setInterval;
+  const realClearInterval = globalThis.clearInterval;
+  let scheduled = null;
+  let fetchCalls = 0;
+
+  try {
+    const runtime = await import("../src/client/runtime.ts");
+    runtime.provideClientReact(react);
+    const { RaccoonTab } = await import("../src/client/raccoon-tab.ts");
+
+    // Every GET fails — the shape of "the Host is gone".
+    globalThis.fetch = async () => { fetchCalls += 1; return { ok: false, status: 500, json: async () => null }; };
+    globalThis.setInterval = (fn, ms) => { scheduled = { fn, ms }; return { fake: true }; };
+    globalThis.clearInterval = () => { scheduled = null; };
+
+    // Mount with NO `onReportStatus`: nothing outside this tab can re-render it.
+    const mount = () => {
+      cursor = 0; dirty = false; effects.length = 0;
+      RaccoonTab({ tt });
+      const cleanups = effects.map((effect) => effect());
+      effects.length = 0;
+      return () => { for (const c of cleanups) if (typeof c === "function") c(); };
+    };
+    // Re-render only when a setter said something changed — React's own rule.
+    // The previous cleanups run first (React tears down before re-running an
+    // effect), but the component stays mounted: unmounting here would clear
+    // the very interval the next assertion reads.
+    let activeCleanups = [];
+    const rerender = () => {
+      if (!dirty) return false;
+      for (const c of activeCleanups) if (typeof c === "function") c();
+      activeCleanups = [];
+      cursor = 0; dirty = false; effects.length = 0;
+      RaccoonTab({ tt });
+      activeCleanups = effects.map((effect) => effect());
+      effects.length = 0;
+      return true;
+    };
+
+    const unmount = mount();
+    check("the failing tab polls immediately on mount", fetchCalls >= 1, `calls=${fetchCalls}`);
+    const healthy = scheduled?.ms;
+    check("a first failure schedules the stated cadence first", typeof healthy === "number", String(healthy));
+
+    // Let the in-flight failure land (the stub resolves immediately).
+    await new Promise((resolve) => setImmediate(resolve));
+    check("a failure re-renders even with no header mounted", rerender(), "the back-off needs a render");
+    check("…and the cadence backs off to at least a minute",
+      scheduled?.ms >= 60_000, `interval=${scheduled?.ms}`);
+    check("the tab really was talking to a failing Host", fetchCalls >= 1, `calls=${fetchCalls}`);
+
+    unmount();
+    for (const c of activeCleanups) if (typeof c === "function") c();
+    check("unmount clears the interval", scheduled === null);
+  } finally {
+    globalThis.fetch = realFetch;
+    globalThis.setInterval = realSetInterval;
+    globalThis.clearInterval = realClearInterval;
+    const runtime = await import("../src/client/runtime.ts");
+    runtime.provideClientReact(reactStandin);
+    if (realDocument === undefined) delete globalThis.document;
+    else globalThis.document = realDocument;
   }
 }
 

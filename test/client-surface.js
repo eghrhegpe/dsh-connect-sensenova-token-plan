@@ -75,6 +75,12 @@ const React = Object.freeze({
   useRef: (initial) => ({ current: initial })
 });
 
+// Exported so a suite that must drive REAL effects (see the polling-loop group
+// in `render.test.mjs`) can install its own recording React through
+// `runtime.ts` and then restore this one — the seam is a plain assignment, so
+// handing it back is the whole contract.
+export const reactStandin = React;
+
 await import("../src/client/index.ts");
 
 const registration = registrations.find((entry) => entry.id === CLIENT_ID);

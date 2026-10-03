@@ -9,14 +9,23 @@ import type { Tt } from "./runtime.ts";
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  // `entry.label` is the Plugins-page card name. It was "积分面板" while the
-  // plugin was a single-topic quota card; now the card hosts three tabs
-  // (额度 / 接入 API / 小浣熊), so the name is the plugin, not one tab.
-  "entry.label": "商汤接入",
-  // The in-card page title used to repeat the card name ("积分面板"). With the
-  // pinned header demoted to a shell whose right side is filled by the ACTIVE
-  // tab, the title is the plugin identity, never a quota-only label.
-  "panel.title": "商汤接入",
+  // NOTE: there is deliberately NO `entry.label` key here. It used to carry the
+  // Plugins-page card name ("积分面板" → "商汤接入") and had no call site for
+  // two releases: the Plugins page names the card from `package.json` +
+  // `locale/<lang>.json` (PITFALLS §27), not from this dictionary, and the
+  // in-card heading reads `panel.title` below. It was maintained in two
+  // languages with no consumer. If the card name ever needs to change, the one
+  // source is `locale/zh.json`'s `meta.title`.
+  // The in-card page title: the plugin identity, never a quota-only label. With
+  // the pinned header demoted to a shell whose right side is filled by the
+  // ACTIVE tab, a title repeating "积分面板" would misdescribe two of three tabs.
+  //
+  // It reads the SAME string as the Plugins-page card (`locale/<lang>.json`'s
+  // `meta.title`): both are on screen at once once the card is opened, and they
+  // used to say different things — 「商汤 Token Plan 接入全家桶」 on the card,
+  // 「商汤接入」 inside it. `test/panel.test.mjs` pins the pair, so change this
+  // and the locale file together.
+  "panel.title": "商汤 Token Plan 接入全家桶",
   "panel.back": "返回会话",
   "panel.refresh": "刷新",
   "panel.updated": "更新于 {time}",
@@ -221,8 +230,7 @@ export const zh = {
 
 /** English dictionary, mirroring every zh key. */
 export const en: typeof zh = {
-  "entry.label": "SenseNova",
-  "panel.title": "SenseNova",
+  "panel.title": "SenseNova Token Plan Connect",
   "panel.back": "Back to conversation",
   "panel.refresh": "Refresh",
   "panel.updated": "Updated {time}",

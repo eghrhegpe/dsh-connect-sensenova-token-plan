@@ -62,6 +62,34 @@ const healthy = {
   check("the missing field reads as not needing setup", result.needsSetup === true);
   check("the reason still names the missing account", result.guidanceKey === "panel.jwtMissing",
     String(result.guidanceKey));
+
+  // The COMMON shape is NOT the legacy one above: the Host answers `ok:true`
+  // for "not signed in yet" and puts the state in `quotaError.code`
+  // (e2e asserts this at test/e2e.mjs — "an unconfigured panel reports the quota
+  // unavailable, not an error"). That distinction is load-bearing for polling:
+  // `useSnapshotPolling` backs off to a minute whenever `interpretSnapshot`
+  // yields an error, so if `not_configured` ever started reading as a FAILURE,
+  // a perfectly normal fresh install would poll once a minute instead of every
+  // 30 s. Pinned here so a change to `interpretSnapshot` cannot make the
+  // ordinary unconfigured state look like a broken one.
+  const fresh = view({
+    ok: true,
+    pools: { pools: [] },
+    trend: { models: [] },
+    quotaError: { code: "not_configured", message: "no console account is configured" },
+    auth: { configured: false, hasAccount: false, hasRefreshToken: false, needsAccount: true, ephemeral: false, retryAfterMs: null }
+  });
+  check("an unconfigured panel is ok:true, so the snapshot reader sees NO error",
+    interpretSnapshot({
+      ok: true,
+      auth: { configured: false },
+      quotaError: { code: "not_configured" }
+    }).error === null,
+    JSON.stringify(interpretSnapshot({
+      ok: true, auth: { configured: false }, quotaError: { code: "not_configured" }
+    })));
+  check("…and the ordinary unconfigured state is not an error view either",
+    fresh.render === RENDER.PANELS, fresh.render);
 }
 
 // === B2. THE CLEARED-ACCOUNT DEAD END: `ok:true` after forget ============
@@ -281,6 +309,74 @@ const healthy = {
   const onlyEn = enKeys.filter((key) => !zhKeys.includes(key));
   check("no key exists only in Chinese", onlyZh.length === 0, onlyZh.join(", "));
   check("no key exists only in English", onlyEn.length === 0, onlyEn.join(", "));
+
+  // …and every key is actually READ somewhere. A key no component asks for is
+  // maintained in two languages forever and shown to nobody: `entry.label` was
+  // exactly that (the Plugins page names the card from `package.json` +
+  // `locale/`, and the in-card heading reads `panel.title`), so it sat in both
+  // dictionaries with zero call sites and green tests. Same failure shape as
+  // PITFALLS §29 — scaffolding with no consumer and no watcher.
+  //
+  // Only keys a text scan can judge are in scope. Two families are exempt and
+  // the exemption is written out rather than hidden behind a pattern:
+  //   - `llm.level.*` / `llm.src.*` are built at runtime by `dictKey()` from
+  //     Host-enumerated values, so no literal exists to find;
+  //   - keys reached through a VARIABLE (`tt(key)`, `tt(absentKey)` in
+  //     `provider-controls.ts`) cannot be resolved statically. Listing them here
+  //     is the honest statement that this check covers the literal-key surface
+  //     only — the alternative (pretending to resolve them) would be a check
+  //     that can be wrong, which is worse than one with a written boundary.
+  const DYNAMIC = new Set([
+    // tt(key) over a prop / local, chosen per draw or per state
+    "llm.id", "llm.keyEditor", "draw.on", "draw.onList", "draw.candidates",
+    "draw.badgeAuto", "draw.badgePinned", "draw.modelFallback", "draw.noTools",
+    "draw.noToolsPeer", "draw.noToolsRefused",
+    "pool.models", "pool.remaining", "raccoon.switchBusy"
+  ]);
+  const clientFiles = (await readdir(new URL("../src/client", import.meta.url), { recursive: true }))
+    .filter((name) => name.endsWith(".ts") && !name.endsWith("i18n.ts"));
+  const usedKeys = new Set();
+  for (const name of clientFiles) {
+    const text = await readFile(new URL(`../src/client/${name}`, import.meta.url), "utf8");
+    for (const m of text.matchAll(/\btt\(\s*"([^"]+)"/g)) usedKeys.add(m[1]);
+    // A key reached through an EXPRESSION rather than a literal right after the
+    // paren: `tt(a ? "auth.portalHint" : "auth.registerHint")`,
+    // `tt(\`section.${open ? "collapse" : "expand"}\`)`. Both spellings are
+    // ordinary call sites a human reads, so scanning for the `namespace.key`
+    // shape anywhere in a client module covers them without pretending to parse
+    // the expression.
+    for (const m of text.matchAll(/["'`]([a-z][\w]*(?:\.[\w-]+)+)["'`]/g)) usedKeys.add(m[1]);
+    // Tables whose VALUES are dictionary keys: `GUIDANCE_BY_CODE` /
+    // `REFUSAL_TEXT` in `snapshot.ts` map a wire code or a tab id to a key
+    // (typed `Record<string, DictionaryKey>`), and `raccoon-tab`/`panel-page`
+    // map tab ids the same way. Those literals are consumed at runtime through
+    // the table, so the scans above cannot see them.
+    for (const m of text.matchAll(/:\s*"([a-z][\w]*(?:\.[\w-]+)+)"/g)) usedKeys.add(m[1]);
+  }
+  const unused = zhKeys.filter((key) => !usedKeys.has(key) && !DYNAMIC.has(key) && !key.startsWith("llm.level.") && !key.startsWith("llm.src."));
+  check("every statically-visible dictionary key is read by something", unused.length === 0,
+    unused.join(", "));
+
+  // The plugin's NAME is stated in three places, and two of them sit on the
+  // same screen: the Plugins-page card title comes from `locale/<lang>.json`'s
+  // `meta.title` (the shell's own lookup, PITFALLS §27), while the heading
+  // inside the opened card comes from the panel dictionary's `panel.title`.
+  // Nothing joined them, so the card could read 「商汤 Token Plan 接入全家桶」
+  // on one surface and 「商汤接入」 on the other with every test green — two
+  // names for one plugin, differing by a whole tab's worth of description. The
+  // pair is pinned here so the two surfaces cannot drift apart silently.
+  //
+  // `package.json`'s `displayName` is deliberately NOT part of this: that one
+  // names the package in npm/marketplace listings (English by convention) and
+  // is not shown on either card surface.
+  const localeZh = JSON.parse(await readFile(new URL("../locale/zh.json", import.meta.url), "utf8"));
+  const localeEn = JSON.parse(await readFile(new URL("../locale/en.json", import.meta.url), "utf8"));
+  check("the zh card name and the in-card title agree",
+    localeZh?.meta?.title === dictionaries.zh["panel.title"],
+    `locale=${localeZh?.meta?.title} panel=${dictionaries.zh["panel.title"]}`);
+  check("the en card name and the in-card title agree",
+    localeEn?.meta?.title === dictionaries.en["panel.title"],
+    `locale=${localeEn?.meta?.title} panel=${dictionaries.en["panel.title"]}`);
 }
 
 // === F4. the panel's rhythm comes from the Host, not from a literal ======
@@ -294,13 +390,34 @@ const healthy = {
 // 1-second countdown timer is unrelated to polling and may stay a literal.
 {
   // The cadence machinery now lives in the extracted `useSnapshotPolling` hook
-  // (panel-page.ts owns only JSX + the non-polling state).
+  // (panel-page.ts owns only JSX + the non-polling state), and since the
+  // visibility/back-off loop was hoisted into the shared
+  // `use-polling-interval.ts` (the Raccoon tab drives the same loop), the
+  // literal-free cadence assertion follows it there. Same rule, new home: the
+  // check is about "the timer takes a STATED cadence", wherever that timer is
+  // written — and it must stay a single occurrence, because two would mean two
+  // loops that could drift apart again.
   const hookSource = await readFile(new URL("../src/client/use-snapshot-polling.ts", import.meta.url), "utf8");
   const pageSource = await readFile(new URL("../src/client/panel-page.ts", import.meta.url), "utf8");
-  const pollTimers = hookSource.match(/setInterval\(run,\s*[^)]*\)/g) ?? [];
+  const loopSource = await readFile(new URL("../src/client/use-polling-interval.ts", import.meta.url), "utf8");
+  const pollTimers = loopSource.match(/setInterval\(\w+,\s*[^)]*\)/g) ?? [];
   check("the poll timer takes a stated cadence, not a literal",
     pollTimers.length === 1 && /\d/.test(pollTimers[0]) === false,
     pollTimers.join(" | "));
+  // The loop the quota hook shares with the Raccoon tab: the two tabs must not
+  // grow separate intervals again (the visibility pause and the back-off are
+  // exactly what drifted), so both are pinned to the one hook.
+  const raccoonSource = await readFile(new URL("../src/client/raccoon-tab.ts", import.meta.url), "utf8");
+  check("both tabs drive the one shared polling loop",
+    /usePollingInterval\(/.test(hookSource) && /usePollingInterval\(/.test(raccoonSource)
+      && !/setInterval\(/.test(hookSource) && !/setInterval\(/.test(raccoonSource),
+    "a tab grew its own setInterval");
+  // The back-off is a real number, so pin it: a "60_000" that silently becomes
+  // 6 s would be faster than the cadence it is backing off from.
+  const backoff = loopSource.match(/ERROR_BACKOFF_MS\s*=\s*(\d+_\d+|\d+)/) ?? [];
+  check("the failure back-off is at least a minute",
+    Number(String(backoff[1] ?? "0").replace(/_/g, "")) >= 60_000,
+    `${backoff[1] ?? "not found"}`);
   check("the cache note quotes the snapshot's own number",
     /cache:\s*data\?\.cacheSeconds/.test(pageSource),
     (pageSource.match(/cache:[^,}]*cacheSeconds[^)]*\)/g) ?? []).join(" | "));

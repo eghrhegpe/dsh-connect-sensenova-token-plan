@@ -22,10 +22,10 @@ name: CI
 #                  the loader, routes, and trust fence assemble correctly — the class
 #                  of bug the offline suites cannot see. It needs the dsh CLI, a host
 #                  that can bind loopback ports, AND the BUILT artifacts (`lib/index.js`,
-#                  root `client.js`) — both gitignored, so this job must build them
-#                  itself; a fresh checkout has neither entry and the loader silently
-#                  drops it. A HARD GATE since 2026-10-02: it runs the same
-#                  `test/e2e-gate.mjs` that ends the local `npm test`, so an
+#                  root `client.js`) — so this job builds them itself before booting,
+#                  which is also what proves a checkout that carries no built lib
+#                  still activates once the build has run. A HARD GATE since 2026-10-02:
+#                  it runs the same `test/e2e-gate.mjs` that ends the local `npm test`, so an
 #                  environment that cannot host dsh prints a loud SKIP and exits 0
 #                  (never a false red), while a run that does host it FAILS the build.
 #                  This plugin's worst bug (a nested `auth:` block posting a REAL
@@ -142,8 +142,8 @@ jobs:
           node test/typecheck-gate.mjs
           # The build gate is not a *.test.mjs, so it stays outside the
           # three-way roster pin; it is listed here because CI is exactly
-          # where the build must be proven (artifacts are gitignored, so a
-          # fresh checkout has none until this build produces them).
+          # where the build must be proven — a checkout without a prior build
+          # has no artifacts until this produces them.
           node test/build-gate.mjs
 
   e2e:
@@ -155,11 +155,10 @@ jobs:
         with:
           node-version: '22'
       # The bundle's two entries are BUILT ARTIFACTS (`lib/index.js`, root
-      # `client.js`) and both are gitignored — a fresh checkout has neither, so the
-      # loader drops the entry with only "1 entry did not activate" in the boot log
-      # and every API route falls through to the Host's default handler as a bare 401.
-      # This job had no build step at all, so it was red on every run since the first
-      # one: 35/44 checks, the very first of them the loader-activation check.
+      # `client.js`). They are VERSIONED in git (ADR-005), so this job still
+      # builds them before booting rather than trusting the checkout: that is
+      # what proves a checkout which carries no built lib (a shallow or
+      # artifact-less copy) still activates the bundle once the build has run.
       - name: Install dev dependencies (tsdown, for the build)
         run: npm install --legacy-peer-deps --no-audit --no-fund
       - name: Build the artifacts the bundle ships

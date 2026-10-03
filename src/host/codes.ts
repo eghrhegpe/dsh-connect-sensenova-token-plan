@@ -217,3 +217,92 @@ export const NO_LOGIN_CODES = Object.freeze(new Set([
   CODE.CONFIG_ERROR,
   CODE.CONSOLE_ERROR
 ]));
+
+/**
+ * SYMPTOM ids — what the USER (or an agent reading this machine) SEES, as
+ * opposed to {@link CODE}, which is what the plugin failed with.
+ *
+ * Why this is a second list and not a renaming of the first: the two answer
+ * different questions. `CODE.CONSOLE_ERROR` is what the plugin reports; "额度
+ * 那一栏一直是空的" is what someone actually types into a search box, an issue
+ * tracker, or an agent's first turn. Documentation was reachable only through
+ * TOPIC ("何时查 ROADMAP"), so a report phrased as a symptom had to be turned
+ * into a topic by a human who already knew the answer — precisely the people
+ * who do not need the doc. `docs/TROUBLESHOOTING.md` is indexed by these ids,
+ * and `doctor --json` reports them (`symptoms`), so the lookup runs in both
+ * directions: symptom → doc, and machine state → symptom → doc.
+ *
+ * The ids are deliberately coarse and stable: they key a documentation page,
+ * not a program branch, so they are NOT wire values and are free to be added
+ * to without a compatibility story. `test/doctor.test.mjs` pins that every id
+ * this file declares is documented in `TROUBLESHOOTING.md`.
+ */
+export const SYMPTOM = Object.freeze({
+  /** 额度 tab 一直显示"不可用"/空，没有数字。 */
+  QUOTA_EMPTY: "quota-empty",
+  /** 面板要求重新登录 / 登录后又立刻掉线。 */
+  NEEDS_LOGIN: "needs-login",
+  /** 改了插件代码但面板行为没变。 */
+  STALE_CODE: "stale-code",
+  /** 打开 provider 开关后，DSH 模型列表里没有商汤模型。 */
+  PROVIDER_MISSING: "provider-missing",
+  /** 模型列表里没有某个已开通的模型 / 出图工具不出现。 */
+  TOOL_OR_MODEL_MISSING: "tool-or-model-missing",
+  /** 状态文件读不出来，或开关"明明打开了却说不通"。 */
+  STATE_UNREADABLE: "state-unreadable",
+  /** 面板顶部红色配置错误。 */
+  CONFIG_ERROR: "config-error",
+  /** 登录被拒/锁号/限频类拒绝。 */
+  LOGIN_REFUSED: "login-refused"
+} satisfies Record<string, string>);
+
+/** Union of every symptom id, for compile-time narrowing at call sites. */
+export type SymptomValue = typeof SYMPTOM[keyof typeof SYMPTOM];
+
+/**
+ * A one-line, user-facing hint per symptom id — the sentence `doctor` prints
+ * so an operator (or an agent) reading the report does not have to open a
+ * document to learn what to do next. The long form lives in
+ * `docs/TROUBLESHOOTING.md`; this map only names the page and the first move.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const SYMPTOM_HINT: Readonly<Record<SymptomValue, string>> = Object.freeze({
+  [SYMPTOM.QUOTA_EMPTY]:
+    "docs/TROUBLESHOOTING.md#a1-额度栏是空的或显示不可用 — 先确认控制台账号已登录（面板「积分额度」tab 顶部），再看快照的 auth.error 与 shapeWarnings。",
+  [SYMPTOM.NEEDS_LOGIN]:
+    "docs/TROUBLESHOOTING.md#b1-面板反复要求重新登录 — refresh_token 已被吊销且环境无密码；在面板表单重填一次账号密码。",
+  [SYMPTOM.STALE_CODE]:
+    "docs/TROUBLESHOOTING.md#c1-改了代码但面板没变 — Host 半边只在启动时加载一次，必须完全退出 DSH（含托盘）再启动。",
+  [SYMPTOM.PROVIDER_MISSING]:
+    "docs/TROUBLESHOOTING.md#b2-模型列表里没有商汤模型 — 确认 provider 开关已开且 llm 服务存在；用 npm run doctor 查磁盘上的生效值。",
+  [SYMPTOM.TOOL_OR_MODEL_MISSING]:
+    "docs/TROUBLESHOOTING.md#b3-某个模型没出现或出图工具没挂上 — 出图工具的下一次 Host 启动才挂载（agent tools 无 unregister 语义）；模型清单看 catalog 是否拉到。",
+  [SYMPTOM.STATE_UNREADABLE]:
+    "docs/TROUBLESHOOTING.md#c2-状态文件读不出来或开关对不上 — 状态文件版本护栏（ADR-006）会拒写未知版本；别手改 JSON，用面板开关改。",
+  [SYMPTOM.CONFIG_ERROR]:
+    "docs/TROUBLESHOOTING.md#c3-面板顶部报配置错误 — 检查 cordis.patch.yml 的端点类字段（SETUP.md §3），改后重装/重载 Host。",
+  [SYMPTOM.LOGIN_REFUSED]:
+    "docs/TROUBLESHOOTING.md#b1-面板反复要求重新登录 — 面板会显示商汤原话；时间型拒绝等窗口，凭据型拒绝不自动重试（AUTH.md）。"
+});
+
+/**
+ * The first move for a symptom id, as a TOTAL function.
+ *
+ * Why not have callers index {@link SYMPTOM_HINT} directly: an index signature
+ * cannot promise the key is present, so `SYMPTOM_HINT[id]` types as
+ * `string | undefined` and every consumer under `strictNullChecks` either
+ * carries a `!`/cast or fails to compile. Here the missing case is handled once,
+ * at the lookup, by narrowing the id to one the table actually declares —
+ * so "a symptom id with no hint" is not representable downstream, and a new id
+ * added to {@link SYMPTOM} without a hint cannot reach a report.
+ *
+ * The fallback names the page instead of inventing advice: an unknown id is a
+ * bug in the caller, and the useful response to a bug is "here is where the
+ * table lives", not a confident sentence.
+ * @param {SymptomValue} id - the symptom id.
+ * @returns {string} the hint, or the "no hint declared" pointer.
+ */
+export function hintFor(id: SymptomValue): string {
+  const hint: string | undefined = SYMPTOM_HINT[id];
+  return hint ?? `no first move declared for ${id} — add one to SYMPTOM_HINT in codes.ts`;
+}

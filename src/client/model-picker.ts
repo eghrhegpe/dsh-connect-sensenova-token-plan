@@ -3,7 +3,7 @@
  * picker around it.
  */
 import { MODELS_PATH } from "./const.ts";
-import { format, tokenSize } from "./format.ts";
+import { errorText, format, tokenSize } from "./format.ts";
 import { postJsonOrThrow } from "./http.ts";
 import { ModelRow } from "./model-row.ts";
 import { bulkModelsIn, modelIsOn, toggleModelIn } from "./models.ts";
@@ -170,7 +170,7 @@ export function ModelPicker({ llm, onDone, tt }: {
       setSavedKey(posted);
       onDone?.();
     } catch (error) {
-      setNotice(format(tt("llm.rosterError"), { error: error instanceof Error ? error.message : String(error) }));
+      setNotice(format(tt("llm.rosterError"), { error: errorText(error) }));
     } finally {
       setBusy(false);
     }

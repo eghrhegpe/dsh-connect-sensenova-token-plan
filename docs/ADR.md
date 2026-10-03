@@ -48,3 +48,12 @@
 - **理由**：DSH 市场的 `github:` 安装源是 **pnpm git-dep**，pnpm 11 在没有 allowBuilds 批准时**不会**替仓库跑 `prepack`/`prepare`——此前 `lib/` 被 gitignore，用户打 GitHub 仓库地址装出来的插件缺宿主入口 `lib/index.js`，卡片静默失效。兄弟插件 `dsh-connect-qoder`（其 `.gitignore` 的 docs/issues/19）已踩过同一坑并采用同款版本化方案。另：构建产物经实测**字节可复现**（双跑 `diff` 为空），门禁可信。
 - **取代**：2026-09-30 的「`lib/` 与 `client.js` 一并 gitignore、产物彻底不入库」方案（原载 [ROADMAP.md](./ROADMAP.md) §6.2，已在该处标注被本 ADR 推翻）。该方案当时依赖「删 lib 可重建」即可，未考虑 github: 安装源不跑 prepack 的现实，故作废。
 - **新约定（团队纪律）**：此后改 `src/` 后，除 `npm run build` 重建，必须把 `lib/`、`client.js` 与源码一并提交，否则 `build-freshness` 门禁红。
+
+## ADR-006 状态文件写侧加版本护栏：拒绝覆盖本构建读不懂的记录
+
+- **日期**：2026-10-03
+- **状态**：现行（实现见 `src/host/state-store.ts` 的 `readStateVersion` / `isKnownStateVersion` 原语与各 store 的 `writePayload`；降级信号经 `degrade()`，见 [PITFALLS.md](./PITFALLS.md) §37）
+- **裁定**：每个带 `version` 的状态文件（catalog / provider / draw / raccoon-switch / throttle）在**写之前**必须先读出磁盘上的 `version`，且当该版本是本构建**不认识**的数字版本时**拒绝写入**——不是覆盖、不是静默跳过，而是 `degrade` 记下原因并把拒绝理由回传给调用方，由调用方决定是否对用户可见。「磁盘上没有 version」与「没有文件」同义（nothing to protect，放行）；只有**本构建读不懂的数字版本**才意味着「这是更新版构建写的」，覆盖它等于销毁自己都看不见的数据。
+- **理由**：这些状态文件是**运营态**而非用户配置，跨版本升级/回滚时新旧构建会在同一路径上交替写。「先写后读」的老实做法在回滚场景里会把新版本写的清单或开关静默降级成旧版本认识的形态，用户看不出任何异常——而这类损坏不可逆（文件里没有备份）。护栏本身由 `state-store.ts` 的两个纯函数承载，五个 store 复用同一份白名单原语，不各自实现（IMPROVEMENTS §4.1「用 Host 原语统一」的第一层已在此落地）。
+- **取代/边界**：与 §23（[PITFALLS.md](./PITFALLS.md)）的**按 profile 分段**是正交的两件事——分段决定「写到哪个目录」，本护栏决定「能不能写」。二者都只保护写侧，读侧一律「不认识就当没有」（宁可多问一次平台，也不因读不懂而崩）。
+- **配套门禁**：ADR 编号被代码引用时必须在账本存在，由 `test/docs.test.mjs` 核对（此前该编号被 `src/` 与 `test/` 引用 27 处却不在账本，正是因为旧门禁只校验条目**形状**、从不校验**存在性**）。

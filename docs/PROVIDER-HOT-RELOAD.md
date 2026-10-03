@@ -27,7 +27,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 
 本插件选择更贴合自身架构的路径，与 qoder 的偏好存储同构：
 
-1. **开关状态存插件私有状态文件** `state/<profile>/<name>/provider.json`（新模块 `provider-store.ts`，完整性纪律与 `catalog-store.ts`/`throttle-store.ts` 一致：版本化、临时文件 + 原子改名、损坏即读作未设置；按 profile 分段，见 [PITFALLS.md](./PITFALLS.md) §23）。
+1. **开关状态存插件私有状态文件** `state/<profile>/<name>/provider.json`（新模块 `provider-store.ts`，完整性纪律与 `catalog-store.ts`/`throttle-store.ts` 一致：版本化、临时文件 + 原子改名、损坏即读作未设置；按 profile 分段，见 [PITFALLS.md](./PITFALLS.md) §23）。**这套纪律如今是五个开关 store 的同族写法**，共用 `state-store.ts` 的原语（`readStateVersion` / `isKnownStateVersion` / `writeStateFile`）：`provider-store`（本文）、`draw-store`（§7）、`catalog-store`、`raccoon-switch-store`（第二上游的开关）、`throttle-store`；写侧版本护栏的裁定见 [ADR.md](./ADR.md) ADR-006。
 2. **优先级**：面板保存过的值 > `cordis.patch.yml` 的 `registerProvider`（后者降级为「出厂默认」）。从未动过面板开关的部署，行为与 0.3.0 完全一致。
 3. **面板开关 → `POST /api/<name>/provider`**（同源围栏 + body 上限，与账号/api-key 路由同一信任形状）→ 存状态 → **立即** `publishProvider(当前目录, 当前允许清单)` → 返回去密状态。不用等下一个轮询周期。
 4. 快照 `llm.registerProvider` 回显**生效值**（不再是 patch 直读），新增 `registerSource`（`"panel"` / `"config"`）说明当前值来自哪一侧。
@@ -40,7 +40,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 |---|---|
 | `provider-store.ts`（新增） | 开关状态文件读写；无 peer 依赖，干净检出可测 |
 | `index.ts` | 生效值解析（面板 > 配置）、新路由 `GET/POST /api/<name>/provider`、快照 `llm` 块回显生效值与来源、dispose 清理 |
-| `client.js` | `ProviderStatus` 区新增开关控件（POST 后刷新快照）；中英文字典同步 |
+| `src/client/provider-controls.ts`（原 `client.js` 内联） | `ProviderStatus` 区新增开关控件（POST 后刷新快照）；`src/client/i18n.ts` 中英文字典同步 |
 | `package.json` / `docs/DSH-PLUGIN.md` | `files` 增补 `provider-store.ts`，教学快照同步 |
 | `test/provider.test.mjs` | `provider-store` 纯逻辑用例（归一、读写、版本拒绝、损坏忽略、forget） |
 | `test/routes.test.mjs` | 新路由用例（GET/POST、立即发布、403/405/400、回退配置默认） |
@@ -59,7 +59,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 
 1. **空清单 = 不过滤**（沿用 WorkBuddy 约定，`catalog-store.normalizeEnabledIds` 已如此）。首次安装没有任何历史清单，若「空 = 一个都不推」，新装用户会看到一个空的模型选择器，只能靠猜才会去勾。
 2. **「一个都不推」必须有独立写法**。空清单已经被上一条占用了，所以需要一个不会被任何真实模型命中的哨兵 `__hide_all__`：它让清单非空（因此走严格允许清单分支），同时又匹配不到任何模型。没有它，用户想临时把全部模型收起来就做不到——只能删掉 API Key。
-3. **面板与 Host 各持一份同一字面量**。浏览器侧的 `client.js` 只能 require 包名，import 不到本仓库的 `llm-models.ts`，所以 `HIDE_ALL_MODELS` 在两侧各写一次。这是一处**故意的重复**：`test/provider.test.mjs` 把两份字面量做相等断言，任一侧改名都会当场红，而不是等上线后静默变成「全部模型都推送」。
+3. **面板与 Host 各持一份同一字面量**。浏览器侧的 `src/client/` 只能 require 包名，import 不到本仓库的 `llm-models.ts`，所以 `HIDE_ALL_MODELS` 在两侧各写一次。这是一处**故意的重复**：`test/provider.test.mjs` 把两份字面量做相等断言，任一侧改名都会当场红，而不是等上线后静默变成「全部模型都推送」。
 4. **POST 只改清单，不改目录**，并在同一请求内 `publishProvider(当前目录, 新清单)`。同时把 `providerState.signature` 设成新清单的签名——否则每次轮询都会看到「签名变了」而重复发布一次，把一次点击变成每 30 秒一次的注册抖动。
 5. **只推勾选的，目录仍全量可见**。`snapshot.llm.models` 是整份目录（不受过滤影响），`modelCount` / `visionCount` 才是**实际注册**的数量（按清单过滤后）。两者分开，面板才能一边说「注册了 1 个」一边让用户看到还能勾选哪 6 个。
 
@@ -74,7 +74,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 | `lifecycle.ts` | `registerDrawTool` 改为读「面板保存值 > 配置默认值」的生效值，而不是直接读 `settings.drawEnabled` |
 | `routes/draw.ts` | 新增 `POST /api/<name>/draw`（2026-10 路由拆分后按资源归入 `routes/` 家族），与 `/provider` 同一信任形状 |
 | `snapshot-aggregate.ts` | 快照 `llm.drawEnabled` / `llm.drawSource` 回显生效值与来源 |
-| `client.js` | `ApiKeyForm` 区新增「出图工具」卡片，含 `DrawSwitch` 控件 |
+| `src/client/provider-controls.ts`（原 `client.js` 内联） | `ApiKeyForm` 区新增「出图工具」卡片，含 `DrawSwitch` 控件 |
 
 与 provider 开关的一个**语义差异**需要说明：provider 开关改的是「当前请求立刻重新发布注册对」，改完立即生效；draw 开关改的是「挂载时是否注册 agent 工具」，**当前 Host 进程里已经注册的工具不会因为改开关而消失或出现**——要真正生效需要在**下一个 Host (re)mount**（即重启 `dsh web` 或重新安装插件）时，`lifecycle.ts` 的 `startSideEffects` 重新读生效值。面板开关本身是「立即生效、无需重启」的**状态读写**；工具的实际挂载/卸载要等到下次 Host 启动。面板文案里「立即生效」指的是**开关值**本身，不是 agent 工具的实时性。
 

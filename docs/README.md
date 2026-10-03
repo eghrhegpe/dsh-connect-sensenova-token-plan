@@ -6,8 +6,14 @@ AI 协作会话从根目录 [AGENTS.md](../AGENTS.md) 进入：验证怎么跑�
 
 阅读顺序建议：先 [ARCHITECTURE.md](./ARCHITECTURE.md) 建立整体认知，再按需查 [SETUP.md](./SETUP.md) / [AUTH.md](./AUTH.md) / [API.md](./API.md)；改动代码前读 [TESTING.md](./TESTING.md) 与 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
+> **手里有症状，先看 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)**（按现象组织，不是按主题）。
+> 「额度那栏一直是空的」「登录后又掉线」「改了代码没生效」这类问题从那里进，每条给稳定症状码；
+> `npm run doctor --json` 的 `symptoms` 字段直接给症状码，人和 agent 用同一条路进文档。症状码真源是
+> `src/host/codes.ts` 的 `SYMPTOM`，与该页由 `test/doctor.test.mjs` 双向钉住。
+
 | 文档 | 内容 | 何时查 |
 |---|---|---|
+| [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | **按症状排查**：额度栏空 / 反复要求登录 / 模型或工具不出现 / 改了代码没生效 / 状态文件对不上 / 配置报错——每条给「先看哪 → 怎么办 → 根因在哪篇」，带稳定症状码供 doctor 与 agent 引用 | **排查问题的第一站**（先有症状、后有主题） |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 双仓库关系（`dsh-connect-sensenova-token-plan` 与 `upstream/`）、Host/Client 分流、数据流、生态定位与大统一路线（§5，同类插件核实见 §5.3、出图对接点源码对照见 §5.4）、与上游 Python 工具差异 | 理解结构、接手、做架构决策、定吸收边界 |
 | [ROADMAP.md](./ROADMAP.md) | 战略执行路线图（2026-09-29 起）：P0 解耦与契约回归（§2，`index.js` 控制面拆模块 + 商汤契约自动化回归）、429 全局自愈、§5「多 Key 池」纠偏、文档精炼、小浣熊网关契约复测与接入面盘点（§6.1），明确不做的边界 | 定吸收顺序 / 优先级、拍板侵入性、防范围漂移 |
 | [DSH-PLUGIN.md](./DSH-PLUGIN.md) | DSH 插件机制总览（bundle 结构、Loader 条目、cordis.patch.yml、安装重启、peer 依赖、与兄弟插件关系） | 理解「这是一个 DSH 插件」、对照 dsh-connect-qoder 范本 |

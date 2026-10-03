@@ -23,9 +23,13 @@
  *    stand-in require, and still exposes the panel test surface.
  *
  * Same rule as test/e2e-gate.mjs: if tsdown is not installed, print a loud
- * SKIP and exit 0 — a machine without dev deps is not a regression. (CI's
- * offline job installs nothing, so it always SKIPs here; wiring the build into
- * CI is a listed follow-up in ROADMAP §6.2.)
+ * SKIP and exit 0 — a machine without dev deps is not a regression. CI's
+ * offline job DOES install dev deps (`npm install --legacy-peer-deps`) and runs
+ * this gate, so on CI it never SKIPs; the byte-comparison half of the freshness
+ * rule is additionally owned by the `build-freshness` job, which rebuilds and
+ * then `git diff --exit-code -- lib client.js` against the committed artifacts
+ * (the check below cannot see that, since it diffs a tree its own build just
+ * rewrote).
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -157,8 +161,16 @@ check("host bundle is non-empty", existsSync(HOST_BUNDLE) && readFileSync(HOST_B
 //    `before` is null on a clean checkout (no artifact yet) — a fresh build is
 //    then trivially fresh.
 const after = normalized(ARTIFACT);
-check("client.js is fresh (rebuild reproduces it byte-for-byte)", before === null || before === after,
-  before === null ? "" : "the artifact drifted from src/client/ — the fresh build is now in the working tree; review and commit it");
+const fresh = before === null || before === after;
+// The detail must describe what actually happened: a previous spelling
+// returned the "artifact drifted" sentence unconditionally, so a clean run
+// printed `pass: true` beside a warning about a drift that had not occurred
+// (verified: the working tree stayed clean through the check). A gate whose
+// failure text lies trains readers to ignore it.
+check("client.js is fresh (rebuild reproduces it byte-for-byte)", fresh,
+  fresh
+    ? (before === null ? "" : "byte-for-byte identical to a rebuild of src/client/")
+    : "the artifact drifted from src/client/ — the fresh build is now in the working tree; review and commit it");
 
 // 4. shape: no top-level import/export statement — the file is evaluated by
 //    the browser module table AND imported as legal ESM in Node (the tail in

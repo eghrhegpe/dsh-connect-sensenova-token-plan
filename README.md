@@ -55,12 +55,16 @@
 
 ## 运维诊断：这台机器现在挂没挂 provider？
 
-provider / 出图开关的生效值存在插件私有状态文件里（`$DSH_HOME/state/<name>/`），不在任何配置或路由上——查"到底开没开"用 doctor，它只读状态文件、不碰凭据，Host 没起也能跑：
+provider / 出图开关的生效值存在插件私有状态文件里，不在任何配置或路由上。按 profile 分段（见 `docs/PITFALLS.md` §23）：`$DSH_HOME/state/<profile>/<name>/`，取不到 profile 名时退回共享目录 `$DSH_HOME/state/<name>/`——查"到底开没开"用 doctor，它只读状态文件、不碰凭据，Host 没起也能跑：
 
 ```powershell
 npm run doctor          # 人读：每个 profile 的 provider / draw 开关与模型清单
 npm run doctor:json     # 机器读：JSON（可进你的巡检 / 工单脚本）
 ```
+
+**遇到问题先看 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**——它按**你看到的现象**组织
+（额度栏空的、反复要求登录、模型不出现、改了代码没生效…），而不是按主题；每条带稳定症状码，
+`doctor --json` 的 `symptoms` 字段直接给症状码，人和 agent 走同一条路。
 
 ## 文档
 

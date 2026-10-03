@@ -1,11 +1,13 @@
 /**
  * The quota snapshot polling hook — the stateful half of `PanelPage`.
  *
- * Extracted from `panel-page.ts` so the ~120 lines of polling machinery (the
- * generation-guarded `load`, the cadence-following `useEffect`, the
- * visibility-aware interval) live in one testable seam instead of inside the
- * 438-line component. The hook returns exactly the five values the rest of the
- * panel renders from; it owns no JSX.
+ * Extracted from `panel-page.ts` so the polling machinery (the
+ * generation-guarded `load`, the cadence the Host states, the unmount teardown)
+ * lives in one testable seam instead of inside the 438-line component. The loop
+ * itself — the interval, the hidden-tab pause, the error back-off — is the
+ * shared one in `use-polling-interval.ts`, which the Raccoon tab drives too.
+ * The hook returns exactly the five values the rest of the panel renders from;
+ * it owns no JSX.
  *
  * The correctness notes below are WHY, not WHAT: each guards a real failure
  * mode that is invisible in the code alone.
@@ -13,7 +15,8 @@
  */
 import { useEffect, useCallback, useRef, useState } from "./runtime.ts";
 import { errorOfStatus, interpretSnapshot, type SnapshotFailure } from "./snapshot.ts";
-import { statedCadenceMs } from "./format.ts";
+import { statedCadenceMs, errorText } from "./format.ts";
+import { usePollingInterval } from "./use-polling-interval.ts";
 import { SNAPSHOT_PATH } from "./const.ts";
 import type { SnapshotData } from "./wire.ts";
 
@@ -102,7 +105,7 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
     } catch (reason) {
       // An abort is our own supersession, not a network failure.
       if (!isCurrent()) return;
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(errorText(reason));
     } finally {
       // The attempt is over one way or another — even where the early
       // `return`s above skipped their state writes (a missing `ok`, a
@@ -114,62 +117,33 @@ export function useSnapshotPolling(defaultCadenceMs = 30_000) {
     }
   }, [cadenceMs]);
 
-  // One effect owns the whole polling cycle: an immediate load on mount,
-  // then the cadence the Host last stated. Re-running on `cadenceMs` is
-  // what lets a changed rate take effect without a reload.
+  // One effect owns the whole polling cycle, and the loop itself is the shared
+  // one (see `use-polling-interval.ts`): stop while the tab is hidden, back off
+  // to a minute while the last answer was a failure. Re-running on `cadenceMs`
+  // is what lets a changed rate take effect without a reload.
   //
-  // The interval is stopped while the tab is hidden — nobody is watching
-  // the screen, and every poll keeps a Host connection open — and a single
-  // load fires on the way back, which also gives a stale "更新于" line
-  // something fresh to say.
-  useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const run = () => {
-      if (alive) void load();
-    };
-    const start = () => {
-      if (timer === null) timer = setInterval(run, cadenceMs);
-    };
-    const stop = () => {
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-    // A re-run can land while the tab is hidden (a completed in-flight load
-    // changed `cadenceMs`, re-running this effect): do not start the interval
-    // or fire the immediate load in that case — polling is for visible tabs.
-    if (typeof document === "undefined" || document.visibilityState !== "hidden") {
-      run();
-      start();
-    }
-    const onVisibility = () => {
-      if (!alive) return;
-      if (document.visibilityState === "hidden") stop();
-      else {
-        run();
-        start();
-      }
-    };
-    if (typeof document !== "undefined" && "addEventListener" in document) {
-      document.addEventListener("visibilitychange", onVisibility);
-    }
-    return () => {
-      // Unmount supersedes every in-flight poll: bump the generation so a
-      // completing load reads `isCurrent() === false` and skips its state
-      // writes, and abort the request so the Host connection is not held open
-      // for nothing (the `alive` flag alone only stopped the INTERVAL; an
-      // already-sent fetch still resolved and wrote to the unmounted hook).
-      alive = false;
-      stop();
-      generation.current += 1;
-      inFlight.current?.abort?.();
-      if (typeof document !== "undefined" && "addEventListener" in document) {
-        document.removeEventListener("visibilitychange", onVisibility);
-      }
-    };
-  }, [load, cadenceMs]);
+  // The `failed` back-off is the read-side half of a discipline the Host already
+  // keeps on the write side (its throttle store backs off after a refusal, per
+  // PITFALLS §6): without it, a Host that is down is re-asked at full cadence
+  // every 30 s until the panel closes, and the error line it shows is the only
+  // thing telling the user anything went wrong.
+  const failed = error !== null;
+  usePollingInterval(load, cadenceMs, { failed });
+
+  // Unmount ONLY, and deliberately separate from the loop above: that hook's
+  // cleanup also runs on every cadence rebuild (a changed `pollSeconds`, an
+  // error flipping the back-off on), where this hook is still mounted and its
+  // request is perfectly valid. Bumping the generation here — rather than in the
+  // loop's cleanup — means only a real unmount supersedes an in-flight poll: a
+  // completing load then reads `isCurrent() === false` and skips its state
+  // writes, and aborting releases the Host connection instead of leaving an
+  // already-sent fetch to settle on a hook nobody is rendering.
+  //
+  // Empty dependency list on purpose: it must fire exactly once, on unmount.
+  useEffect(() => () => {
+    generation.current += 1;
+    inFlight.current?.abort?.();
+  }, []);
 
   return { data, error, loadedOnce, updatedAt, cadenceMs, load };
 }

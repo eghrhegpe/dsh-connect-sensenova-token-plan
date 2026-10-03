@@ -211,10 +211,11 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
   与源码放进**同一个 commit**；只提交源码不提交产物 = build-gate 红。devDeps 安装需
   `--legacy-peer-deps`（peer 是 Host 运行时包，registry 上只发预发布版且整套互相以 peer 咬合；本仓刻意无 lockfile。**2026-10-01 补正**：见 [PITFALLS.md](./PITFALLS.md) §30——正因如此，CI 的 peer 来源必须是整棵 CLI 运行时树）。
 - **【当晚已被取代】「Host 半边不动」**：随后按 workbuddy 规范完成全仓归一——Host 源码迁
-  `src/host/*.ts`（27 个模块），tsdown 多入口构建 `lib/`（ESM bundle + 切分 chunk）；`lib/` 与根
-  `client.js` 一并 `.gitignore`，**产物彻底不入库**（上文「产物与源码同 commit」纪律随之作废），
-  *该方案于 2026-10-03 被推翻*：DSH 市场 `github:` 安装源走 pnpm git-dep、不跑 prepack，lib 不入库则 GitHub 直装坏——现改为 lib/ 与 client.js **版本化入库**（见 `.gitignore` 注释、`ci.yml` 的 build-freshness 门禁、兄弟插件 dsh-connect-qoder 的 docs/issues/19），「产物与源码同 commit」纪律恢复。
-  测试面与门禁已适配；17 套件 + build-gate + e2e + tsc 全绿，「删 lib 可重建」验收通过。
+  `src/host/*.ts`（27 个模块），tsdown 多入口构建 `lib/`（ESM bundle + 切分 chunk）。当晚的方案是
+  `lib/` 与根 `client.js` 一并 `.gitignore`、**产物彻底不入库**，据此「产物与源码同 commit」纪律一度作废。
+  **该方案已于 2026-10-03 被推翻**：DSH 市场 `github:` 安装源走 pnpm git-dep、不跑 prepack，lib 不入库则 GitHub 直装坏——
+  现改为 lib/ 与 client.js **版本化入库**，「产物与源码同 commit」纪律恢复。裁定见 [ADR.md](./ADR.md) ADR-005；
+  同段的后半句不再有效，读者请以 ADR 为准。测试面与门禁已适配，build-freshness 为硬门禁，「删 lib 可重建」验收通过。
   checkJs 的 JSDoc 投入随 .ts 化自然并入类型标注。
 
 **遗留项已闭合（2026-09-30）**：CI 离线 job 现已安装 devDeps（`npm install

@@ -74,6 +74,32 @@ export function format(template: string, vars?: Record<string, unknown> | null):
 }
 
 /**
+ * A caught value as the one error string the panel shows.
+ *
+ * Every mutation surface (`ModelPicker`, `ProviderControls`, `RaccoonTab`)
+ * ends a `catch` with the same `why instanceof Error ? why.message : String(why)`
+ * template, and there were eight copies of it. That is the same drift the HTTP
+ * seam in `http.ts` was extracted to stop: a copy that handles a thrown string
+ * but not a rejected `{code}` object prints `[object Object]` in the panel's
+ * one error line, and no test catches it because each copy is trivial. One
+ * definition, so a fix lands everywhere at once.
+ * @param why - whatever the `catch` received.
+ * @returns {string} the Error's message, the string itself, or a JSON-ish
+ *   rendering of a thrown object (never `[object Object]`).
+ */
+export function errorText(why: unknown): string {
+  if (why instanceof Error) return why.message;
+  if (typeof why === "string") return why;
+  if (why === null || why === undefined) return String(why);
+  try {
+    return JSON.stringify(why) ?? String(why);
+  } catch {
+    // Circular or otherwise unserialisable: the shape itself is the message.
+    return String(why);
+  }
+}
+
+/**
  * A token count the way the platform names it: 1048576 → "1M", 65536 → "64K",
  * 128000 → "128K". Returns "" for a figure that is not a positive number, so
  * an unknown value draws no segment instead of a zero.

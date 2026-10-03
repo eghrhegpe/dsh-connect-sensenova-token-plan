@@ -1,10 +1,16 @@
 /**
- * Hook-free presentational components: the panel icon, the quota pool cards,
- * the exhaustion notice, the trend chart, and the collapsible section card.
- * The render suite drives every one of these in Node, so behavior may not
- * drift by a hair.
+ * Hook-free presentational components: the quota pool cards, the exhaustion
+ * notice, the trend chart, and the collapsible section card. The render suite
+ * drives every one of these in Node, so behavior may not drift by a hair.
+ *
+ * `PanelIcon` used to live here: an inline "积分币" glyph for a plugin card the
+ * Plugins page draws from `icon.svg`. It had no call site — the card renders
+ * through the `plugins.bundle.config` slot, and there is no sidebar row to put a
+ * glyph in — so the bundler dropped it from `client.js` entirely while its
+ * source, its bilingual comments and its `PANEL_ID` import stayed behind and
+ * were carried review after review. Deleted rather than kept "just in case":
+ * the icon a user actually sees is `icon.svg` at the repo root.
  */
-import { PANEL_ID } from "./const.ts";
 import { clockLong, count, format, when } from "./format.ts";
 import { h } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
@@ -20,32 +26,6 @@ import type { PoolData, PoolsData, QuotaWindowData, TrendData } from "./wire.ts"
  * well-formed case, so this narrows the same shape instead of redeclaring it.
  */
 type QuotaWindow = QuotaWindowData;
-
-/**
- * The "积分币" coin glyph the plugin card's `icon.svg` derives from, drawn here
- * so the shape lives in one place. The card itself is rendered by the Plugins
- * page (`plugins.bundle.config` slot); there is no sidebar row this could be a
- * glyph for.
- */
-export function PanelIcon({ size }: { size?: number }): unknown {
-  return h(
-    "svg",
-    {
-      "data-dsh-panel-entry": PANEL_ID,
-      viewBox: "0 0 16 16",
-      width: size,
-      height: size,
-      fill: "none",
-      stroke: "currentColor",
-      strokeWidth: "1.3",
-      strokeLinecap: "round",
-      strokeLinejoin: "round",
-      "aria-hidden": "true"
-    },
-    h("circle", { cx: 8, cy: 8, r: 6 }),
-    h("path", { d: "M8 5.2v5.6M6.2 6.6h3.6M6.2 9.4h3.6" })
-  );
-}
 
 /** The bar fill and figure tone for a usage percentage: 70 warn / 90 danger. */
 export function usageTone(pct: number): { fill: Record<string, unknown>; color: string } {

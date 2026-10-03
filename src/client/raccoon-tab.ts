@@ -19,10 +19,11 @@
  * logged-out view).
  */
 import { RACCOON_PATH } from "./const.ts";
-import { format, statedCadenceMs } from "./format.ts";
+import { errorText, format, statedCadenceMs } from "./format.ts";
 import { postJson, postJsonOrThrow } from "./http.ts";
 import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
+import { usePollingInterval } from "./use-polling-interval.ts";
 import { RaccoonCard } from "./raccoon-card.ts";
 import type { RaccoonState } from "./raccoon-card.ts";
 
@@ -81,7 +82,37 @@ export function RaccoonTab({
   const [loginNote, setLoginNote] = useState<string | null>(null);
   const [modelsNote, setModelsNote] = useState<string | null>(null);
   const [idsBusy, setIdsBusy] = useState(false);
+  /**
+   * The last failed read, held as state so a failure ALWAYS re-renders.
+   *
+   * `lastError` (below) is the value the loop reads; this is the re-render
+   * trigger that makes a ref-based read observable. Keeping them separate is
+   * deliberate: the loop must not depend on a render it causes, yet a pure
+   * failure with no `onReportStatus` produces no other state change. See the
+   * note on `fail` and the H group in `test/render.test.mjs`.
+   */
+  const [readFailure, setReadFailure] = useState<string | null>(null);
   const alive = useRef(true);
+  /**
+   * Whether the last read failed — the shared loop's back-off input.
+   *
+   * A ref, and that is load-bearing rather than lazy: the shared loop reads it
+   * DURING render to decide its cadence, so the back-off must not depend on the
+   * render it causes. A ref change is picked up on the NEXT render, and `load`
+   * guarantees one exists — every failure path calls `report(...)`, which calls
+   * `setLoginNote(...)` unconditionally and therefore re-renders. The record is
+   * written in exactly that one function, so it cannot drift from what the
+   * header shows.
+   *
+   * The unconditional part is the whole trick. An earlier draft could strand
+   * the back-off: with `onReportStatus` omitted there was no other state write
+   * on a pure-failure path (nothing about the data changed), so a tab talking
+   * to a dead Host kept polling at full speed. `setLoginNote` on every failure
+   * is what makes the ref version correct, so do not "optimise" it away — the
+   * H group in `test/render.test.mjs` drives this tab through a failing Host
+   * with NO `onReportStatus` and asserts the cadence backs off.
+   */
+  const lastError = useRef<string | null>(null);
   /**
    * Which read is allowed to write.
    *
@@ -133,6 +164,10 @@ export function RaccoonTab({
   // the poll kept running — the "silently shows old data" outcome
   // `docs/AUTH.md` forbids for the token path, which applied here too.
   const report = useCallback((err: string | null) => {
+    // The back-off input is recorded here, in the one place every read outcome
+    // passes through — including the "Host answered but said no" ones, which
+    // are failures even though the request succeeded.
+    lastError.current = err;
     if (onReportStatus !== undefined && alive.current) {
       onReportStatus({ updatedAt: lastGoodAt.current, error: err, onRefresh: () => void loadRef.current() });
     }
@@ -146,9 +181,26 @@ export function RaccoonTab({
     inFlight.current?.abort?.();
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     inFlight.current = controller;
-    /** Record a failed read: forward it to the header, the only place that renders it. */
+    /**
+     * Record a failed read: forward it to the header, the only place that
+     * renders it, AND make sure a render happens.
+     *
+     * The second half is not decoration. The shared loop reads `lastError`
+     * during render to decide its cadence, so a failure that changed no state
+     * would never re-render — and with `onReportStatus` omitted (this tab
+     * mounted without a header) nothing else on the failure path writes state
+     * either: the data is unchanged, so there is genuinely nothing new to show.
+     * The tab would then keep polling a dead Host at full speed, which is the
+     * exact failure the back-off exists to prevent.
+     *
+     * `readFailure` is written on EVERY failure (even to the same string) so
+     * React sees a real state change; the header still renders the message via
+     * `report`, and this state only carries the same text for the tab's own
+     * use as the loop's back-off trigger.
+     */
     const fail = (message: string) => {
       if (!isCurrent()) return;
+      setReadFailure(message);
       report(message);
     };
     try {
@@ -179,6 +231,10 @@ export function RaccoonTab({
         return;
       }
       setState(body);
+      // A success clears the back-off: leaving `readFailure` set would keep the
+      // loop at the slow cadence forever after one blip, so a recovered Host
+      // would still be polled only once a minute.
+      setReadFailure(null);
       // A terminal walk outcome is delivered ONCE, so this is the only poll
       // that sees it — the note is the tab's whole account of a scan that
       // ended without the user being signed in. (`logged_in` needs no note:
@@ -223,36 +279,57 @@ export function RaccoonTab({
   const pollMs = statedCadenceMs(state?.pollSeconds, RACCOON_POLL_MS);
   const scanPollMs = statedCadenceMs(state?.scanPollSeconds, RACCOON_SCAN_POLL_MS);
 
-  // One loop owns the tab's polling: an immediate load on entry, then the
-  // cadence; the timer stops on unmount (the tab may close at any time). The
-  // cadence is part of the dependency set, so entering or leaving a scan
-  // rebuilds the loop — and its immediate first load is what fetches the
-  // just-published roster the moment a scan settles.
-  useEffect(() => {
+  // The loop itself is the shared one (`use-polling-interval.ts`): an immediate
+  // load on entry, then the cadence; it stops while the tab is hidden and backs
+  // off to a minute while the last read failed. The cadence is part of that
+  // hook's dependency set, so entering or leaving a scan rebuilds the loop —
+  // and its immediate first load is what fetches the just-published roster the
+  // moment a scan settles.
+  //
+  // What this tab keeps for ITSELF is the per-load invalidation below: the
+  // shared hook owns when to fire, not whether a late answer may be written.
+  // `alive` is set here (not in the hook) so `load`'s own `isCurrent()` test
+  // still has something to read, and the generation bump on rebuild keeps a
+  // slow read from the OLD cadence (60 s ↔ 2 s) from overwriting the new loop's
+  // fresher answer — that rebuild re-sets `alive` to true on the way back in.
+  // Driven by STATE, not by `lastError.current`: the loop's effect must rebuild
+  // when the failure flips, and a ref change renders nothing on its own. The
+  // ref remains the record `report` writes (it is also what a late answer
+  // compares against); this is the observable that makes the back-off real
+  // even with no `onReportStatus` mounted.
+  const failed = readFailure !== null;
+  const fire = useCallback(() => {
     alive.current = true;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const run = () => {
-      if (alive.current) void load();
-    };
-    run();
-    timer = setInterval(run, scanning ? scanPollMs : pollMs);
+    void load();
+  }, [load]);
+  usePollingInterval(fire, scanning ? scanPollMs : pollMs, { failed });
+  // Unmount ONLY: mark the tab dead and release whatever it had in flight.
+  // Split from the loop above because that hook's cleanup also runs on every
+  // cadence rebuild (a scan starting or ending, a back-off engaging), where this
+  // tab is still mounted and `alive` must stay true. An empty dependency list
+  // makes this run exactly once, when the tab really goes away.
+  useEffect(() => () => {
+    alive.current = false;
+    // Invalidate the reads this tab started: a completing load then reads
+    // `isCurrent() === false` and skips its state writes. The generation bump
+    // below only stops the read from being WRITTEN; the abort releases the
+    // connection it was holding — `alive = false` alone leaves an already-sent
+    // fetch to settle on a tab nobody is rendering.
+    generation.current += 1;
+    inFlight.current?.abort?.();
+  }, []);
+  // Every REBUILD of the loop invalidates the reads the previous one started,
+  // but must NOT mark the tab dead: `fire` re-arms `alive` above, so the
+  // generation is what keeps a slow read from the OLD cadence (60 s ↔ 2 s) from
+  // overwriting the new loop's fresher answer.
+  useEffect(() => {
     return () => {
-      alive.current = false;
-      // Invalidate the reads this loop started: the cadence change that
-      // rebuilds this effect (60 s ↔ 2 s) also re-sets `alive` to true on the
-      // way back in, so a slow read from the OLD loop could otherwise still
-      // pass the liveness test and overwrite the new loop's fresher answer.
       generation.current += 1;
-      if (timer !== null) clearInterval(timer);
-      // The generation bump above only stops the read from being WRITTEN; this
-      // releases the connection it was holding. Quota's hook does the same in
-      // its cleanup, and for the same reason: `alive = false` alone leaves an
-      // already-sent fetch to settle on an unmounted (or superseded) tab.
       inFlight.current?.abort?.();
       // NOTE: the header is deliberately NOT cleared here. This cleanup also
-      // runs on every cadence rebuild (entering/leaving a scan), where the tab
-      // is still mounted — clearing wiped the header's raccoon cluster until
-      // the next successful GET, which the unmount-only effect below avoids.
+      // runs on every cadence rebuild, where the tab is still mounted —
+      // clearing wiped the header's raccoon cluster until the next successful
+      // GET, which the unmount-only effect below avoids.
     };
   }, [load, onReportStatus, scanning, pollMs, scanPollMs]);
 
@@ -273,7 +350,7 @@ export function RaccoonTab({
       const body = await postJsonOrThrow(RACCOON_PATH, { action: "switch", enabled });
       if (alive.current) setState((current) => (current ? { ...current, enabled: body.enabled === true, providerRegistered: body.providerRegistered === true } : current));
     } catch (why) {
-      if (alive.current) setLoginNote(format(tt("raccoon.switchError"), { error: why instanceof Error ? why.message : String(why) }));
+      if (alive.current) setLoginNote(format(tt("raccoon.switchError"), { error: errorText(why) }));
     }
   }, [tt]);
 
@@ -303,7 +380,7 @@ export function RaccoonTab({
         }
       }
     } catch (why) {
-      if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: why instanceof Error ? why.message : String(why) }));
+      if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: errorText(why) }));
     } finally {
       if (alive.current) setLoginBusy(false);
     }
@@ -315,7 +392,7 @@ export function RaccoonTab({
       await postJsonOrThrow(RACCOON_PATH, { action: "logout" });
       if (alive.current) void load();
     } catch (why) {
-      if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: why instanceof Error ? why.message : String(why) }));
+      if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: errorText(why) }));
     }
   }, [load, tt]);
 
@@ -345,7 +422,7 @@ export function RaccoonTab({
         setModelsNote(tt("raccoon.modelsSaved"));
       }
     } catch (why) {
-      if (alive.current) setModelsNote(format(tt("raccoon.modelsError"), { error: why instanceof Error ? why.message : String(why) }));
+      if (alive.current) setModelsNote(format(tt("raccoon.modelsError"), { error: errorText(why) }));
     } finally {
       if (alive.current) setIdsBusy(false);
     }

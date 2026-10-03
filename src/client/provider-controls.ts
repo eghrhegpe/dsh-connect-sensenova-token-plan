@@ -3,7 +3,7 @@
  * live provider switch, and the live draw-tool switch.
  */
 import { DRAW_PATH, PROVIDER_PATH } from "./const.ts";
-import { count, format } from "./format.ts";
+import { count, errorText, format } from "./format.ts";
 import { postJsonOrThrow } from "./http.ts";
 import { dictKey, h, useCallback, useState } from "./runtime.ts";
 import type { Tt, DictionaryKey } from "./runtime.ts";
@@ -102,7 +102,7 @@ export function ProviderSwitch({ llm, onDone, tt }: {
       await postJsonOrThrow(PROVIDER_PATH, { enabled: !enabled });
       onDone?.();
     } catch (error) {
-      setSwitchError(format(tt("llm.switchError"), { error: error instanceof Error ? error.message : String(error) }));
+      setSwitchError(format(tt("llm.switchError"), { error: errorText(error) }));
     } finally {
       setBusy(false);
     }
@@ -166,7 +166,7 @@ export function DrawSwitch({ llm, onDone, tt }: {
       await postJsonOrThrow(DRAW_PATH, { enabled: !enabled });
       onDone?.();
     } catch (error) {
-      setSwitchError(format(tt("draw.switchError"), { error: error instanceof Error ? error.message : String(error) }));
+      setSwitchError(format(tt("draw.switchError"), { error: errorText(error) }));
     } finally {
       setBusy(false);
     }
@@ -196,7 +196,7 @@ export function DrawSwitch({ llm, onDone, tt }: {
       await postJsonOrThrow(DRAW_PATH, { drawModelId: id });
       onDone?.();
     } catch (error) {
-      setSwitchError(format(tt("draw.switchError"), { error: error instanceof Error ? error.message : String(error) }));
+      setSwitchError(format(tt("draw.switchError"), { error: errorText(error) }));
     } finally {
       setBusy(false);
     }

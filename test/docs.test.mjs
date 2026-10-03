@@ -8,6 +8,9 @@
 //                    screenshots.json 声明的图真实存在于磁盘。这三条与 1-8 有本质区别：
 //                    前两组验的是「文档格式对不对」，它们验的是「文档有没有说实话」——
 //                    形式全绿而语义已漂，是本仓库踩过两次的坑（见 PITFALLS §25）。
+//   裁定账本闭合（12-13）：现行文档无内联考古补丁、账本条目形状齐；
+//                    且代码/测试里引用的 ADR-NNN 必须在账本里存在（曾有 ADR-006 被引用
+//                    27 处却不在账本，而只校验形状的门禁全绿放过）。
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname, extname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -544,6 +547,48 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
     }
     note(`考古纪律：受检 ${scanned} 篇现行文档零内联补丁；账本 ${heads.length} 条目形状合格（日期/状态齐）`);
   }
+}
+
+// 13) 代码/测试里引用的 ADR 编号必须在账本里存在
+// 事故（2026-10-03）：ADR-006（状态文件写侧版本护栏）被 src/ 的五个 store +
+// state-store + 四个测试套件共 27 处注释引用，却从未在 docs/ADR.md 落条目——
+// 上面第 12 项只校验条目**形状**（日期/状态齐不齐），从不校验**存在性**，所以它
+// 带着 27 处引用全绿通过。一个"已被代码依赖的裁定"缺席账本，等于裁定理由、
+// 取代关系与推翻它的能力全部无处可查（本插件的账本正是为此建立的）。
+// 这里沿用第 8 项的模式：walk src/ 与 test/，凡是引用了 ADR-NNN 就要求它入账。
+// 白名单只放本仓库无意的字符串命中（如正则在讲 ADR 形状本身）。
+{
+  const adrPath = join(ROOT, "docs", "ADR.md");
+  const ledger = existsSync(adrPath)
+    ? new Set([...readFileSync(adrPath, "utf8").matchAll(/^## (ADR-\d{3})/gm)].map((m) => m[1]))
+    : new Set();
+  const codeFiles = [];
+  const walk = (dir) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) { if (name !== "node_modules") walk(p); }
+      else if (/\.(ts|mjs|js)$/.test(name)) codeFiles.push(p);
+    }
+  };
+  walk(join(ROOT, "src"));
+  walk(join(ROOT, "test"));
+  const rel = (p) => p.replace(ROOT + "\\", "").replace(/\\/g, "/");
+  const seen = new Map(); // id -> 首个引用处
+  for (const f of codeFiles) {
+    const text = readFileSync(f, "utf8");
+    for (const m of text.matchAll(/ADR-\d{3}/g)) {
+      if (!seen.has(m[0])) seen.set(m[0], `${rel(f)}:${text.slice(0, m.index).split(/\r?\n/).length}`);
+    }
+  }
+  // 账本自身引用它自己的条目是合法的（如 ADR-005 块内的"取代：ADR-xxx"占位）。
+  // 但 docs/ADR.md 不在 codeFiles 里（只 walk src/ 与 test/），故无需豁免。
+  for (const [id, where] of [...seen.entries()].sort()) {
+    if (!ledger.has(id)) {
+      bad(`代码引用了账本里没有的裁定 ${id}（首个引用 ${where}）——在 docs/ADR.md 补一条 "## ${id} …" 条目`);
+    }
+  }
+  note(`ADR 引用闭合：src/ 与 test/ 引用的 ${seen.size} 个编号（${[...seen.keys()].sort().join(", ") || "无"}）全部在账本中存在`);
 }
 
 if (fails.length) {
