@@ -17,8 +17,8 @@
  */
 import { name } from "../host-config.ts";
 import { createCoalescedFetch } from "../coalesced-fetch.ts";
-import { optional, errMsg, str } from "../util.ts";
-import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, wantsDiagnostics, MAX_ENABLED_MODEL_IDS, MAX_RACCOON_BODY_BYTES } from "./http.ts";
+import { optional, str } from "../util.ts";
+import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, wantsDiagnostics, MAX_ENABLED_MODEL_IDS, MAX_RACCOON_BODY_BYTES, redactedError } from "./http.ts";
 import type { Wiring } from "../types.ts";
 import {
   pollRaccoonQrLogin,
@@ -188,7 +188,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
             await raccoonPublisher.publish(rows, officeIdentity);
           }
         } catch (error) {
-          await answer({ ok: false, error: errMsg(error) });
+          await answer({ ok: false, error: redactedError(error) });
           return;
         }
         await answer();
@@ -217,7 +217,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
             await raccoonPublisher.publish(rows, officeIdentity);
           }
         } catch (error) {
-          await answer({ ok: false, error: errMsg(error) });
+          await answer({ ok: false, error: redactedError(error) });
           return;
         }
         await answer({ ok: true, saved: true });
@@ -275,7 +275,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
             await raccoonPublisher.publish(rows, officeIdentity);
           }
         } catch (error) {
-          await answer({ ok: false, error: errMsg(error) });
+          await answer({ ok: false, error: redactedError(error) });
           return;
         }
         await answer({ ok: true, status: "logged_out" });

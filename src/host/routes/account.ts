@@ -11,9 +11,9 @@
 import { name } from "../host-config.ts";
 import { CODE } from "../codes.ts";
 import { writeLoginTrace } from "../trace.ts";
-import { str, optional, errMsg } from "../util.ts";
+import { str, optional } from "../util.ts";
 import { clearCoalescedFetch } from "../coalesced-fetch.ts";
-import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin } from "./http.ts";
+import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, redactedError } from "./http.ts";
 import type { PluginError, Wiring } from "../types.ts";
 
 /** The account route: the panel configures itself without editing `.env`. */
@@ -61,7 +61,7 @@ export function registerAccountRoute(ctx: any, wiring: Pick<Wiring, "settings" |
           writeJson(response, 200, {
             ...(await optional(tokenStore.state())),
             ok: false,
-            error: errMsg(error)
+            error: redactedError(error)
           }, { "cache-control": "no-store" });
           return;
         }
@@ -93,7 +93,7 @@ export function registerAccountRoute(ctx: any, wiring: Pick<Wiring, "settings" |
           ...(await optional(tokenStore.state())),
           ok: false,
           code: str(error?.code, CODE.AUTH_ERROR),
-          error: errMsg(error),
+          error: redactedError(error),
           // The platform's own words ride along so the panel can show them
           // beneath the classified line.
           ...(error?.detail === undefined ? {} : { detail: String(error.detail) }),

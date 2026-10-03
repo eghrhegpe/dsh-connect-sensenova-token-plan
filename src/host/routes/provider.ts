@@ -9,9 +9,9 @@
  * @module dsh-connect-sensenova-token-plan/routes/provider
  */
 import { name } from "../host-config.ts";
-import { optional, errMsg } from "../util.ts";
+import { optional } from "../util.ts";
 import { resolveSwitchEnabled, switchSource } from "../switch-precedence.ts";
-import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin } from "./http.ts";
+import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, redactedError } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
 /** The provider-registration switch route (docs/PROVIDER-HOT-RELOAD.md). */
@@ -75,7 +75,7 @@ export function registerProviderRoute(ctx: any, wiring: Pick<Wiring, "settings" 
         // surfaces its reason in providerState.error.
         await publishProvider(providerState.entries, providerState.enabledIds, providerState.unavailableIds ?? []);
       } catch (error) {
-        await answer({ ok: false, error: errMsg(error) });
+        await answer({ ok: false, error: redactedError(error) });
         return;
       }
       await answer();

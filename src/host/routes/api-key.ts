@@ -10,9 +10,9 @@
  */
 import { name } from "../host-config.ts";
 import { syncSignaturesAfterPublish } from "../provider-publish.ts";
-import { optional, errMsg } from "../util.ts";
+import { optional } from "../util.ts";
 import { clearCoalescedFetch } from "../coalesced-fetch.ts";
-import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin } from "./http.ts";
+import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, redactedError } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
 /** The inference API-key route (`sk-…`), step three of the one-stop plan. */
@@ -76,14 +76,14 @@ export function registerApiKeyRoute(ctx: any, wiring: Pick<Wiring, "settings" | 
           syncSignaturesAfterPublish(providerState);
           await answer();
         } catch (error) {
-          await answer({ ok: false, error: errMsg(error) });
+          await answer({ ok: false, error: redactedError(error) });
         }
         return;
       }
       try {
         await apiKeyStore.save(body.value.apiKey);
       } catch (error) {
-        await answer({ ok: false, error: errMsg(error) });
+        await answer({ ok: false, error: redactedError(error) });
         return;
       }
       // The next poll fetches the catalog with the new key; a stale catalog

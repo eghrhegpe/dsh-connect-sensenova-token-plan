@@ -11,9 +11,9 @@
 import { name } from "../host-config.ts";
 import { buildSnapshotBody, failureCode } from "../snapshot-aggregate.ts";
 import { CODE } from "../codes.ts";
-import { optional, errMsg } from "../util.ts";
+import { optional } from "../util.ts";
 import { drawToolNote } from "../draw-tool-state.ts";
-import { writeJson, refuseMethod, withOrigin } from "./http.ts";
+import { writeJson, refuseMethod, withOrigin, redactedError } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
 /** The one read-only route the Client panel polls. */
@@ -96,7 +96,7 @@ export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" 
         // the first is fixed by logging in, the second is usually transient.
         writeJson(response, 200, {
           ok: false,
-          error: errMsg(error),
+          error: redactedError(error),
           code: failureCode(error),
           auth: await optional(tokenStore.state())
         }, { "cache-control": "no-store" });

@@ -11,9 +11,9 @@
 import { name } from "../host-config.ts";
 import { normalizeEnabledIds } from "../catalog-store.ts";
 import { syncSignaturesAfterPublish } from "../provider-publish.ts";
-import { optional, errMsg } from "../util.ts";
+import { optional } from "../util.ts";
 import { resolveSwitchEnabled } from "../switch-precedence.ts";
-import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, MAX_ENABLED_MODEL_IDS } from "./http.ts";
+import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, MAX_ENABLED_MODEL_IDS, redactedError } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
 /** The model-roster route (docs/API.md). */
@@ -78,7 +78,7 @@ export function registerModelsRoute(ctx: any, wiring: Pick<Wiring, "settings" | 
         // see a "change" and re-publish the same set.
         syncSignaturesAfterPublish(providerState);
       } catch (error) {
-        await answer({ ok: false, error: errMsg(error) });
+        await answer({ ok: false, error: redactedError(error) });
         return;
       }
       await answer();

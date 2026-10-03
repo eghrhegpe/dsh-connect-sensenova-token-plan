@@ -11,9 +11,9 @@
  * @module dsh-connect-sensenova-token-plan/routes/draw
  */
 import { name } from "../host-config.ts";
-import { optional, errMsg } from "../util.ts";
+import { optional } from "../util.ts";
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "../switch-precedence.ts";
-import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin } from "./http.ts";
+import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, redactedError } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
 /** The draw-tool switch route (docs/PROVIDER-HOT-RELOAD.md, same discipline). */
@@ -83,7 +83,7 @@ export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "d
         try {
           await drawStore.forget();
         } catch (error) {
-          await answer({ ok: false, error: errMsg(error) });
+          await answer({ ok: false, error: redactedError(error) });
           return;
         }
         await answer();
@@ -102,7 +102,7 @@ export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "d
         try {
           await drawStore.saveModel(raw);
         } catch (error) {
-          await answer({ ok: false, error: errMsg(error) });
+          await answer({ ok: false, error: redactedError(error) });
           return;
         }
         await answer();
@@ -119,7 +119,7 @@ export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "d
       try {
         await drawStore.save(body.value.enabled);
       } catch (error) {
-        await answer({ ok: false, error: errMsg(error) });
+        await answer({ ok: false, error: redactedError(error) });
         return;
       }
       await answer();

@@ -13,6 +13,7 @@
  * @module dsh-connect-sensenova-token-plan/routes/http
  */
 import { isAdmitted } from "../host-config.ts";
+import { errMsg, redactSecrets } from "../util.ts";
 
 /** Family default response headers for a JSON route. */
 export const JSON_HEADERS = {
@@ -92,6 +93,27 @@ export function refuseOrigin(response: any) {
  */
 export function refuseMethod(response: any) {
   writeJson(response, 405, { ok: false, error: "method not allowed" });
+}
+
+/**
+ * Redact a caught error before it travels to the browser as the response's
+ * `error` field.
+ *
+ * AGENTS.md red line 1 (a credential never enters a log or a response) is kept
+ * on the LOG path by `redactSecrets`, but the route error branches all emitted
+ * the raw `errMsg(error)` straight to the body — so a credentials service whose
+ * error echoes the value it was asked to store (a YAML/JSON validation message
+ * quoting the line) would ship the `sk-` key or password back to the panel.
+ * `draw.ts` / `publish-core.ts` / `raccoon-status.ts` already wrap their
+ * `errMsg` with `redactSecrets`; this is the same discipline for every route.
+ * `redactSecrets` is idempotent, so double-applying it (a caller that already
+ * redacted) is harmless.
+ * @param {unknown} error - the caught value.
+ * @returns {string} the redacted prose, or `"request failed"` when empty.
+ */
+export function redactedError(error: unknown): string {
+  const text = redactSecrets(errMsg(error));
+  return text.trim() === "" ? "request failed" : text;
 }
 
 /**
