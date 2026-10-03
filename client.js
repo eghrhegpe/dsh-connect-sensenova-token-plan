@@ -126,7 +126,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.noService": "registerProvider 已开启，但当前 Host 没有提供 LLM 注册服务。",
 			"llm.error": "提供方注册失败：{error}",
 			"llm.id": "提供方 ID：{id}（勾选开关后生效）",
-			"llm.switch": "向 DSH 注册（立即生效）",
+			"llm.switch": "向 DSH 注册",
+			"llm.switchTitle": "开启后立刻向 DSH 注册 SenseNova 提供方（无需重启）；关闭则从模型下拉框移除，已保存的设置保留。",
 			"llm.switchBusy": "切换中…",
 			"llm.switchError": "切换失败：{error}",
 			"llm.roster": "推送到 DSH 的模型",
@@ -157,7 +158,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.level.xhigh": "极高",
 			"llm.level.max": "最高",
 			"draw.title": "出图工具",
-			"draw.switch": "注册出图工具 sensenova_draw_image（下次 Host 装载生效）",
+			"draw.switch": "注册出图工具",
+			"draw.switchTitle": "开启后 Host 给 agent 注册 sensenova_draw_image 工具。开关值立即生效，但工具的实际挂载/缺席发生在下一次 Host 启动。",
 			"draw.switchBusy": "切换中…",
 			"draw.switchError": "切换失败：{error}",
 			"draw.on": "agent 可用{model}生成图片。",
@@ -183,7 +185,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.title": "小浣熊（商汤）",
 			"raccoon.desc": "接入 xiaohuanxiong.com 网关：微信扫码登录，模型经 DSH 提供方注册后可对话。与积分池相互独立。",
 			"raccoon.clientLink": "下载商汤小浣熊客户端，领取限时积分 →",
-			"raccoon.switch": "启用小浣熊提供方（向 DSH 注册模型）",
+			"raccoon.switch": "启用小浣熊提供方",
+			"raccoon.switchTitle": "开启后向 DSH 注册小浣熊的模型；关闭则从模型下拉框移除，登录与勾选设置都保留，重新开启即恢复。",
 			"raccoon.switchBusy": "切换中…",
 			"raccoon.switchError": "切换失败：{error}",
 			"raccoon.login": "微信扫码登录",
@@ -316,7 +319,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.noService": "registerProvider is on, but this Host exposes no LLM registration service.",
 			"llm.error": "Provider registration failed: {error}",
 			"llm.id": "Provider id: {id} (takes effect once the switch is ticked)",
-			"llm.switch": "Register with DSH (immediate)",
+			"llm.switch": "Register with DSH",
+			"llm.switchTitle": "On registers the SenseNova provider with DSH at once (no restart); off removes it from the model picker while saved settings stay.",
 			"llm.switchBusy": "Switching…",
 			"llm.switchError": "Switch failed: {error}",
 			"llm.roster": "Models pushed to DSH",
@@ -347,7 +351,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.level.xhigh": "xhigh",
 			"llm.level.max": "max",
 			"draw.title": "Draw tool",
-			"draw.switch": "Register the sensenova_draw_image tool (next Host mount)",
+			"draw.switch": "Register the draw tool",
+			"draw.switchTitle": "On registers sensenova_draw_image for the agent. The switch value takes effect at once, but the tool mounts/absents at the next Host start.",
 			"draw.switchBusy": "Switching…",
 			"draw.switchError": "Switch failed: {error}",
 			"draw.on": "The agent can generate images with {model}.",
@@ -373,7 +378,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.title": "Raccoon (SenseNova)",
 			"raccoon.desc": "Connects the xiaohuanxiong.com gateway: WeChat QR sign-in, models registered with DSH. Independent of the credit pools.",
 			"raccoon.clientLink": "Download the SenseNova Raccoon client for limited-time credits →",
-			"raccoon.switch": "Register Raccoon with DSH",
+			"raccoon.switch": "Enable Raccoon provider",
+			"raccoon.switchTitle": "On registers the Raccoon models with DSH; off removes them from the model picker while sign-in and curation stay, so re-enabling restores them.",
 			"raccoon.switchBusy": "Switching…",
 			"raccoon.switchError": "Switch failed: {error}",
 			"raccoon.login": "Sign in with WeChat QR",
@@ -1361,6 +1367,82 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	}));
 
 //#endregion
+//#region src/client/toggle-switch.ts
+/**
+	* A sliding toggle with a short label and a tooltip.
+	* @param props - see {@link ToggleSwitchProps}.
+	* @returns the `<label>` tree wrapping the real checkbox input.
+	*/
+	function ToggleSwitch({ checked, onChange, label, busyLabel, busy = false, title }) {
+		const on = checked === true;
+		const text = busy && busyLabel !== void 0 ? busyLabel : label;
+		return h("label", {
+			style: {
+				display: "inline-flex",
+				alignItems: "center",
+				gap: 8,
+				position: "relative",
+				cursor: busy ? "wait" : "pointer",
+				opacity: busy ? .55 : 1,
+				verticalAlign: "middle"
+			},
+			...title !== void 0 && title !== "" ? { title } : {}
+		}, h("span", { style: {
+			position: "relative",
+			display: "inline-block",
+			width: TRACK_W,
+			height: TRACK_H,
+			flex: "none"
+		} }, h("input", {
+			type: "checkbox",
+			checked: on,
+			disabled: busy,
+			onChange,
+			style: {
+				position: "absolute",
+				inset: 0,
+				width: TRACK_W,
+				height: TRACK_H,
+				margin: 0,
+				opacity: 0,
+				cursor: busy ? "wait" : "pointer"
+			}
+		}), h("span", {
+			"aria-hidden": "true",
+			style: {
+				position: "absolute",
+				inset: 0,
+				borderRadius: 999,
+				pointerEvents: "none",
+				border: `1px solid ${on ? "var(--sensenova-brand, #6C5CE7)" : "var(--dsw-alias-border-l2, #36373b)"}`,
+				background: on ? "var(--sensenova-brand, #6C5CE7)" : "var(--dsw-alias-bg-layer-2, #2a2b31)",
+				transition: "background .15s, border-color .15s"
+			}
+		}, h("span", { style: {
+			position: "absolute",
+			top: 1.5,
+			left: 1.5,
+			width: THUMB,
+			height: THUMB,
+			borderRadius: "50%",
+			background: on ? "#fff" : "var(--dsw-alias-label-tertiary, #999)",
+			transform: on ? `translateX(${TRAVEL}px)` : "translateX(0)",
+			transition: "transform .15s, background .15s"
+		} }))), h("span", { style: {
+			fontSize: 13,
+			color: "var(--dsw-alias-label-primary, #e6e6e6)"
+		} }, text));
+	}
+	var TRACK_W, TRACK_H, THUMB, TRAVEL;
+	var init_toggle_switch = __esmMin((() => {
+		init_runtime();
+		TRACK_W = 30;
+		TRACK_H = 17;
+		THUMB = 12;
+		TRAVEL = 13;
+	}));
+
+//#endregion
 //#region src/client/provider-controls.ts
 /**
 	* The API-key card's status: ONLY key provenance (+ the ephemeral-host
@@ -1468,21 +1550,20 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			onDone,
 			tt
 		]);
-		return h("label", { style: {
+		return h("div", { style: {
 			display: "flex",
-			gap: 8,
+			gap: 10,
 			alignItems: "center",
 			margin: "0 0 12px",
-			cursor: busy ? "wait" : "pointer"
-		} }, h("input", {
-			type: "checkbox",
+			flexWrap: "wrap"
+		} }, h(ToggleSwitch, {
 			checked: enabled,
-			disabled: busy,
-			onChange: toggle
-		}), h("span", { style: {
-			fontSize: 12,
-			color: "var(--dsw-alias-label-secondary)"
-		} }, busy ? tt("llm.switchBusy") : tt("llm.switch")), switchError ? h("span", {
+			onChange: toggle,
+			busy,
+			label: tt("llm.switch"),
+			busyLabel: tt("llm.switchBusy"),
+			title: tt("llm.switchTitle")
+		}), switchError ? h("span", {
 			style: S.formError,
 			role: "alert"
 		}, switchError) : null);
@@ -1596,20 +1677,14 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			fontSize: 12,
 			marginTop: 4
 		} }, tt("draw.noCandidates")) : null;
-		return h("div", { style: { marginBottom: 12 } }, h("label", { style: {
-			display: "flex",
-			gap: 8,
-			alignItems: "baseline",
-			cursor: busy ? "wait" : "pointer"
-		} }, h("input", {
-			type: "checkbox",
+		return h("div", { style: { marginBottom: 12 } }, h(ToggleSwitch, {
 			checked: enabled,
-			disabled: busy,
-			onChange: toggle
-		}), h("span", { style: {
-			fontSize: 12,
-			color: "var(--dsw-alias-label-primary)"
-		} }, busy ? tt("draw.switchBusy") : tt("draw.switch"))), h("div", { style: {
+			onChange: toggle,
+			busy,
+			label: tt("draw.switch"),
+			busyLabel: tt("draw.switchBusy"),
+			title: tt("draw.switchTitle")
+		}), h("div", { style: {
 			...S.muted,
 			fontSize: 12,
 			marginTop: 4
@@ -1625,6 +1700,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_http();
 		init_runtime();
 		init_styles();
+		init_toggle_switch();
 		DRAW_ABSENT_KEY = {
 			"no-tools-service": "draw.noTools",
 			"peer-load-failed": "draw.noToolsPeer",
@@ -3196,28 +3272,20 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				marginTop: 8
 			},
 			role: "status"
-		}, loginNote) : null, h("label", { style: {
+		}, loginNote) : null, h("div", { style: {
 			display: "flex",
-			gap: 8,
 			alignItems: "center",
 			margin: "12px 0 0",
 			padding: "8px 14px",
 			borderRadius: 8,
-			background: "var(--dsw-alias-bg-layer-1)",
-			cursor: waiting ? "wait" : "pointer"
-		} }, h("input", {
-			type: "checkbox",
+			background: "var(--dsw-alias-bg-layer-1)"
+		} }, h(ToggleSwitch, {
 			checked: enabled,
-			disabled: waiting,
 			onChange: () => onSwitch(!enabled),
-			style: {
-				accentColor: "var(--sensenova-brand, #6C5CE7)",
-				margin: 0
-			}
-		}), h("span", { style: {
-			fontSize: 12,
-			color: "var(--dsw-alias-label-secondary)"
-		} }, tt("raccoon.switch"))), state !== null && state.providerError !== void 0 && state.providerError !== "" ? h("div", {
+			busy: waiting,
+			label: tt("raccoon.switch"),
+			title: tt("raccoon.switchTitle")
+		})), state !== null && state.providerError !== void 0 && state.providerError !== "" ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, state.providerError) : null, loggedIn ? h("div", {
@@ -3280,6 +3348,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_qr();
 		init_raccoon_roster();
 		init_const();
+		init_toggle_switch();
 		init_styles();
 		QR_SIZE = 208;
 		DAY_MS = 864e5;
@@ -3895,6 +3964,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_account_form();
 		init_cards();
 		init_provider_controls();
+		init_toggle_switch();
 		init_api_key_form();
 		init_model_picker();
 		init_panel_page();
@@ -3960,6 +4030,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 					ProviderRegStatus,
 					ProviderSwitch,
 					DrawSwitch,
+					ToggleSwitch,
 					ModelRoster,
 					ModelPicker,
 					PanelPage,

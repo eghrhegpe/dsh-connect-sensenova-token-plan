@@ -9,6 +9,7 @@ import { dictKey, h, useCallback, useState } from "./runtime.ts";
 import type { Tt, DictionaryKey } from "./runtime.ts";
 import type { LlmData, DrawToolAbsentReason } from "./wire.ts";
 import { S } from "./styles.ts";
+import { ToggleSwitch } from "./toggle-switch.ts";
 
 /**
  * The API-key card's status: ONLY key provenance (+ the ephemeral-host
@@ -108,10 +109,16 @@ export function ProviderSwitch({ llm, onDone, tt }: {
     }
   }, [enabled, onDone, tt]);
   return h(
-    "label",
-    { style: { display: "flex", gap: 8, alignItems: "center", margin: "0 0 12px", cursor: busy ? "wait" : "pointer" } },
-    h("input", { type: "checkbox", checked: enabled, disabled: busy, onChange: toggle }),
-    h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" } }, busy ? tt("llm.switchBusy") : tt("llm.switch")),
+    "div",
+    { style: { display: "flex", gap: 10, alignItems: "center", margin: "0 0 12px", flexWrap: "wrap" } },
+    h(ToggleSwitch, {
+      checked: enabled,
+      onChange: toggle,
+      busy,
+      label: tt("llm.switch"),
+      busyLabel: tt("llm.switchBusy"),
+      title: tt("llm.switchTitle")
+    }),
     switchError ? h("span", { style: S.formError, role: "alert" }, switchError) : null
   );
 }
@@ -275,12 +282,14 @@ export function DrawSwitch({ llm, onDone, tt }: {
   return h(
     "div",
     { style: { marginBottom: 12 } },
-    h(
-      "label",
-      { style: { display: "flex", gap: 8, alignItems: "baseline", cursor: busy ? "wait" : "pointer" } },
-      h("input", { type: "checkbox", checked: enabled, disabled: busy, onChange: toggle }),
-      h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-primary)" } }, busy ? tt("draw.switchBusy") : tt("draw.switch"))
-    ),
+    h(ToggleSwitch, {
+      checked: enabled,
+      onChange: toggle,
+      busy,
+      label: tt("draw.switch"),
+      busyLabel: tt("draw.switchBusy"),
+      title: tt("draw.switchTitle")
+    }),
     h("div", { style: { ...S.muted, fontSize: 12, marginTop: 4 } }, statusText),
     pickerRows,
     noListHint,

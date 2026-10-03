@@ -65,6 +65,7 @@ import {
   TrendTable
 } from "./cards.ts";
 import { ProviderStatus, ProviderRegStatus, ProviderSwitch, DrawSwitch } from "./provider-controls.ts";
+import { ToggleSwitch } from "./toggle-switch.ts";
 import { ApiKeyForm, ProviderForm } from "./api-key-form.ts";
 import { ModelPicker, ModelRoster } from "./model-picker.ts";
 import { HeaderStatus, PanelPage } from "./panel-page.ts";
@@ -129,6 +130,7 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       ProviderRegStatus,
       ProviderSwitch,
       DrawSwitch,
+      ToggleSwitch,
       ModelRoster,
       ModelPicker,
       PanelPage,

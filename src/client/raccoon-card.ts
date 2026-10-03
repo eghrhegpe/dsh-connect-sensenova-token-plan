@@ -25,6 +25,7 @@ import type { Tt } from "./runtime.ts";
 import { qrDataUrl } from "./qr.ts";
 import { RaccoonRoster } from "./raccoon-roster.ts";
 import { RACCOON_SITE_URL } from "./const.ts";
+import { ToggleSwitch } from "./toggle-switch.ts";
 import { S } from "./styles.ts";
 import type { RaccoonState } from "../shared/wire.ts";
 
@@ -242,18 +243,24 @@ export function RaccoonCard({
     // models are registered with DSH at all — the second step, after signing in.
     // It used to be a bare label floating in the column gap between the login
     // card and the balance line, with no surface of its own: a control with no
-    // home. It now sits on a quiet inset row so it reads as a deliberate
-    // setting, aligned to the card content it governs.
+    // home. The inset row gives it that home, and the shared ToggleSwitch makes
+    // it read as a switch: the label is a few words and the sentence about what
+    // registering does lives in the tooltip, not in the label.
     h(
-      "label",
+      "div",
       {
         style: {
-          display: "flex", gap: 8, alignItems: "center", margin: "12px 0 0", padding: "8px 14px",
-          borderRadius: 8, background: "var(--dsw-alias-bg-layer-1)", cursor: waiting ? "wait" : "pointer"
+          display: "flex", alignItems: "center", margin: "12px 0 0", padding: "8px 14px",
+          borderRadius: 8, background: "var(--dsw-alias-bg-layer-1)"
         }
       },
-      h("input", { type: "checkbox", checked: enabled, disabled: waiting, onChange: () => onSwitch(!enabled), style: { accentColor: "var(--sensenova-brand, #6C5CE7)", margin: 0 } }),
-      h("span", { style: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" } }, tt("raccoon.switch"))
+      h(ToggleSwitch, {
+        checked: enabled,
+        onChange: () => onSwitch(!enabled),
+        busy: waiting,
+        label: tt("raccoon.switch"),
+        title: tt("raccoon.switchTitle")
+      })
     ),
     // A registration failure stays visible even while the switch is OFF —
     // hiding it behind `enabled` is the same dead-end as the account editor
