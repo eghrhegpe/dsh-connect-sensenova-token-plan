@@ -106,11 +106,13 @@ for (const [file, text] of [
     "createFileDrawStore",
     "createFileRaccoonStore",
   ]) {
-    // Construction is the literal `factory({ profile })`. A refactor that
-    // threaded the profile through differently would drop this exact call and
-    // this check would go red — exactly the drift we want to catch.
+    // Construction keeps `profile` as the object's first key, and may carry a
+    // sibling (ADR-006 added `logger` so a version-refusal is visible in the
+    // log). The invariant under test is that profile REACHES the factory at
+    // all; the regex still goes red the moment it is dropped, renamed, or
+    // threaded through some other mechanism.
     check(`${factory} is constructed with { profile }`,
-      new RegExp(`${factory}\\((\\s*|[\\s\\S]*?)\\{\\s*profile\\s*\\}`).test(indexTs),
+      new RegExp(`${factory}\\((\\s*|[\\s\\S]*?)\\{\\s*profile\\s*(?:,|\\})`).test(indexTs),
       `${factory} is not called with { profile }`);
   }
   // The throttle factory's call is argument-free — never { profile }.

@@ -842,6 +842,60 @@ function section(title) {
   }
 }
 
+// --- ADR-006 (raccoon-switch): all three writers refuse a foreign version ----
+// raccoon-provider.json has THREE writers (save / saveIds / forget) instead of
+// the provider switch's two, so the guard has to sit in the single writePayload
+// and every writer must respect its refusal — otherwise saveIds is the side door
+// that still stomps a newer build's file.
+{
+  const { writeFileSync, readFileSync, mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "raccoon-switch-guard-"));
+  try {
+    const file = join(dir, "raccoon-provider.json");
+    const foreignPayload = { version: 999, enabled: true, futureField: "x" };
+    const seedForeign = () => writeFileSync(file, JSON.stringify(foreignPayload, null, 2), "utf8");
+    const intact = () => {
+      const raw = JSON.parse(readFileSync(file, "utf8"));
+      return raw.version === 999 && raw.futureField === "x";
+    };
+
+    seedForeign();
+    const warnings = [];
+    const a = createFileRaccoonStore({ dir, logger: { warn: (m) => warnings.push(m) } });
+    await a.save(true);
+    check("raccoon save() does not overwrite a foreign version", intact(), readFileSync(file, "utf8"));
+    check("the raccoon refusal is logged, not silent",
+      warnings.some((w) => w.includes("refusing to overwrite raccoon-provider.json") && w.includes("version 999")),
+      warnings.join(" | "));
+
+    seedForeign();
+    await createFileRaccoonStore({ dir }).saveIds(["sn-raccoon-1"]);
+    check("raccoon saveIds() does not overwrite a foreign version", intact());
+
+    seedForeign();
+    await createFileRaccoonStore({ dir }).forget();
+    check("raccoon forget() does not overwrite a foreign version", intact());
+
+    // The guard must not trip on the file's own version.
+    writeFileSync(file, JSON.stringify({ version: RACCOON_SWITCH_VERSION, enabled: false }), "utf8");
+    await createFileRaccoonStore({ dir }).save(true);
+    const afterNormal = JSON.parse(readFileSync(file, "utf8"));
+    check("a known raccoon version still writes normally",
+      afterNormal.version === RACCOON_SWITCH_VERSION && afterNormal.enabled === true, JSON.stringify(afterNormal));
+
+    // The reason string is load-bearing, same as the other guards.
+    const source = readFileSync(new URL("../src/host/raccoon-switch-store.ts", import.meta.url), "utf8");
+    check("the raccoon refusal marker stays in the source",
+      source.includes("raccoon-switch: refusing to overwrite raccoon-provider.json holding version"), "");
+  } catch (error) {
+    fail("ADR-006 raccoon-switch write-side version guard", error);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // --- the wire constants have exactly one home --------------------------------
 // ROADMAP §6.1.4: the route side used to re-declare the QR walk's deadline and
 // poll cadence, so the same number lived in two files and NOTHING could see

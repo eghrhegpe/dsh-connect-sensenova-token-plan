@@ -227,7 +227,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const raccoonStore = createRaccoonStore({
     credentials: () => ctx.get("credentials") ?? null
   });
-  const raccoonSwitch = createFileRaccoonStore({ profile });
+  const raccoonSwitch = createFileRaccoonStore({ profile, logger: ctx.logger });
   const raccoonPublisher = createRaccoonPublisher({
     panelSwitch: () => raccoonSwitch.enabled().catch(() => null),
     resolveToken: async () => {
