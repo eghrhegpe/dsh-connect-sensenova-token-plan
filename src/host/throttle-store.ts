@@ -19,9 +19,9 @@
 import { readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { str, num } from "./util.ts";
+import { str, num, degrade } from "./util.ts";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, stateDir as pluginStateDir } from "./state-store.ts";
+import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, stateDir as pluginStateDir } from "./state-store.ts";
 import type { HeldThrottle } from "./token-store/state.ts";
 
 /**
@@ -37,6 +37,21 @@ import type { HeldThrottle } from "./token-store/state.ts";
  * silently orphan every parked refusal already on disk.
  */
 const THROTTLE_FILE_VERSION = 1;
+
+/**
+ * Every persisted shape THIS build can read: the current version plus any
+ * historical ones. Bumping {@link THROTTLE_FILE_VERSION} means adding the new
+ * number here too — otherwise this build would refuse its own newest files.
+ *
+ * This is the ADR-006 write-side guard's whitelist, mirroring
+ * `catalog-store.ts` / `provider-store.ts` / `draw-store.ts` /
+ * `raccoon-switch-store.ts` (78df0d1 → 3b4aea6): an on-disk version not in
+ * this list was written by a NEWER build and must not be clobbered. The throttle
+ * is the one store that patch missed — which is exactly the hole P0-B names,
+ * because the value it carries (a parked wrong-password refusal) is the one the
+ * red line says must never be lost to a cross-build overwrite.
+ */
+export const KNOWN_THROTTLE_VERSIONS: readonly number[] = [THROTTLE_FILE_VERSION];
 
 /**
  * Where the throttle lives: the SHARED directory, `$DSH_HOME/state/<plugin>`.
