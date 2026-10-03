@@ -3305,14 +3305,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				marginTop: 8
 			},
 			role: "status"
-		}, ...clockParts) : null, h("div", { style: {
-			display: "flex",
-			alignItems: "center",
-			marginTop: 8,
-			padding: "8px 12px",
-			borderRadius: 8,
-			background: "var(--dsw-alias-bg-layer-2)"
-		} }, h(ToggleSwitch, {
+		}, ...clockParts) : null, h("div", { style: { marginTop: 8 } }, h(ToggleSwitch, {
 			checked: enabled,
 			onChange: () => onSwitch(!enabled),
 			busy: waiting,

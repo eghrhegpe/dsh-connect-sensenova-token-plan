@@ -268,28 +268,19 @@ export function RaccoonCard({
         ? h("div", { style: { ...S.statCaption, marginTop: 8 }, role: "status" }, ...clockParts)
         : null,
       // The provider switch (opt-in, default off) — the second step, after
-      // signing in. It was once a bare label floating in the column gap with no
-      // surface of its own; the inset row gives it a home. It lives in this
-      // card rather than the balance card because it governs the credential,
-      // not the credit figure. It stays visible when signed out too: that is
-      // where the "tick this first" and "sign in first" wordings point, and
-      // hiding the control the wording names would strand the instruction.
-      h(
-        "div",
-        {
-          style: {
-            display: "flex", alignItems: "center", marginTop: 8, padding: "8px 12px",
-            borderRadius: 8, background: "var(--dsw-alias-bg-layer-2)"
-          }
-        },
-        h(ToggleSwitch, {
-          checked: enabled,
-          onChange: () => onSwitch(!enabled),
-          busy: waiting,
-          label: tt("raccoon.switch"),
-          title: tt("raccoon.switchTitle")
-        })
-      )
+      // signing in. It lives in this card because it governs the credential,
+      // not the credit figure. It renders with NO wrapper box: the card already
+      // has its own surface, and a second filled rectangle inside it (the layer
+      // above the card's own layer) reads as a foreign white band rather than
+      // a control. The switch is just the toggle and its label, left aligned
+      // on the card it belongs to.
+      h("div", { style: { marginTop: 8 } }, h(ToggleSwitch, {
+        checked: enabled,
+        onChange: () => onSwitch(!enabled),
+        busy: waiting,
+        label: tt("raccoon.switch"),
+        title: tt("raccoon.switchTitle")
+      }))
     ),
     loginNote !== null
       ? h("div", { style: { ...S.formNote, fontSize: 12, marginTop: 8 }, role: "status" }, loginNote)
