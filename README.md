@@ -8,6 +8,12 @@
 
 后台另有 429 自愈：限频被误判为"额度耗尽"时在 Host 侧纠正回退避重试，模型不会无端"消失"。
 
+> **AI 协作会话请先读 [AGENTS.md](AGENTS.md)**——验证入口、红线与文档地图都在那里；过程文档与提交历史本身就是本仓库工作面的一部分。
+> 三个常被外部审读问起的疑问，预答在这里：
+> - `lib/` 与根 `client.js` 是**入库的构建产物**：`github:` 安装源不跑 prepack，不入库则直装即坏（[docs/ADR.md](docs/ADR.md) ADR-005）
+> - `docs/sensenova-api-reference/` 是商汤**官方文档的本地容器**，逐文件出处与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+> - 本仓库由 AI 协作开发，其提交历史里的过程痕迹是工作方式的一部分，不是疏漏
+
 ## ① 积分额度
 
 把商汤 Token Plan 搬进 DSH，写代码时不用切网页就能盯住：
@@ -80,21 +86,15 @@
 - [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（37 条）
 - [CHANGELOG.md](CHANGELOG.md) — 版本变化
 
-AI 协作会话请先读 [AGENTS.md](AGENTS.md)。
-
 ## 运维诊断：这台机器现在挂没挂 provider？
 
-- 遇到问题先看 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**——它按**你看到的现象组织
-- provider / 出图开关的生效值存在插件私有状态文件里，不在任何配置或路由上。按 profile 分段（见 `docs/PITFALLS.md` §23）：`$DSH_HOME/state/<profile>/<name>/`，
-- 取不到 profile 名时退回共享目录 `$DSH_HOME/state/<name>/`——查"到底开没开"用 doctor，它只读状态文件、不碰凭据，Host 没起也能跑：
+- 遇到问题先看 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)——它按**你看到的现象**组织（额度栏空的、反复要求登录、模型不出现、改了代码没生效…），而不是按主题；每条带稳定症状码，`doctor --json` 的 `symptoms` 字段直接给症状码，人和 agent 走同一条路。
+- provider / 出图开关的生效值存在插件私有状态文件里，不在任何配置或路由上。按 profile 分段（见 `docs/PITFALLS.md` §23）：`$DSH_HOME/state/<profile>/<name>/`，取不到 profile 名时退回共享目录 `$DSH_HOME/state/<name>/`——查"到底开没开"用 doctor，它只读状态文件、不碰凭据，Host 没起也能跑：
 
 ```powershell
 npm run doctor          # 人读：每个 profile 的 provider / draw 开关与模型清单
 npm run doctor:json     # 机器读：JSON（可进你的巡检 / 工单脚本）
 ```
-
-（额度栏空的、反复要求登录、模型不出现、改了代码没生效…），而不是按主题；每条带稳定症状码，
-`doctor --json` 的 `symptoms` 字段直接给症状码，人和 agent 走同一条路。
 
 ## 诚实声明
 
