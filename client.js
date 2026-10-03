@@ -1995,13 +1995,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			visible,
 			ids
 		]);
-		return h("div", { style: { marginBottom: 14 } }, h("p", { style: { margin: "0 0 10px" } }, h("span", { style: S.sectionTitle }, tt("llm.roster"), " — "), h("span", { style: {
+		return h("div", { style: { marginBottom: 14 } }, h("p", { style: { margin: "0 0 10px" } }, h("span", { style: S.sectionTitle }, tt("llm.roster")), typeof llm?.thinkingDefault === "string" && llm.thinkingDefault !== "" ? h("span", { style: {
 			...S.muted,
 			fontSize: 12
-		} }, tt("llm.rosterHint")), typeof llm?.thinkingDefault === "string" && llm.thinkingDefault !== "" ? h("span", { style: {
-			...S.muted,
-			fontSize: 12
-		} }, ` · ${format(tt("llm.rosterThinkingDefault"), { level: tt(dictKey("llm.level", llm.thinkingDefault)) })}`) : null), models.length === 0 ? h("p", { style: S.empty }, tt("llm.rosterEmpty")) : h("div", null, h("div", { style: S.rosterTools }, h("input", {
+		} }, ` — ${format(tt("llm.rosterThinkingDefault"), { level: tt(dictKey("llm.level", llm.thinkingDefault)) })}`) : null), models.length === 0 ? h("p", { style: S.empty }, tt("llm.rosterEmpty")) : h("div", null, h("div", { style: S.rosterTools }, h("input", {
 			type: "search",
 			style: {
 				...S.input,
@@ -2065,7 +2062,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				color: "var(--dsw-alias-state-success-primary)"
 			},
 			role: "status"
-		}, tt("llm.rosterSaved")) : null, notice !== null ? h("p", {
+		}, tt("llm.rosterSaved")) : null, h("p", { style: {
+			...S.trendLegend,
+			marginTop: 10
+		} }, tt("llm.rosterHint")), notice !== null ? h("p", {
 			style: S.formError,
 			role: "alert"
 		}, notice) : null));

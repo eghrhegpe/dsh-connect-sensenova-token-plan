@@ -203,16 +203,22 @@ export function ModelPicker({ llm, onDone, tt }: {
   return h(
     "div",
     { style: { marginBottom: 14 } },
-    // Title and rule share one line — the rule is the tail of the same
-    // sentence, not a second notice competing for attention. The provider-wide
-    // thinking default rides here too: it is one constant for every row, so
-    // the roster says it ONCE instead of repeating it seven times.
+    // Title and rule were sharing one line with the mechanism sentence, which
+    // read as a caption bolted to a heading: a title, then a paragraph, then a
+    // value, all in one breath. The rule is still the tail of the title's own
+    // sentence and stays; the mechanism paragraph drops to the footnote at the
+    // bottom of the block (the same stop `raccoon-roster.ts` uses for its
+    // fallback note), where it explains without competing with the heading.
+    // The provider-wide thinking default rides here too: it is one constant for
+    // every row, so the roster says it ONCE instead of repeating it seven times.
+    // The dash is the title's own tail and only appears when a value follows
+    // it — a lone `推送到 DSH 的模型 —` trailed off into nothing when the Host
+    // declared no thinking default.
     h("p", { style: { margin: "0 0 10px" } },
-      h("span", { style: S.sectionTitle }, tt("llm.roster"), " — "),
-      h("span", { style: { ...S.muted, fontSize: 12 } }, tt("llm.rosterHint")),
+      h("span", { style: S.sectionTitle }, tt("llm.roster")),
       typeof llm?.thinkingDefault === "string" && llm.thinkingDefault !== ""
         ? h("span", { style: { ...S.muted, fontSize: 12 } },
-          ` · ${format(tt("llm.rosterThinkingDefault"), { level: tt(dictKey("llm.level", llm.thinkingDefault)) })}`)
+          ` — ${format(tt("llm.rosterThinkingDefault"), { level: tt(dictKey("llm.level", llm.thinkingDefault)) })}`)
         : null),
     models.length === 0
       ? h("p", { style: S.empty }, tt("llm.rosterEmpty"))
@@ -294,6 +300,10 @@ export function ModelPicker({ llm, onDone, tt }: {
             : justSaved
               ? h("p", { style: { ...S.formNote, color: "var(--dsw-alias-state-success-primary)" }, role: "status" }, tt("llm.rosterSaved"))
               : null,
+          // The mechanism sentence, at the quietest layer: what ticking a box
+          // does and how a newly-catalogued model starts out. It explains the
+          // list without holding the heading hostage.
+          h("p", { style: { ...S.trendLegend, marginTop: 10 } }, tt("llm.rosterHint")),
           notice !== null ? h("p", { style: S.formError, role: "alert" }, notice) : null
         )
   );
