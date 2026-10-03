@@ -25,10 +25,10 @@
 ## ② 接入 API（可选，默认关）
 
 把商汤模型注册为 DSH provider，参与对话与出图。
-
-- **语言模型**：在「API Key」卡粘贴 `sk-` Key 保存后，Host 即以 `sensenova-token-plan` 之名注册 OpenAI 兼容 provider，模型列表随 `/v1/models` 自动刷新、可看图模型自动带图片输入；Key 只进 DSH 凭据、面板永不回显。
-- **出图工具**：打开开关后，Host 给 agent 注册工具 `sensenova_draw_image`（首选模型由 `drawModelId` 指定），鉴权走同一把 `SENSENOVA_API_KEY`；出图模型由 catalog 的 `output_modalities` 结构化判定，不靠名字正则。工具的实际挂载 / 缺席发生在**下一次 Host 启动**，开关值本身立即生效。
-- 开关与勾选都在面板热生效，无需重启。细节见 [docs/SETUP.md](docs/SETUP.md) §3 与 [docs/PROVIDER-HOT-RELOAD.md](docs/PROVIDER-HOT-RELOAD.md)。
+- 在「API Key」卡粘贴 `sk-` Key 保存后，Host 即以 `sensenova-token-plan` 之名注册 OpenAI 兼容 provider
+- **语言模型**：模型列表随 `/v1/models` 自动刷新、可看图模型自动带图片输入；
+- **出图工具**：Host 给 agent 注册工具 `sensenova_draw_image`；模型由 catalog 的 `output_modalities` 结构化判定。
+- 开关与勾选都在面板热生效，无需重启,但工具的实际挂载 / 缺席发生在**下一次 Host 启动**。细节见 [docs/SETUP.md](docs/SETUP.md) §3 与 [docs/PROVIDER-HOT-RELOAD.md](docs/PROVIDER-HOT-RELOAD.md)。
 
 ![「接入 API」tab](assets/panel-API-provider.png)
 
