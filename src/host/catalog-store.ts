@@ -20,13 +20,20 @@
  */
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { str, obj, num } from "./util.ts";
+import { str, obj, num, degrade } from "./util.ts";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
+import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
 import type { StoreOptions } from "./types.ts";
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
 export const CATALOG_VERSION = 1;
+
+/**
+ * Every persisted shape THIS build can read (current + history) — the ADR-006
+ * write-side guard's whitelist (see {@link persist}). Mirrors
+ * `provider-store.ts` / `draw-store.ts`.
+ */
+export const KNOWN_CATALOG_VERSIONS: readonly number[] = [1];
 
 /** The persisted record shape `parse` accepts and the writers produce. */
 export interface CatalogRecord {
@@ -142,7 +149,7 @@ function parse(raw: unknown): CatalogRecord | null {
  * @returns {CatalogStore} the store.
  */
 export function createFileCatalogStore(options: StoreOptions = {}) {
-  const { dir, profile = null, now = Date.now, ttlMs = STATE_READ_TTL_MS } = options;
+  const { dir, profile = null, now = Date.now, ttlMs = STATE_READ_TTL_MS, logger } = options;
   const stateDir = dir ?? catalogDir(profile);
   const file = join(stateDir, "catalog.json");
   /**
@@ -191,6 +198,20 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
    */
   const persist = async () => {
     if (held === null) return;
+    // ADR-006 write-side guard (mirrors `provider-store.ts` / `draw-store.ts`):
+    // never overwrite a catalog file this build cannot read. An unknown NUMERIC
+    // version means a NEWER build wrote it; clobbering it destroys data we
+    // cannot see. The in-memory record keeps serving either way (a refusal only
+    // stops the DISK write), so this is a `degrade`, not an error — PITFALLS
+    // §37: swallow the failure, not the reason.
+    const existing = await readStateVersion(file);
+    if (!isKnownStateVersion(existing, KNOWN_CATALOG_VERSIONS)) {
+      degrade(
+        `catalog: refusing to overwrite catalog.json holding version ${existing} (this build knows ${KNOWN_CATALOG_VERSIONS.join("/")})`,
+        null, logger, null
+      );
+      return;
+    }
     const temporary = temporaryOf(stateDir, "catalog.json", now);
     try {
       await ensureStateDir(stateDir);

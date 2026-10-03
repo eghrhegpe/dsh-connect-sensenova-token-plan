@@ -549,6 +549,63 @@ const BASE_URL = "https://token.sensenova.cn/v1";
   }
 }
 
+// --- 8a. ADR-006 (catalog): persist never clobbers a foreign version --------
+// Group 8 proved the READ side treats a foreign version as "no catalog". This is
+// the WRITE half, in the single `persist()` both writers share. catalog's shape
+// differs from the switch stores: `replace` / `setEnabledIds` remember the value
+// in memory BEFORE persisting, so a refusal must still leave the catalog
+// SERVING here (only the disk write is withheld) — that is the same contract as
+// an ordinary write failure, which this store already swallows.
+{
+  const restoreEnv = isolateHostEnv();
+  const restoreHome = isolateStateDir();
+  try {
+    const dir = join(process.env.DSH_HOME, "state", "dsh-connect-sensenova-token-plan");
+    const file = join(dir, "catalog.json");
+    mkdirSync(dir, { recursive: true });
+    const foreignPayload = { version: 999, fetchedAt: 1, entries: [], futureField: "x" };
+    const seedForeign = () => writeFileSync(file, JSON.stringify(foreignPayload, null, 2), "utf8");
+    const intact = () => {
+      const raw = JSON.parse(readFileSync(file, "utf8"));
+      return raw.version === 999 && raw.futureField === "x";
+    };
+
+    seedForeign();
+    const warnings = [];
+    const guarded = createFileCatalogStore({ dir, logger: { warn: (m) => warnings.push(m) } });
+    await guarded.replace([{ id: "fresh" }]);
+    check("catalog replace() does not overwrite a foreign version", intact(), readFileSync(file, "utf8"));
+    check("a refused catalog write still serves in memory",
+      JSON.stringify(await guarded.list()) === JSON.stringify([{ id: "fresh" }]),
+      JSON.stringify(await guarded.list()));
+    check("the catalog refusal is logged, not silent",
+      warnings.some((w) => w.includes("refusing to overwrite catalog.json") && w.includes("version 999")),
+      warnings.join(" | "));
+
+    seedForeign();
+    await createFileCatalogStore({ dir }).setEnabledIds(["only-this"]);
+    check("catalog setEnabledIds() does not overwrite a foreign version", intact());
+
+    // The guard must not trip on the file's own version.
+    writeFileSync(file, JSON.stringify({ version: CATALOG_VERSION, fetchedAt: 1, entries: [], enabledModelIds: [] }, null, 2), "utf8");
+    const normal = createFileCatalogStore({ dir });
+    await normal.replace([{ id: "ok" }]);
+    const afterNormal = JSON.parse(readFileSync(file, "utf8"));
+    check("a known catalog version still writes normally",
+      afterNormal.version === CATALOG_VERSION && afterNormal.entries[0].id === "ok", JSON.stringify(afterNormal));
+
+    // The reason string is load-bearing, same as the other two guards.
+    const source = readFileSync(new URL("../src/host/catalog-store.ts", import.meta.url), "utf8");
+    check("the catalog refusal marker stays in the source",
+      source.includes("catalog: refusing to overwrite catalog.json holding version"), "");
+  } catch (error) {
+    fail("ADR-006 catalog write-side version guard", error);
+  } finally {
+    restoreHome();
+    restoreEnv();
+  }
+}
+
 // --- 8b. 另一个进程的写入，本进程必须很快看得见（不等重启） --------------
 // PITFALLS §22：两个 profile 的 Host 进程共享同一个 state 目录。进程内的读缓存
 // 一旦没有 TTL，就是「另一个进程改了允许清单 / 开关，这边要重启才生效」——
