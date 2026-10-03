@@ -134,6 +134,11 @@ jobs:
           node test/raccoon.test.mjs
           node test/raccoon-status.test.mjs
           node test/state-segmentation.test.mjs
+          # The duplication gate is not a *.test.mjs (same exemption as the
+          # build gate): jscpd (devDependency) scans src/ and every clone must
+          # match a line-capped whitelist entry — the mechanical half of the
+          # Token Plan ↔ raccoon isolation invariant (PITFALLS.md §343).
+          node test/duplication-gate.mjs
           # The typecheck gate is not a *.test.mjs (same exemption as the build
           # gate): it runs the local tsc pinned in devDependencies against
           # tsconfig.json, so the strict flags there cannot rot silently. It
