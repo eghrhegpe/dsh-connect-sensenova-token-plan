@@ -93,6 +93,20 @@ export function redactSecrets(text: unknown) {
       .replace(/(["']?(?:password|access[_-]?token|refresh[_-]?token|api[_-]?key|token|client[_-]?secret|code[_-]?verifier|secret)["']?\s*:\s*["'])[^"']+(?=["'])/gi, "$1[REDACTED]")
       // 6) Known secret key=value pairs.
       .replace(/\b(password|access[_-]?token|refresh[_-]?token|api[_-]?key|token|client[_-]?secret|code[_-]?verifier)\s*=\s*[^&;\s"']+/gi, "$1=[REDACTED]")
+      // 7) The SAME pairs with an UNQUOTED value: `{ accessToken: eyJ… }`.
+      //    Rule 5 needs a quote to anchor the value, so this shape slipped
+      //    through it entirely — and it is the shape a Node error message takes
+      //    when something interpolates the record it was handed
+      //    (`util.inspect` / `String(obj)` print objects unquoted). Since the
+      //    thing being printed IS the credential pair, that is the one form
+      //    guaranteed to show up on a save/refresh failure.
+      //
+      //    The value stops at the first structural character, so it cannot eat
+      //    the rest of a human-readable message. `null` / `true` / `false` /
+      //    digits are left alone on purpose: a field can be reported as absent
+      //    (`refreshToken: null`) and saying so is the diagnosis; redacting it
+      //    to `[REDACTED]` would destroy the only clue that it was never set.
+      .replace(/\b(password|access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|code[_-]?verifier|token)(\s*:\s*)(?!null\b|true\b|false\b|undefined\b|-?\d)([A-Za-z0-9._~+/=-]{4,})/gi, "$1$2[REDACTED]")
   );
 }
 

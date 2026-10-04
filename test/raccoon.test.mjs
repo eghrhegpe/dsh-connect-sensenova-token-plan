@@ -1126,6 +1126,52 @@ function section(title) {
       `polls=${polls}`);
   }
 
+  // W9: a `saveCredential` failure rides the EVENT channel to the browser —
+  // `takeEvent()` → `raccoon-status.ts`'s `loginError` → the panel — and the
+  // record it was handed IS the credential pair. The code claimed "sanitized"
+  // above a bare `String(message)`, so a store/credentials-provider error that
+  // quoted its input would have printed the tokens into the response. Asserted
+  // here at the boundary (rather than on `redactSecrets` alone) because that
+  // boundary is the thing that was open.
+  {
+    const walk = createRaccoonWalk({
+      fetcher: async () => success(),
+      saveCredential: async () => {
+        throw new Error('refused pair { accessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig, refreshToken: rt-abcdef123456 }');
+      },
+      invalidateCache: () => {}
+    });
+    void walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W9 a save failure still reports `failed`",
+      event.status === LOGIN_STATUS.failed, `${event.status}`);
+    check("W9 the reason is present (a silent failure would be the other bug)",
+      typeof event.error === "string" && event.error.includes("refused pair"), `${event.error}`);
+    check("W9 the tokens in that reason are redacted before it reaches the panel",
+      typeof event.error === "string"
+        && !event.error.includes("eyJhbGciOi")
+        && !event.error.includes("rt-abcdef123456"),
+      `${event.error}`);
+  }
+
+  // W10: the REDACTION must not swallow the diagnosis. A store that refuses an
+  // EMPTY token says so with a plain message; if `redactSecrets` were
+  // over-eager (whole-string blanking, or a catch-all) the panel would show
+  // "unknown" and the user would lose the only actionable fact.
+  {
+    const walk = createRaccoonWalk({
+      fetcher: async () => success(),
+      saveCredential: async () => { throw new Error("a Raccoon access token is required"); },
+      invalidateCache: () => {}
+    });
+    void walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W10 a reason with no secret in it survives verbatim",
+      event.error === "a Raccoon access token is required", `${event.error}`);
+  }
+
   // W8: `stop()` is idempotent and safe with no walk running — every teardown
   // but the one that races a live scan calls it that way.
   {

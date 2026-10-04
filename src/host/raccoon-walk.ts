@@ -31,6 +31,7 @@
  * @module dsh-connect-sensenova-token-plan/raccoon-walk
  */
 import { RACCOON_QR_STATUS, RACCOON_QR_POLL_INTERVAL_MS, RACCOON_LOGIN_TIMEOUT_MS, generateRaccoonQrCode, raccoonQrLoginUrl } from "./raccoon.ts";
+import { errMsg, redactSecrets } from "./util.ts";
 import type { RaccoonQrPollResult } from "./raccoon.ts";
 
 /**
@@ -256,10 +257,20 @@ export function createRaccoonWalk(options: {
         }
       } catch (saveError) {
         // The scan worked but the credential did not land: the tab can only hear
-        // about it through the event channel, so the reason rides there
-        // (sanitized — the store's message may quote the document).
+        // about it through the event channel, so the reason rides there.
+        //
+        // REDACTED, because that channel is the one place in this module whose
+        // output is guaranteed to reach a browser: `takeEvent()` feeds
+        // `raccoon-status.ts`'s `loginError`, which rides the GET response
+        // straight into the panel. A store or credentials-provider message can
+        // quote the record it was handed, and the record is the credential pair
+        // (AGENTS.md red line 1: credentials never reach logs, traces, or
+        // responses). `redactSecrets` is the same helper `draw.ts` puts between
+        // an error and its response — the comment here used to CLAIM this was
+        // sanitized while passing a bare `String(message)` underneath, and
+        // nothing between here and the DOM would have caught it.
         status = LOGIN_STATUS.failed;
-        error = String(saveError instanceof Error ? saveError.message : saveError);
+        error = redactSecrets(errMsg(saveError));
       }
     } finally {
       // Both exits land here: whatever the outcome (settled / save / publish),

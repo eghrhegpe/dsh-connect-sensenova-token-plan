@@ -1201,6 +1201,22 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     check("a JSON api_key pair is redacted",
       redactSecrets('{"api_key":"sk-live-123456789"}') === '{"api_key":"[REDACTED]"}',
       redactSecrets('{"api_key":"sk-live-123456789"}'));
+    // The unquoted value shape: `{ accessToken: eyJ… }`. Every quoted-pair rule
+    // needs a quote to anchor the value, so this slipped through them all — and
+    // it is exactly what `util.inspect` / `String(obj)` produce when something
+    // interpolates the credential record it was handed, i.e. precisely what a
+    // failed `saveCredential` throws. Reached the panel intact via
+    // `raccoon-walk.ts` → `takeEvent()` → `loginError`.
+    check("an UNQUOTED secret value (util.inspect shape) is redacted",
+      !/eyJhbGciOi/.test(redactSecrets("failed to store { accessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig, refreshToken: rt-abcdef123456 }")),
+      redactSecrets("failed to store { accessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig, refreshToken: rt-abcdef123456 }"));
+    // The inverse, and the reason the rule above skips non-secret values: an
+    // absent field reported as `null` IS the diagnosis. Redacting it would
+    // destroy the only clue that the token was never set.
+    check("a null/undefined secret field keeps its diagnostic value",
+      redactSecrets("{ accessToken: null, refreshToken: undefined }")
+        === "{ accessToken: null, refreshToken: undefined }",
+      redactSecrets("{ accessToken: null, refreshToken: undefined }"));
     // Basic auth: that base64 IS a decodable user:password, and the user is
     // the console account name. The old rule order redacted the SCHEME word and
     // left the payload standing behind it — a redacted-looking line that still
