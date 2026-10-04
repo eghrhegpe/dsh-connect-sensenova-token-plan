@@ -113,3 +113,13 @@
         # drawTimeoutMs: 120000
         #   -> deadline for one image request (image models are slow).
         # ------------------------------------------------------------------
+        # Web-search absorption (docs/ROADMAP.md §6.1.7): when true AND the
+        # Host exposes a `ctx.web` service, the Raccoon hosted `web_search` MCP
+        # server is registered as a search provider, so DSH's own `web_search`
+        # tool searches through it with the panel-signed-in Raccoon credential.
+        # The plugin takes the search selection over (remembering whatever it
+        # displaced) so a second provider does not raise WEB_PROVIDER_AMBIGUOUS.
+        # Off by default - a search provider is a Host-wide change.
+        # webSearchEnabled: false
+        #   -> the opt-in switch (strict boolean).
+        # ------------------------------------------------------------------

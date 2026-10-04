@@ -438,7 +438,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 | 分级 | 端点 | 用途 | 处置 |
 |---|---|---|---|
 | A 值得接 | `POST /api/web/llm/v2/images/gen` | **出图**；客户端 `imageGeneration.endpoint` 即此（`type:"remote"`、`provider:"openai"`、apiKey 空）。全 asar 唯一的 image 端点 | 待实测契约（见本节末） |
-| A 值得接 ✅ 已验证 | `POST /api/web/mcp/web_search/v1/mcp` | **内置联网搜索**（MCP over HTTP，`mcp-server-askecho-search-infinity`） | ✅ 可用（2026-10-04 实测）：小浣熊凭据可鉴权，`initialize` 200、`tools/list` 返回 `web_search`（web/image、Count、TimeRange），端到端 `tools/call` 返回真实网页结果。接入走 DSH tools 服务，属工具层非 provider——接入前需论证定位边界 |
+| A 值得接 ✅ 已接入 | `POST /api/web/mcp/web_search/v1/mcp` | **内置联网搜索**（MCP over HTTP，`mcp-server-askecho-search-infinity`） | ✅ 已接入（2026-10-04）：`src/host/raccoon-search.ts` 两层——MCP 传输（streamable，`initialize` → `tools/call`，`Mcp-Session-Id` 回传，SSE 解析 + 三种错误信封）+ `RaccoonSearchProvider` 挂 **`ctx.web`**（`registerSearchProvider`，不是 `tools.register`——后者会造出第二个并行搜索工具，commandcode 先例）。opt-in `webSearchEnabled`（默认关），复用 Raccoon 凭据链；注册时按 commandcode 方式**接管 `searchProviderId`**（避免 `WEB_PROVIDER_AMBIGUOUS`），teardown 恢复被顶掉的后端。面板开关是剩余一步 |
 | B 可选 | `GET /api/web/org/user` | 用户信息（比 JWT `name` claim 全：头像、组织） | 观望 |
 | B 可选 | `office/v3/assets/*` | 文件/资产 CRUD（files、folders、upload、export/import、search） | ➖ 不做：附件管理，provider 形态用不上 |
 | C 不接 | `desktop/v1/conversation-relay/*`、`mobile/v1/*`、`relay-ws/*` | 桌面↔手机会话同步、中继、websocket | ➖ 客户端专属 |

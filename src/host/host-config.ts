@@ -120,7 +120,9 @@ export const CONFIG_DEFAULTS = Object.freeze({
   /** Preferred draw model id; empty means "first image-gen model of the catalog". */
   drawModelId: "",
   /** Deadline for one image request. Image models are slow; chat deadlines do not apply. */
-  drawTimeoutMs: 120_000
+  drawTimeoutMs: 120_000,
+  /** Opt-in: register the Raccoon hosted `web_search` provider in `ctx.web`. */
+  webSearchEnabled: false
 });
 
 /**
@@ -184,6 +186,8 @@ export interface ResolvedSettings {
   drawEnabled: boolean;
   drawModelId: string;
   drawTimeoutMs: number;
+  /** Whether the Raccoon `web_search` provider is registered in `ctx.web`. */
+  webSearchEnabled: boolean;
 }
 
 /**
@@ -250,7 +254,8 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         // sized deadline would abort healthy requests.
         drawEnabled: source.drawEnabled === true,
         drawModelId: str(source.drawModelId, ""),
-        drawTimeoutMs: clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 5_000)
+        drawTimeoutMs: clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 5_000),
+        webSearchEnabled: source.webSearchEnabled === true
       },
       configError: null
     };
@@ -276,7 +281,8 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         registerProvider: false,
         drawEnabled: false,
         drawModelId: "",
-        drawTimeoutMs: CONFIG_DEFAULTS.drawTimeoutMs
+        drawTimeoutMs: CONFIG_DEFAULTS.drawTimeoutMs,
+        webSearchEnabled: false
       },
       configError: errMsg(error)
     };

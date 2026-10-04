@@ -221,4 +221,10 @@ export interface Wiring {
   raccoonPublisher: ReturnType<typeof import("./raccoon-publish.ts").createRaccoonPublisher> | null;
   /** The Raccoon gateway read cache (balance + catalogue); may be absent. */
   raccoonCache: ReturnType<typeof import("./coalesced-fetch.ts").createCoalescedFetch> | null;
+  /** Resolve the live Raccoon access token ('' when not signed in). */
+  resolveRaccoonToken: () => Promise<string>;
+  /** The Raccoon `web_search` provider switch; may be absent on some Hosts. */
+  webSearchStore: ReturnType<typeof import("./raccoon-web-store.ts").createFileRaccoonWebStore> | null;
+  /** Restore the displaced `ctx.web` search selection; filled at mount. */
+  webSearchRestore?: () => void;
 }

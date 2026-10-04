@@ -11,7 +11,7 @@
  *    an end-to-end `tools/call` returned real web results).
  * 2. **Mounting** — a `ctx.web` search PROVIDER, NOT a hand-registered agent
  *    tool. This follows the `dsh-commandcode-provider` precedent
- *    (`src/web-search.ts`): DSH ships its own `web_search` tool and a
+ *    (its web-search module): DSH ships its own `web_search` tool and a
  *    `WebSearchProvider` registry (`ctx.web` / `@deepseek-ai/dsh-web`), so a
  *    plugin registers a provider and lets DSH's model-facing tool call it. The
  *    earlier `tools.register` plan was the wrong mount — it would have created
@@ -224,7 +224,7 @@ export async function searchWebOnce(options: {
 }) {
   const { token, query, count, searchType, timeRange, fetchImpl, timeoutMs } = options;
   const url = RACCOON_MCP_SEARCH_URL;
-  const common = { url, token, timeoutMs, fetchImpl };
+  const common = { url, token, ...(timeoutMs !== undefined ? { timeoutMs } : {}), ...(fetchImpl !== undefined ? { fetchImpl } : {}) };
   const init = await mcpPost({
     ...common,
     body: {
@@ -269,10 +269,6 @@ export async function searchWebOnce(options: {
   const results = Array.isArray(parsed?.Result?.WebResults) ? parsed.Result.WebResults : [];
   const resultCount = typeof parsed?.Result?.ResultCount === "number" ? parsed.Result.ResultCount : results.length;
   return { ok: true, results, resultCount, raw: parsed };
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -337,8 +333,8 @@ export class RaccoonSearchProvider implements RaccoonWebSearchProvider {
         token,
         query,
         count,
-        fetchImpl: this.deps.fetchImpl,
-        timeoutMs: this.deps.timeoutMs
+        ...(this.deps.fetchImpl !== undefined ? { fetchImpl: this.deps.fetchImpl } : {}),
+        ...(this.deps.timeoutMs !== undefined ? { timeoutMs: this.deps.timeoutMs } : {})
       });
     } catch (error) {
       throwIfAborted(signal);

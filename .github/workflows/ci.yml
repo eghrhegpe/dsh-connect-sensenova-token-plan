@@ -133,6 +133,8 @@ jobs:
           node test/doctor.test.mjs
           node test/raccoon.test.mjs
           node test/raccoon-status.test.mjs
+          node test/raccoon-search.test.mjs
+          node test/raccoon-web.test.mjs
           node test/state-segmentation.test.mjs
           # The duplication gate is not a *.test.mjs (same exemption as the
           # build gate): jscpd (devDependency) scans src/ and every clone must

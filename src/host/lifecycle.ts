@@ -28,6 +28,7 @@ import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
 import { resolveSwitchEnabled } from "./switch-precedence.ts";
+import { RaccoonSearchProvider, RACCOON_SEARCH_PROVIDER_ID } from "./raccoon-search.ts";
 import type { Wiring } from "./types.ts";
 
 /** How many times a mount-time optional-service read is retried. */
@@ -399,6 +400,12 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // tool lives until the Host restarts).
   void registerDrawTool(ctx, wiring, side);
 
+  // Web-search absorption (ROADMAP §6.1.7): opt-in, doubly degraded, and the
+  // selection is taken over only when the switch is on. Fire-and-forget, like
+  // the draw tool — and the restore is remembered on `wiring` so `teardown`
+  // hands the selection back to whichever backend it displaced.
+  void registerWebSearchProvider(ctx, wiring);
+
   // ------------------------------------------------------------------
   // Vision step two (ARCHITECTURE.md §5.1): publish which of this key's
   // models take image input into THIS row's own settings namespace, for
@@ -493,7 +500,127 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
  *   return anything, so it pinned neither the shape nor the arity.
  * @returns {void}
  */
-export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher">, offs: Array<() => void>) {
+/**
+ * The `ctx.web` web-search mount (ROADMAP §6.1.7) — the commandcode-provider
+ * precedent (`dsh-commandcode-provider`'s web-search module). DSH ships its own
+ * `web_search` tool and a `WebSearchProvider` registry (`ctx.web`), so a plugin
+ * registers a provider and lets DSH's model-facing tool call it — a
+ * hand-registered agent tool would be a parallel, second search path.
+ *
+ * Opt-in (`webSearchEnabled`, default off) and doubly degraded (no `web`
+ * service / no `registerSearchProvider` on it), exactly like the draw tool. The
+ * provider interfaces are STRUCTURAL here (no `@deepseek-ai/dsh-web` import), so
+ * the offline suite drives this with a fake `ctx` and a fake runtime.
+ *
+ * Selection: DSH reads a private `searchProviderId` field per search call. When
+ * a second provider is registered without being selected, every search throws
+ * `WEB_PROVIDER_AMBIGUOUS` — the commandcode issue #26 lesson. So enabling this
+ * plugin takes the selection over (remembering whatever it displaced) and
+ * `teardown` hands it back. The write is a bounded dependency on the runtime
+ * shape, mirrored from commandcode; a hardened runtime degrades to
+ * registered-but-unselected.
+ */
+
+/** Structural view of the `ctx.web` runtime's search surface. */
+export interface WebSearchRuntime {
+  registerSearchProvider?: (provider: unknown) => void;
+  searchProviderId: string | undefined;
+}
+
+/** Tracked search-selection state for one mounted `WebSearchRuntime`. */
+export interface WebSearchSelection {
+  /** Whether this plugin currently owns the selection. */
+  owner: boolean;
+  /** The backend it displaced; `undefined` means "nothing was configured". */
+  displaced: string | undefined;
+  /** Whether the field already read our id when we took it over. */
+  preexisting: boolean;
+}
+
+/** Fresh selection state: the plugin starts out not owning the selection. */
+export function webSearchSelection(): WebSearchSelection {
+  return { owner: false, displaced: undefined, preexisting: false };
+}
+
+/**
+ * Reach one end of the web-search selection without trampling siblings.
+ * Never throws: a hardened runtime shape degrades to registered-but-unselected.
+ * @param {WebSearchRuntime} web - the `ctx.web` runtime.
+ * @param {WebSearchSelection} state - the tracked selection.
+ * @param {boolean} enable - take the selection over, or hand it back.
+ */
+export function applyWebSearchSelection(web: WebSearchRuntime, state: WebSearchSelection, enable: boolean): void {
+  try {
+    if (enable) {
+      if (state.owner) {
+        // Still on across a re-apply: re-assert without forgetting whom we displaced.
+        web.searchProviderId = RACCOON_SEARCH_PROVIDER_ID;
+        return;
+      }
+      const prior = web.searchProviderId;
+      state.preexisting = prior === RACCOON_SEARCH_PROVIDER_ID;
+      state.displaced = state.preexisting ? undefined : prior;
+      web.searchProviderId = RACCOON_SEARCH_PROVIDER_ID;
+      state.owner = true;
+      return;
+    }
+    if (state.owner) {
+      state.owner = false;
+      if (!state.preexisting) web.searchProviderId = state.displaced;
+      state.preexisting = false;
+    }
+  } catch {
+    // Hardened/frozen runtime: stay registered-but-unselected.
+  }
+}
+
+/** The wiring subset {@link registerWebSearchProvider} reads — its own `Pick`. */
+export type WebSearchToolWiring = Pick<Wiring,
+  | "settings"
+  | "configError"
+  | "publisher"
+  | "resolveRaccoonToken"
+  | "webSearchStore"
+  | "webSearchRestore"
+  | "logger"
+>;
+
+/**
+ * Register the Raccoon `web_search` provider in `ctx.web` and take the
+ * selection over when the switch is on. Off → the provider is never registered
+ * and the selection is never touched; a late `web` service that finally
+ * registers is picked up by {@link resolveServiceWithRetry}, never by a
+ * duplicate registration.
+ * @param ctx - the host root context (reads `ctx.get("web")`).
+ * @param {WebSearchToolWiring} wiring - the fields listed in that type.
+ * @returns {Promise<void>}
+ */
+export async function registerWebSearchProvider(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: WebSearchToolWiring) {
+  const { settings, configError, publisher, resolveRaccoonToken, webSearchStore } = wiring;
+  if (configError !== null) return;
+  const effective = resolveSwitchEnabled(
+    webSearchStore ? await webSearchStore.enabled().catch(() => null) : null,
+    settings.webSearchEnabled
+  );
+  if (effective !== true) return;
+  const web = await resolveServiceWithRetry<WebSearchRuntime>(ctx, "web", {
+    isDisposed: () => publisher.isDisposed()
+  });
+  if (web === null || typeof web.registerSearchProvider !== "function") return;
+  const selection = webSearchSelection();
+  web.registerSearchProvider(new RaccoonSearchProvider({ resolveToken: resolveRaccoonToken }));
+  applyWebSearchSelection(web, selection, true);
+  // Hand the selection back on teardown (idempotent: the second call sees
+  // `owner === false` and does nothing). A fresh boot re-applies it.
+  wiring.webSearchRestore = () => applyWebSearchSelection(web, selection, false);
+}
+
+export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher" | "webSearchRestore">, offs: Array<() => void>) {
+  try {
+    wiring.webSearchRestore?.();
+  } catch {
+    // The web runtime may already be gone during shutdown.
+  }
   const { publisher, releaseProvider, raccoonPublisher } = wiring;
   // Before anything else: a publish still in flight (the mount seed's, or a
   // poll's) must not register into a Host that is letting this plugin go.
