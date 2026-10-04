@@ -31,6 +31,22 @@
       "expectedCode": 100002,
       "expectedMessage": "params_invalid_error",
       "note": "只能用假 token 探：真 refresh token 是单用轮换，烧掉一次用户就得重扫码。"
+    },
+    {
+      "id": "image-gen",
+      "method": "POST",
+      "path": "/api/web/llm/v2/images/gen",
+      "auth": "required",
+      "probeWithoutAuth": "structured-401",
+      "note": "客户端 imageGeneration.endpoint 即此（ROADMAP §6.1.7）。路由存在性用 structured-401 判定即可；**L2 不做真实出图**：每次 POST 烧积分且同步阻塞实测 >600s，响应格式（b64_json vs url）尚未实证确认。契约形状见下 imageGen 段。"
+    },
+    {
+      "id": "mcp-web-search",
+      "method": "POST",
+      "path": "/api/web/mcp/web_search/v1/mcp",
+      "auth": "required",
+      "probeWithoutAuth": "structured-401",
+      "note": "DSH web_search 工具的后端（src/host/raccoon-search.ts）。MCP over HTTP streamable：鉴权通过后必须同时接受 application/json 与 text/event-stream（否则 406），并回传 Mcp-Session-Id。无凭据时路由在、鉴权先拦，与普通 REST 同判。"
     }
   ],
   "absentRouteControls": [
@@ -69,6 +85,20 @@
     "fallbackFields": ["balance", "available", "amount"],
     "partFields": ["daily_points", "reward_points", "monthly_points", "topup_points"],
     "note": "主字段 available_points 必须仍在网关响应里 —— 它一消失，旧解析就会静默读成 null（0.4.6 事故）。四个 part 字段是「网关声明了才上报」，故只校验声明的值是有限数，不要求都存在。"
+  },
+  "imageGen": {
+    "endpoint": "/api/web/llm/v2/images/gen",
+    "modelGroup": "raccoon-image-gen",
+    "requiredFields": ["prompt"],
+    "syncTimeoutObservedMs": ">600000",
+    "responseFormat": "unconfirmed",
+    "note": "2026-10-04 实测：路由 POST-only；唯一必需字段是 prompt（空 body → 500「missing 1 required positional argument: 'prompt'」）；model 组固定 raccoon-image-gen（传别的模型 → 400 Invalid request parameters）；无凭据 POST → 401 authorization_empty_error。真实出图两次均 600s 超时（同步阻塞），客户端自身 imageGeneration.timeout 只有 500~1000ms，说明客户端不走同步路径。响应按 OpenAI images 兼容推断为 {data:[{b64_json|url}]}，**未实证**。故 L2 只冻结路由与字段契约，真实出图契约待人工手动一次确认后再补。"
+  },
+  "mcpWebSearch": {
+    "toolName": "web_search",
+    "probeQuery": "商汤科技",
+    "protocolVersion": "2024-11-05",
+    "note": "L2d 段按此探：只做一次 tools/call、Count=1（免费额度内，不轮询、不批量）。参数契约：Query 1~100 字符、Count web≤50/image≤5、SearchType web|image、TimeRange 可选。"
   },
   "envelope": {
     "successCode": 0,

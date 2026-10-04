@@ -105,6 +105,22 @@ function tryJson(text) {
   }
 }
 
+/** Split an SSE body into its JSON `data:` envelopes, skipping keep-alive
+ *  lines and blank rows — the same tolerance `parseMcpSse` in
+ *  src/host/raccoon-search.ts has to carry, because the gateway interleaves
+ *  comments and heartbeats with the messages. */
+function parseSseEnvelopes(text) {
+  const envelopes = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (payload === "") continue;
+    const parsed = tryJson(payload);
+    if (parsed !== null) envelopes.push(parsed);
+  }
+  return envelopes;
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -276,6 +292,97 @@ if (accessToken === "") {
     }
   }
   await sleep(PROBE_BACKOFF_MS);
+}
+
+// --- L2d. the hosted web_search MCP, end to end (ROADMAP §6.1.7) ----------
+// This is not route existence — it is the contract src/host/raccoon-search.ts
+// depends on. MCP over HTTP streamable answers 406 unless BOTH content types
+// are accepted and hands back a per-session `Mcp-Session-Id`, so the generic
+// probe() (plain `Accept`) cannot speak it; a raw fetch is the instrument here.
+{
+  const mcpRoute = contract.routes.find((r) => r.id === "mcp-web-search");
+  const mcpUrl = `${BASE_URL}${mcpRoute.path}`;
+  const mcpHeaders = () => ({
+    Accept: "application/json, text/event-stream",
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${accessToken}`
+  });
+  const mcp = contract.mcpWebSearch ?? { toolName: "web_search", probeQuery: "商汤科技", protocolVersion: "2024-11-05" };
+
+  let init = null;
+  let initError = "";
+  try {
+    init = await fetch(mcpUrl, {
+      method: "POST",
+      headers: mcpHeaders(),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: mcp.protocolVersion, capabilities: {}, clientInfo: { name: "live-raccoon-probe", version: "1.0" } }
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+  } catch (error) {
+    initError = error instanceof Error ? error.message : String(error);
+  }
+  check("mcp initialize is reachable with credentials", init !== null, initError);
+
+  if (init !== null) {
+    check("mcp initialize answers 200", init.status === 200, `HTTP ${init.status}`);
+    const sessionId = init.headers.get("mcp-session-id") ?? "";
+    check("mcp initialize returns a Mcp-Session-Id", sessionId.length > 0,
+      sessionId.length === 0 ? "header missing" : `id=${fingerprint(sessionId)}`);
+    const initText = await init.text().catch(() => "");
+    const initEnvelopes = parseSseEnvelopes(initText);
+    check("mcp initialize announces a server (serverInfo or error-free envelope)",
+      initEnvelopes.length > 0, `envelopes=${initEnvelopes.length}`);
+
+    let call = null;
+    let callError = "";
+    try {
+      call = await fetch(mcpUrl, {
+        method: "POST",
+        headers: { ...mcpHeaders(), ...(sessionId !== "" ? { "Mcp-Session-Id": sessionId } : {}) },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: mcp.toolName, arguments: { Query: mcp.probeQuery, Count: 1, SearchType: "web" } }
+        }),
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      });
+    } catch (error) {
+      callError = error instanceof Error ? error.message : String(error);
+    }
+    check("mcp tools/call is reachable", call !== null, callError);
+    if (call !== null) {
+      check("mcp tools/call answers 200", call.status === 200, `HTTP ${call.status}`);
+      const callText = await call.text().catch(() => "");
+      const envelopes = parseSseEnvelopes(callText);
+      const textPiece = envelopes
+        .flatMap((e) => Array.isArray(e?.result?.content) ? e.result.content : [])
+        .find((c) => typeof c?.text === "string")?.text ?? "";
+      const parsed = tryJson(textPiece);
+      const webResults = Array.isArray(parsed?.Result?.WebResults) ? parsed.Result.WebResults : [];
+      check(`mcp web_search returns a WebResults array (Count=1)`,
+        webResults.length >= 1,
+        `results=${webResults.length} resultCount=${String(parsed?.Result?.ResultCount)}`);
+      const first = webResults[0];
+      if (first) {
+        check("mcp web_search result rows carry Url/Title/Snippet",
+          typeof first.Url === "string" && typeof first.Title === "string" && typeof first.Snippet === "string",
+          first.Url ? `url=${first.Url}` : "missing Url");
+      }
+    }
+  }
+
+  // `images/gen` is deliberately NOT generated here: each POST spends points
+  // and blocks synchronously past 600 s, and its response shape is still
+  // unconfirmed. Route existence is already covered in L1; the field contract
+  // is frozen in `contract.imageGen` until someone runs one by hand.
+  check("images/gen real generation is not auto-probed (spends points, response format unconfirmed)",
+    true, "route existence in L1; see contract.imageGen.note");
 }
 
 // --- L2c. refresh: opt-in only, because it BURNS the token ----------------
