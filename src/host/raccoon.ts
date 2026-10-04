@@ -465,6 +465,42 @@ export function raccoonRowVision(model: any): boolean {
 }
 
 /**
+ * The gateway's credit multiplier for one catalogue row, promotion-aware.
+ *
+ * The gateway ships BOTH a list price and an effective price, and the desktop
+ * client renders the two together (the effective price, with the list price
+ * struck through) rather than the list price alone — a `limited_free` model
+ * carries `billing_multiplier: 0.5` beside `billing_effective_multiplier: 0`,
+ * and quoting 0.5 to the user would misstate what a turn actually costs.
+ * Quoting 0 would misstate the other way once the promotion lapses, so the
+ * LIST price is carried alongside as `original` for the panel to show.
+ *
+ * The status set is the one the desktop client accepts (`normal` /
+ * `discount` / `limited_free`); anything else is treated as undeclared. The
+ * promotion fields are emitted ONLY for the two promotion states, so a
+ * `normal` row keeps the pre-existing row shape.
+ * @param {object} model - a raw `categories[].models[]` entry.
+ * @returns {{multiplier?: number, original?: number, status?: "discount"|"limited_free", note?: string}}
+ */
+export function raccoonEffectiveMultiplier(model: any): { multiplier?: number; original?: number; status?: "discount" | "limited_free"; note?: string } {
+  const base =
+    typeof model.billing_multiplier === "number" ? model.billing_multiplier
+      : typeof model.multiplier === "number" ? model.multiplier
+        : undefined;
+  const rawStatus = model.billing_status;
+  const status = rawStatus === "discount" || rawStatus === "limited_free" ? rawStatus : undefined;
+  const effective = typeof model.billing_effective_multiplier === "number" ? model.billing_effective_multiplier : undefined;
+  const promoted = status !== undefined && effective !== undefined;
+  const note = typeof model.billing_status_note === "string" ? model.billing_status_note.trim() : "";
+  return {
+    multiplier: promoted ? effective : base,
+    ...(promoted && base !== undefined ? { original: base } : {}),
+    ...(promoted ? { status } : {}),
+    ...(promoted && note !== "" ? { note } : {})
+  };
+}
+
+/**
  * Fetch the live model catalogue, or `null` when it cannot be read OR when it
  * read fine but lists no visible model.
  *
@@ -513,13 +549,14 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
         if (id === "" || seen.has(id)) continue;
         seen.add(id);
         const params = obj(model.params);
+        const billing = raccoonEffectiveMultiplier(model);
         out.push({
           id,
           name: str(model.name, id),
-          multiplier:
-            typeof model.billing_multiplier === "number" ? model.billing_multiplier
-              : typeof model.multiplier === "number" ? model.multiplier
-                : undefined,
+          multiplier: billing.multiplier,
+          ...(billing.original !== undefined ? { originalMultiplier: billing.original } : {}),
+          ...(billing.status !== undefined ? { billingStatus: billing.status } : {}),
+          ...(billing.note !== undefined ? { billingStatusNote: billing.note } : {}),
           vision: raccoonRowVision(model),
           contextWindow: num(params.context_window ?? model.context_window ?? model.context_length),
           maxOutputLength: num(params.max_tokens ?? params.max_output_tokens ?? model.max_output_tokens ?? model.max_output_length)

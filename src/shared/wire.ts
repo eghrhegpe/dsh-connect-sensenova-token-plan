@@ -212,7 +212,23 @@ export interface RaccoonModel {
   id?: string;
   name?: string;
   vision?: boolean;
+  /**
+   * The multiplier the gateway charges RIGHT NOW. For a promotion this is
+   * `billing_effective_multiplier` (a `limited_free` model reads 0 here), not
+   * the list price — the same figure the desktop client quotes as the live
+   * rate. Absent when the gateway declared nothing.
+   */
   multiplier?: number;
+  /**
+   * The list price the promotion discounts from (`billing_multiplier`). Set
+   * only while the row is in a `discount` / `limited_free` state, so the panel
+   * can draw the struck-through price the client shows.
+   */
+  originalMultiplier?: number;
+  /** The promotion state, only for `discount` / `limited_free`. */
+  billingStatus?: "discount" | "limited_free";
+  /** The gateway's human note, e.g. "免费至10月31日". */
+  billingStatusNote?: string;
   contextWindow?: number;
   maxOutputLength?: number;
 }

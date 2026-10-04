@@ -296,14 +296,26 @@ function section(title) {
     const catalog = await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
       { model_name: "sn-model-1", name: "sn-model-1", visible: true, billing_multiplier: 0.5, tags: ["general", "vision"], params: { context_window: 200_000, max_tokens: 8_000 } },
       { model_name: "sn-deepseek-v4-1-flash", name: "sn-deepseek-v4-1-flash", visible: true, billing_multiplier: 0.25, tags: ["general", "code"], params: { context_window: 1_000_000, max_tokens: 100_000 } },
+      { model_name: "sn-promo-free", name: "sn-promo-free", visible: true, billing_multiplier: 0.5, billing_effective_multiplier: 0, billing_status: "limited_free", billing_status_note: "免费至10月31日", tags: ["vision"], params: { context_window: 256_000, max_tokens: 63_999 } },
+      { model_name: "sn-promo-disc", name: "sn-promo-disc", visible: true, billing_multiplier: 1, billing_effective_multiplier: 0.75, billing_status: "discount", billing_status_note: "会员日", tags: ["general"] },
+      { model_name: "sn-plain", name: "sn-plain", visible: true, billing_multiplier: 0.3, billing_status: "normal" },
+      { model_name: "sn-noeff", name: "sn-noeff", visible: true, billing_multiplier: 0.4, billing_status: "limited_free" },
       { model_name: "m2", name: "Model 2", visible: false, input_modalities: ["image"] }
     ] }] } }));
     check("the catalog keeps only the visible chat models",
-      catalog?.length === 2 && catalog?.[0]?.id === "sn-model-1" && catalog?.[1]?.id === "sn-deepseek-v4-1-flash", JSON.stringify(catalog));
+      catalog?.length === 6 && catalog?.[0]?.id === "sn-model-1" && catalog?.[1]?.id === "sn-deepseek-v4-1-flash", JSON.stringify(catalog));
     check("a catalog row carries its multiplier + vision + window (v2 fields)",
       catalog?.[0]?.multiplier === 0.5 && catalog?.[0]?.vision === true && catalog?.[0]?.contextWindow === 200_000 && catalog?.[0]?.maxOutputLength === 8_000);
     check("the probed vision whitelist beats a missing tag",
       catalog?.[1]?.vision === true && catalog?.[1]?.multiplier === 0.25);
+    check("a limited_free row quotes the effective price with the list price beside it",
+      catalog?.[2]?.multiplier === 0 && catalog?.[2]?.originalMultiplier === 0.5 && catalog?.[2]?.billingStatus === "limited_free" && catalog?.[2]?.billingStatusNote === "免费至10月31日", JSON.stringify(catalog?.[2]));
+    check("a discount row quotes the effective price, not the list",
+      catalog?.[3]?.multiplier === 0.75 && catalog?.[3]?.originalMultiplier === 1 && catalog?.[3]?.billingStatus === "discount" && catalog?.[3]?.billingStatusNote === "会员日", JSON.stringify(catalog?.[3]));
+    check("a normal row keeps the pre-existing row shape (no promotion fields)",
+      catalog?.[4]?.multiplier === 0.3 && catalog?.[4]?.billingStatus === undefined && catalog?.[4]?.originalMultiplier === undefined, JSON.stringify(catalog?.[4]));
+    check("a promotion without an effective price degrades to the list price",
+      catalog?.[5]?.multiplier === 0.4 && catalog?.[5]?.billingStatus === undefined, JSON.stringify(catalog?.[5]));
     // The legacy shape must still read: `id` as the id, top-level windows.
     const legacy = await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
       { id: "legacy-1", name: "Legacy", visible: true, multiplier: 1, vision: true, context_window: 1000, max_output_tokens: 500 }

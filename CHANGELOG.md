@@ -2,6 +2,13 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
+## [Unreleased] — 2026-10-04
+
+两条小浣熊网关契约的实测修正，都由桌面客户端行为反推后真凭据验证。
+
+- **目录字段漂移修复**（`src/host/raccoon.ts`）：网关 `/model_catalog` 已切换为只发 `model_name` / `tags` / `params` / `billing_multiplier`，旧字段（`id` / `vision` / `input_modalities` / `context_window` / `max_output_*` / `multiplier`）全部消失，目录读取因此恒为空（不报错），面板与模型注册**恒走内置快照表**。实测 `sn-deepseek-v4-1-flash` 支持读图（`chat/completions` 带 `image_url` 回 HTTP 200），快照却标 `vision:false`。现按 v2 字段归一化、`tags` 判定 vision，并新增实测白名单 `RACCOON_VISION_WHITELIST`（实测优先于声明）。
+- **限时免费 / 折扣如实展示**（`raccoon.ts` + `raccoon-roster.ts` + `wire.ts` + `i18n.ts`）：目录行的 `multiplier` 改读**生效倍率**（限免时为 0），并保留 `originalMultiplier` / `billingStatus` / `billingStatusNote`；面板模型清单对促销模型加「限时免费 / 限时折扣」徽章，倍率 tooltip 同时给出当前价与原价。此前只读原价，`sn-sensenova-6-8-flash` 面板显示 ×0.50，实际限免 0 倍（客户端把限免折扣当永久免费读）。
+
 ## [0.4.9] — 2026-10-03
 
 两条主线：**「小浣熊」tab 的面板按自家设计系统重做**（三个注册开关换成真开关、余额从一行散文改成卡片组、模型清单表头不再替整段说明当标题），以及**限频与并发两处真实缺口**（Retry-After 的 HTTP-date 形式读不到、跨进程写入缺版本护栏）。

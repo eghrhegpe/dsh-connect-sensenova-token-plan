@@ -217,6 +217,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.modelsError": "保存失败：{error}",
 			"raccoon.free": "free",
 			"raccoon.rateTitle": "网关目录声明的积分倍率（0 为免费）",
+			"raccoon.limitedFree": "限时免费",
+			"raccoon.discount": "限时折扣",
+			"raccoon.promoRateTitle": "当前 {effective}（原价 {original}）{note}",
 			"raccoon.unregistered": "未注册——勾选上方开关即可开启。",
 			"raccoon.awaitingLogin": "已启用——登录后即可注册模型。",
 			"raccoon.loginTimeout": "扫码超时（未在时限内确认）——请重新点击登录。",
@@ -409,6 +412,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.modelsError": "Save failed: {error}",
 			"raccoon.free": "free",
 			"raccoon.rateTitle": "Credit multiplier as declared by the gateway catalogue (0 = free)",
+			"raccoon.limitedFree": "Free (limited time)",
+			"raccoon.discount": "Discount (limited time)",
+			"raccoon.promoRateTitle": "Current {effective} (list {original}){note}",
 			"raccoon.unregistered": "Not registered — tick the switch above.",
 			"raccoon.awaitingLogin": "Enabled — log in to register the models.",
 			"raccoon.loginTimeout": "The scan timed out (no confirmation within the deadline) — start it again.",
@@ -3132,6 +3138,15 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			const label = String(row?.name ?? id);
 			const on = raccoonModelIsOn(enabledIds, id);
 			const rate = typeof row?.multiplier === "number" ? row.multiplier : null;
+			const promo = row?.billingStatus === "limited_free" || row?.billingStatus === "discount" ? row.billingStatus : null;
+			const promoNote = typeof row?.billingStatusNote === "string" ? row.billingStatusNote.trim() : "";
+			const promoOriginal = typeof row?.originalMultiplier === "number" ? row.originalMultiplier : null;
+			const rateText = rate === null ? null : rate === 0 ? tt("raccoon.free") : `×${rate}`;
+			const rateTitle = promo === null ? tt("raccoon.rateTitle") : format(tt("raccoon.promoRateTitle"), {
+				effective: rateText ?? "?",
+				original: promoOriginal === null ? "?" : `×${promoOriginal}`,
+				note: promoNote === "" ? "" : ` ${promoNote}`
+			});
 			const meta = [typeof row?.contextWindow === "number" && row.contextWindow > 0 ? format(tt("llm.contextBadge"), { ctx: tokenSize(row.contextWindow) }) : null, typeof row?.maxOutputLength === "number" && row.maxOutputLength > 0 ? format(tt("llm.metaOutput"), { out: tokenSize(row.maxOutputLength) }) : null].filter(Boolean).join(" · ");
 			return h(ModelRow, {
 				key: id,
@@ -3139,12 +3154,16 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				label,
 				on,
 				busy,
-				rateText: rate === null ? null : rate === 0 ? tt("raccoon.free") : `×${rate}`,
-				rateTitle: tt("raccoon.rateTitle"),
+				rateText,
+				rateTitle,
 				badges: [row?.vision === true ? h("span", {
 					key: "vision",
 					style: S.modelBadge
-				}, tt("llm.rosterVision")) : null],
+				}, tt("llm.rosterVision")) : null, promo === null ? null : h("span", {
+					key: "promo",
+					style: S.modelBadge,
+					title: promoNote === "" ? void 0 : promoNote
+				}, promo === "limited_free" ? tt("raccoon.limitedFree") : tt("raccoon.discount"))],
 				meta,
 				onToggle
 			});

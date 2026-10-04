@@ -111,6 +111,21 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
         // The credit rate reads as its own chip, drawn exactly like the Token
         // Plan roster's `×N` (0 is "free", not "×0" — see the module note).
         const rate = typeof row?.multiplier === "number" ? row.multiplier : null;
+        // The gateway's promotion state rides beside the rate: `multiplier` is
+        // already the EFFECTIVE price, and the list price + the gateway's note
+        // let the chip say in one tooltip what the desktop client draws as a
+        // struck-through list price.
+        const promo = row?.billingStatus === "limited_free" || row?.billingStatus === "discount" ? row.billingStatus : null;
+        const promoNote = typeof row?.billingStatusNote === "string" ? row.billingStatusNote.trim() : "";
+        const promoOriginal = typeof row?.originalMultiplier === "number" ? row.originalMultiplier : null;
+        const rateText = rate === null ? null : rate === 0 ? tt("raccoon.free") : `×${rate}`;
+        const rateTitle = promo === null
+          ? tt("raccoon.rateTitle")
+          : format(tt("raccoon.promoRateTitle"), {
+              effective: rateText ?? "?",
+              original: promoOriginal === null ? "?" : `×${promoOriginal}`,
+              note: promoNote === "" ? "" : ` ${promoNote}`
+            });
         // Only figures the platform actually declares draw a segment, and the
         // thinking ladder is deliberately absent (see the module note).
         const ctx = typeof row?.contextWindow === "number" && row.contextWindow > 0
@@ -126,10 +141,14 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
           label,
           on,
           busy,
-          rateText: rate === null ? null : rate === 0 ? tt("raccoon.free") : `×${rate}`,
-          rateTitle: tt("raccoon.rateTitle"),
+          rateText,
+          rateTitle,
           badges: [
-            row?.vision === true ? h("span", { key: "vision", style: S.modelBadge }, tt("llm.rosterVision")) : null
+            row?.vision === true ? h("span", { key: "vision", style: S.modelBadge }, tt("llm.rosterVision")) : null,
+            promo === null
+              ? null
+              : h("span", { key: "promo", style: S.modelBadge, title: promoNote === "" ? undefined : promoNote },
+                  promo === "limited_free" ? tt("raccoon.limitedFree") : tt("raccoon.discount"))
           ],
           meta,
           onToggle

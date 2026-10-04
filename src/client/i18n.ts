@@ -215,6 +215,13 @@ export const zh = {
   // pseudo figure ("非官方"). This one IS the gateway catalogue's own field,
   // and quoting the other tooltip here would libel real data as invented.
   "raccoon.rateTitle": "网关目录声明的积分倍率（0 为免费）",
+  // Promotion states the gateway declares (`billing_status`): the row's
+  // multiplier is already the EFFECTIVE price, and the list price + the
+  // gateway's note ride along so the chip can say what the strike-through
+  // would, in one tooltip. `{note}` may be empty — the format tolerates it.
+  "raccoon.limitedFree": "限时免费",
+  "raccoon.discount": "限时折扣",
+  "raccoon.promoRateTitle": "当前 {effective}（原价 {original}）{note}",
   "raccoon.unregistered": "未注册——勾选上方开关即可开启。",
   "raccoon.awaitingLogin": "已启用——登录后即可注册模型。",
   // The three terminal outcomes of a QR walk. They are EVENTS the tab reports
@@ -416,6 +423,9 @@ export const en: typeof zh = {
   "raccoon.modelsError": "Save failed: {error}",
   "raccoon.free": "free",
   "raccoon.rateTitle": "Credit multiplier as declared by the gateway catalogue (0 = free)",
+  "raccoon.limitedFree": "Free (limited time)",
+  "raccoon.discount": "Discount (limited time)",
+  "raccoon.promoRateTitle": "Current {effective} (list {original}){note}",
   "raccoon.unregistered": "Not registered — tick the switch above.",
   "raccoon.awaitingLogin": "Enabled — log in to register the models.",
   "raccoon.loginTimeout": "The scan timed out (no confirmation within the deadline) — start it again.",
