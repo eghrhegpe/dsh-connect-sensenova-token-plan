@@ -438,7 +438,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 | 分级 | 端点 | 用途 | 处置 |
 |---|---|---|---|
 | A 值得接 | `POST /api/web/llm/v2/images/gen` | **出图**；客户端 `imageGeneration.endpoint` 即此（`type:"remote"`、`provider:"openai"`、apiKey 空）。全 asar 唯一的 image 端点 | 待实测契约（见本节末） |
-| A 值得接 | `GET /api/web/mcp/web_search/v1/mcp` | 内置联网搜索（MCP 协议，`mcp-server-askecho-search-infinity`） | 观望：DSH tools 服务可注册，但属工具层非 provider |
+| A 值得接 ✅ 已验证 | `POST /api/web/mcp/web_search/v1/mcp` | **内置联网搜索**（MCP over HTTP，`mcp-server-askecho-search-infinity`） | ✅ 可用（2026-10-04 实测）：小浣熊凭据可鉴权，`initialize` 200、`tools/list` 返回 `web_search`（web/image、Count、TimeRange），端到端 `tools/call` 返回真实网页结果。接入走 DSH tools 服务，属工具层非 provider——接入前需论证定位边界 |
 | B 可选 | `GET /api/web/org/user` | 用户信息（比 JWT `name` claim 全：头像、组织） | 观望 |
 | B 可选 | `office/v3/assets/*` | 文件/资产 CRUD（files、folders、upload、export/import、search） | ➖ 不做：附件管理，provider 形态用不上 |
 | C 不接 | `desktop/v1/conversation-relay/*`、`mobile/v1/*`、`relay-ws/*` | 桌面↔手机会话同步、中继、websocket | ➖ 客户端专属 |
@@ -456,6 +456,13 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 - **模型组固定 `raccoon-image-gen`**：带 `model` / `size` / `n` → `400 Invalid request parameters`（网关不接受这些参数）。
 - **同步返回、生成极慢**：`{"prompt":"…"}` 单请求 600 秒超时仍未返回（实测两次），带 `model:"raccoon-image-gen"` 也被接受进入生成但同样阻塞；而客户端配置 `imageGeneration.timeout: 500~1000`——客户端不走同步等待（疑似网关侧队列 / 生成耗时，接入时需长超时或改异步轮询）。
 - **响应格式推断**：客户端经 Vercel AI SDK 的 OpenAI 图像工具链（`/images/generations` + `response_format:"b64_json"` + `openaiImageResponseSchema`），故响应应按 OpenAI images 兼容解析（`{data:[{b64_json|url}]}`）——**未实测确认**（同步阻塞拿不到响应体），接入时先按此解析并设长超时。
+
+**`mcp/web_search` 契约实测（2026-10-04，带凭据，端到端通）**：
+
+- **路由**：仅 `POST`，MCP over HTTP（streamable）；`Accept` 必须同时给 `application/json, text/event-stream`，否则回 `406 Not Acceptable: Client must accept both application/json and text/event-stream`。无凭据 → 结构化 `401 authorization_empty_error`。
+- **凭据**：**小浣熊扫码凭据（`Bearer <access_token>`）直接可用**——`initialize` 返回 `200` + `Mcp-Session-Id` 头 + SSE `event: message` 信封，serverInfo 为「联网搜索 API MCP Server」v1.27.0，协议 `2024-11-05`；`notifications/initialized` 回 `202`；后续请求带 `Mcp-Session-Id` 头。
+- **工具**：`tools/list` 返回 1 个 `web_search`，参数 `Query`（1~100 字符）、`Count`（web 最多 50 / image 最多 5）、`SearchType`（web / image）、`TimeRange`。
+- **返回**：`tools/call` 回 `200`，结果为 `ResponseMetadata.RequestId` + `Result.ResultCount` + `WebResults[{Id, SortId, Title, SiteName, Url, Snippet, Summary}]`（实测 `Query:"商汤科技"` 返回 sensetime.com 真实结果）。后端特征为腾讯云 TC3 搜索 API 形态。
 
 ## 7. 优先级与时间盒
 
