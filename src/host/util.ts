@@ -65,19 +65,34 @@ export function redactSecrets(text: unknown) {
   const raw = typeof text === "string" ? text : "";
   return (
     raw
-      // 1) Header values FIRST, so a whole `"authorization":"sk-..."` value is
-      //    consumed in one pass instead of leaving the token behind. The
-      //    `(?!Bearer\s)` skip keeps this from eating the word "Bearer" that
-      //    rule 2 leaves tagged.
-      .replace(/(["']?[Aa]uthorization["']?\s*[:=]\s*["']?)(?!Bearer\s)[^"',;\s]+/g, "$1[REDACTED]")
-      // 2) Bearer / Basic tokens.
+      // 1) Bearer / Basic FIRST, while the scheme word and its value are still
+      //    one contiguous shape. Rule 2 below swallows whatever token follows
+      //    an `authorization` header, and its `(?!Bearer\s)` skip covers Bearer
+      //    only — so with the old order a `Basic <base64>` pair was turned into
+      //    `Authorization: [REDACTED] dXNlcjpwYXNz…`, i.e. the scheme word was
+      //    redacted and the base64 (a trivially decodable user:password, and
+      //    that user IS the console account name) was left standing behind it.
       .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [REDACTED]")
-      // 3) Bare SenseNova inference keys, e.g. sk-a1b2c3... (long alnum + - _ .)
+      // 2) Header values, so a whole `"authorization":"sk-..."` value is
+      //    consumed in one pass instead of leaving the token behind.
+      .replace(/(["']?[Aa]uthorization["']?\s*[:=]\s*["']?)(?!Bearer\s)[^"',;\s]+/g, "$1[REDACTED]")
+      // 3) Cookie / Set-Cookie: every cookie in the jar is a session
+      //    credential — the OIDC walk's CSRF cookie among them (AGENTS.md red
+      //    line 1 names cookies explicitly) — so the whole header goes rather
+      //    than trying to match cookie names one by one. It must run to the
+      //    END of the value, not to the first `;`: a jar is `a=1; b=2`, and
+      //    stopping at the separator would leave every cookie but the first
+      //    standing. The quote group is echoed back so a JSON-shaped
+      //    `"Cookie": "a=1; b=2"` stays well-formed.
+      .replace(/\b(Set-Cookie|Cookie)(\s*[:=]\s*)(["']?)[^"'\n]*\3/gi, "$1$2$3[REDACTED]$3")
+      // 4) Bare SenseNova inference keys, e.g. sk-a1b2c3... (long alnum + - _ .)
       .replace(/\bsk-[A-Za-z0-9._-]{8,}/g, "sk-[REDACTED]")
-      // 4) Known secret JSON pairs, quoted: {"api_key":"..."}.
-      .replace(/(["']?(?:password|access_token|refresh_token|api[_-]?key|token)["']?\s*:\s*["'])[^"']+(?=["'])/gi, "$1[REDACTED]")
-      // 5) Known secret key=value pairs.
-      .replace(/\b(password|access_token|refresh_token|api[_-]?key|token)\s*=\s*[^&;\s]+/gi, "$1=[REDACTED]")
+      // 5) Known secret JSON pairs, quoted: {"api_key":"..."}. The key
+      //    alternation is separator-agnostic (`access[_-]?token` under `/i`),
+      //    so a platform that spells the same field camelCase is still matched.
+      .replace(/(["']?(?:password|access[_-]?token|refresh[_-]?token|api[_-]?key|token|client[_-]?secret|code[_-]?verifier|secret)["']?\s*:\s*["'])[^"']+(?=["'])/gi, "$1[REDACTED]")
+      // 6) Known secret key=value pairs.
+      .replace(/\b(password|access[_-]?token|refresh[_-]?token|api[_-]?key|token|client[_-]?secret|code[_-]?verifier)\s*=\s*[^&;\s"']+/gi, "$1=[REDACTED]")
   );
 }
 

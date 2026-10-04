@@ -17,7 +17,12 @@
  *
  * If the rollback is missing: step 4 fails (registered=false, built=null).
  */
-import { createPairReleaser, registerProviderPair, swapRegistration } from "../src/host/publish-core.ts";
+import {
+  createPairReleaser,
+  registerProviderPair,
+  swapRegistration,
+  createAdapterFactoryResolver
+} from "../src/host/publish-core.ts";
 
 const PROVIDER_ID = "test-rollback-guard";
 const DISPLAY_NAME = "Test Rollback Guard";
@@ -111,6 +116,40 @@ function check(name, condition, detail = "") {
   
   release();
   check("release safe", true, "");
+}
+
+// --- Adapter factory resolver: memoize the SUCCESS, never the failure ------
+// The resolver exists so a Host whose peers resolve slowly pays the `import()`
+// once instead of per publish. It used to memoize the PROMISE rather than its
+// result, which pinned a rejection in the slot for the life of the process:
+// every later publish rethrew that one error, and the provider could never
+// register again — even after the operator fixed the missing peer, which is
+// exactly the remedy `describeBuildFailure` prints for ERR_MODULE_NOT_FOUND.
+// A recoverable install problem cost a Host restart.
+{
+  let attempts = 0;
+  const resolver = createAdapterFactoryResolver(async () => {
+    attempts += 1;
+    if (attempts < 2) throw new Error("Cannot find module '@earendil-works/pi-ai'");
+    return { createSensenovaAdapter: "factory" };
+  }, "createSensenovaAdapter");
+
+  let firstError = null;
+  try { await resolver(); } catch (error) { firstError = error; }
+  check("the resolver surfaces the first load failure", firstError !== null, String(firstError));
+
+  let second = null;
+  let secondError = null;
+  try { second = await resolver(); } catch (error) { secondError = error; }
+  check("the resolver retries after a failure (a rejection is not memoized)",
+    second === "factory" && secondError === null,
+    `value=${String(second)} error=${String(secondError)}`);
+
+  // And the happy path still loads once — that is the resolver's whole reason
+  // to exist, so the retry above must not have cost it.
+  const third = await resolver();
+  check("the resolver still loads the module once on the happy path",
+    attempts === 2 && third === "factory", `attempts=${attempts} third=${String(third)}`);
 }
 
 console.log(`\nprovider-rollback-guard: ${passed} passed, ${failed} failed`);

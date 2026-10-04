@@ -8,6 +8,7 @@
  * offline" stays a property you can rely on rather than a claim.
  */
 import { readJwtClaims, readJwtExpiry, createAuth } from "../src/host/sensenova-auth.ts";
+import { createTrace } from "../src/host/auth-trace.ts";
 import { sealPassword, createJwksCache } from "../src/host/sensenova-crypto.ts";
 import { installNetworkGuard } from "./peer-roots.mjs";
 import {
@@ -826,6 +827,39 @@ check("empty token yields null expiry", readJwtExpiry("") === null);
     let code = null;
     try { createAuth({ iamOrigin: endpoint }); } catch (error) { code = error?.code; }
     check(label, code === expect, `iamOrigin=${endpoint} code=${String(code)}`);
+  }
+}
+
+// --- 7c. the login trace never records a credential ------------------------
+// The trace file is what a user attaches to a bug report, so it is the highest
+// -value leak in the plugin and the one place a red line is truly load-bearing.
+// Two gates are pinned, because either alone fails open:
+//   - the KEY names a secret field (matched separator-agnostically, so a
+//     platform that spells `accessToken` instead of `access_token` is covered);
+//   - the VALUE simply IS one (a JWT is self-describing, whatever key holds it).
+// The second gate is what catches a credential under an INNOCENT key, and the
+// URL shapes below are the ones the platform actually uses — a relative
+// `Location` and a fragment are both outside `searchParams`.
+{
+  try {
+    const trace = createTrace();
+    trace.step("token", { body: JSON.stringify({ access_token: "AT.1", accessToken: "AT.2", refreshToken: "RT.2" }) });
+    trace.step("nested", { body: JSON.stringify({ data: { token: "eyJhbGciOiJIUzI1NiJ9.abc.def" }, ok: true }) });
+    trace.step("relative", { url: "/oauth2/callback?code=SECRETCODE&state=xyz" });
+    trace.step("fragment", { url: "https://x/cb#access_token=SECRETAT" });
+    const blob = JSON.stringify(trace.done());
+    check("the trace redacts snake_case token keys",
+      !blob.includes("AT.1") && !blob.includes("RT.2"), blob.slice(0, 220));
+    check("the trace redacts camelCase token keys",
+      !blob.includes("AT.2"), blob.slice(0, 220));
+    check("the trace redacts a JWT nested under an ordinary key",
+      !blob.includes("eyJhbGci"), blob.slice(0, 220));
+    check("the trace redacts a secret in a RELATIVE redirect",
+      !blob.includes("SECRETCODE"), blob.slice(0, 220));
+    check("the trace redacts a secret in the URL fragment",
+      !blob.includes("SECRETAT"), blob.slice(0, 220));
+  } catch (error) {
+    fail("the login trace never records a credential", error);
   }
 }
 

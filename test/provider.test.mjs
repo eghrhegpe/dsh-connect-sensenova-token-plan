@@ -1201,6 +1201,28 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     check("a JSON api_key pair is redacted",
       redactSecrets('{"api_key":"sk-live-123456789"}') === '{"api_key":"[REDACTED]"}',
       redactSecrets('{"api_key":"sk-live-123456789"}'));
+    // Basic auth: that base64 IS a decodable user:password, and the user is
+    // the console account name. The old rule order redacted the SCHEME word and
+    // left the payload standing behind it — a redacted-looking line that still
+    // carried the credential.
+    check("a Basic authorization payload is redacted (it decodes to user:password)",
+      !/dXNlcjpwYXNz/.test(redactSecrets("Authorization: Basic dXNlcjpwYXNzMTIzNDU=")),
+      redactSecrets("Authorization: Basic dXNlcjpwYXNzMTIzNDU="));
+    // Cookies are session credentials (the OIDC walk's CSRF cookie among them),
+    // and a jar is `a=1; b=2` — redacting up to the first separator would leave
+    // every cookie but the first one standing.
+    check("a Cookie header is redacted whole, not only its first entry",
+      !/abc123|xyz789/.test(redactSecrets("Cookie: oauth2_authentication_csrf=abc123; sid=xyz789")),
+      redactSecrets("Cookie: oauth2_authentication_csrf=abc123; sid=xyz789"));
+    check("a code_verifier pair is redacted",
+      redactSecrets("login failed: code_verifier=VERIFIERVALUE_1234")
+        === "login failed: code_verifier=[REDACTED]",
+      redactSecrets("login failed: code_verifier=VERIFIERVALUE_1234"));
+    // Separator-agnostic keys: a platform that spells the same field camelCase
+    // must not slip past a snake_case-shaped rule.
+    check("a camelCase token key is redacted",
+      redactSecrets('{"accessToken":"AT.secret"}') === '{"accessToken":"[REDACTED]"}',
+      redactSecrets('{"accessToken":"AT.secret"}'));
     // Non-secret text passes through unchanged — the gate must not eat
     // diagnostic detail that has nothing to do with credentials.
     check("a credential-free error message passes through",

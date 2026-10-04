@@ -59,6 +59,29 @@ export interface ProviderPublisherState extends PublisherStateBase {
 }
 
 /**
+ * What a publish answers.
+ *
+ * A real `interface`, not the JSDoc `@returns` that used to sit on `publish`:
+ * in a `.ts` file JSDoc is a comment, not a type source (the trap `codes.ts`
+ * spells out for `CodeValue`), so the declared shape reached no call site —
+ * each consumer re-declared `Promise<unknown>` and the result became
+ * unreadable. That is how a FAILED publish came to be treated as a landed one:
+ * nothing downstream could see `ok`.
+ *
+ * `ok:false` never means "the provider is down". It means this offer was NOT
+ * registered and the previously serving pair was left in place, so the caller
+ * must not adopt the new state's signature.
+ */
+export interface PublishResult {
+  /** True when the offer was registered (or deliberately unregistered). */
+  ok: boolean;
+  /** True when the publish was declined rather than failed (disposed, switch off). */
+  skipped?: boolean;
+  /** The redacted reason, present when `ok` is false. */
+  error?: unknown;
+}
+
+/**
  * The provider publisher.
  *
  * Holds the live registration state (`state`); the publish queue, the
@@ -194,7 +217,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
    *   drop from the picker's offer.
    * @returns {Promise<{ok: boolean, skipped?: boolean, error?: unknown}>}
    */
-  const publishProviderOnce = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []) => {
+  const publishProviderOnce = async (entries: unknown, enabledIds: unknown, unavailableModelIds: string[] = []): Promise<PublishResult> => {
     // A publish that arrives after the plugin was disposed registers a
     // provider into a Host that has already withdrawn this plugin: no owner,
     // no release, and nothing on screen saying where it came from.

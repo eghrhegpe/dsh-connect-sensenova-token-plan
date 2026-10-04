@@ -86,10 +86,17 @@ export function createPublishQueue() {
   return {
     /**
      * Queue `task` behind everything in flight and resolve with its result.
-     * @param {() => Promise<unknown>} task - the publish to run, in turn.
-     * @returns {Promise<unknown>} the task's own settled value.
+     *
+     * @template T - the task's settled value. It must come back UNCHANGED: the
+     *   callers read the publish result off it, and `ok:false` is the only
+     *   signal that a build failed while the previous registration kept
+     *   serving. Returning `Promise<unknown>` here threw that away at every
+     *   call site, which is why a caller could not tell a landed publish from a
+     *   failed one — the shape the poll's signature gate depends on.
+     * @param {() => Promise<T>} task - the publish to run, in turn.
+     * @returns {Promise<T>} the task's own settled value.
      */
-    enqueue(task: () => Promise<unknown>): Promise<unknown> {
+    enqueue<T>(task: () => Promise<T>): Promise<T> {
       const queued = publishChain.then(task, task);
       publishChain = queued.then(() => undefined, () => undefined);
       return queued;
@@ -179,6 +186,16 @@ export function registerProviderPair(llm: { registerAdapter: (providerIds: strin
  *
  * The module is loaded once and the factory is read off it once, so a Host
  * whose peers resolve slowly pays that cost one time, not per publish.
+ *
+ * Only the SUCCESS is memoized. A rejection used to be pinned in the slot
+ * forever, because the memoized value was the promise rather than its result:
+ * after one failed `import()` every later publish rethrew the same error and
+ * the provider could never register again — even after the operator fixed the
+ * missing peer, which is the failure this resolver's own diagnostics
+ * (`describeBuildFailure`, remedy text for `ERR_MODULE_NOT_FOUND`) tell them
+ * to go fix. That made a recoverable install problem cost a Host restart.
+ * Clearing the slot on failure keeps "loaded once" for the happy path and
+ * gives the next publish a real retry.
  * @param {() => Promise<object>} loadModule - resolves the adapter module.
  * @param {string} exportName - the factory export to read off the module.
  * @returns {() => Promise<Function>} the memoized factory resolver.
@@ -187,7 +204,12 @@ export function createAdapterFactoryResolver(loadModule: () => Promise<object>, 
   let adapterFactoryPromise: Promise<((options: unknown) => unknown) | undefined> | undefined;
   return async () => {
     if (adapterFactoryPromise === undefined) {
-      adapterFactoryPromise = Promise.resolve(loadModule()).then((mod) => (mod as Record<string, unknown>)?.[exportName] as ((options: unknown) => unknown) | undefined);
+      adapterFactoryPromise = Promise.resolve(loadModule())
+        .then((mod) => (mod as Record<string, unknown>)?.[exportName] as ((options: unknown) => unknown) | undefined)
+        .catch((error: unknown) => {
+          adapterFactoryPromise = undefined;
+          throw error;
+        });
     }
     return adapterFactoryPromise;
   };

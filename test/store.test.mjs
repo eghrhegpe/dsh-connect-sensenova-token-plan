@@ -3,6 +3,7 @@
  * with and without a credentials service.
  */
 import { createTokenStore, MAX_LOGIN_BACKOFF_MS, DEFAULT_LOGIN_BACKOFF_MS, THROTTLE_ID } from "../src/host/token-store.ts";
+import { purgeGrant } from "../src/host/token-store/grant.ts";
 import { createFileThrottleStore, createMemoryThrottleStore } from "../src/host/throttle-store.ts";
 import { loadPeer, installNetworkGuard, findPeerRoot, isolateStateDir } from "./peer-roots.mjs";
 import { createRequire } from "node:module";
@@ -1078,6 +1079,52 @@ async function withNetwork(stub, body) {
     !serialized.includes("hunter2") && !serialized.includes("秘密") &&
       !serialized.includes("SENSENOVA_PASSWORD") && !keys.some((k) => /password|secret/i.test(k)),
     `${serialized.slice(0, 100)} keys=${keys.join(",")}`);
+}
+
+// --- purgeGrant: a read failure must not be read as "safe to delete" -------
+// The compare-and-reap gate exists for ONE scenario: two Host processes sharing
+// this credentials document (PITFALLS §22 — desktop runs an installed copy, web
+// symlinks the source tree), where the other process has already rotated the
+// refresh token and written a HEALTHY grant. Deleting unconditionally silently
+// signed both out, so the gate reaps only if the record is still the dead token.
+//
+// Its old shape folded a read FAILURE into "record absent" via
+// `.catch(() => undefined)`, and `undefined` is not `onDisk.accessToken !==
+// accessToken`, so it fell through to `delete` — the gate opened precisely in
+// the racing case it was built for, whenever the document could not be read at
+// that instant (concurrent rewrite, EACCES, half-parsed YAML). A stale grant
+// costs one failed request the caller is already handling; a deleted one costs
+// the user a silent sign-out, so the conservative direction is to leave it.
+{
+  try {
+    // The case under test: the document cannot be read right now.
+    const unreadable = fakeCredentials(grant("AT-new", "RT-new", 60));
+    unreadable.readRecord = async () => {
+      throw new Error("EACCES: the credentials document is being rewritten");
+    };
+    const s1 = { cached: null, rejected: new Set() };
+    await purgeGrant({ backend: () => unreadable, key: KEY }, s1, "AT-old");
+    check("purgeGrant leaves the record alone when it cannot read it",
+      unreadable.records.has(KEY),
+      `records=${[...unreadable.records.keys()].join(",") || "(empty)"}`);
+
+    // Control 1: readable and ROTATED by the other process — not deleted, adopted.
+    const rotated = fakeCredentials(grant("AT-new", "RT-new", 60));
+    const s2 = { cached: null, rejected: new Set() };
+    await purgeGrant({ backend: () => rotated, key: KEY }, s2, "AT-old");
+    check("purgeGrant keeps a grant another process has already rotated",
+      rotated.records.has(KEY) && s2.cached?.accessToken === "AT-new",
+      `has=${rotated.records.has(KEY)} cached=${s2.cached?.accessToken}`);
+
+    // Control 2: readable and still the dead token — deleted, as intended.
+    const dead = fakeCredentials(grant("AT-old", "RT-old", 60));
+    const s3 = { cached: null, rejected: new Set() };
+    await purgeGrant({ backend: () => dead, key: KEY }, s3, "AT-old");
+    check("purgeGrant still reaps a grant that is the dead token",
+      !dead.records.has(KEY), `records=${[...dead.records.keys()].join(",") || "(empty)"}`);
+  } catch (error) {
+    fail("purgeGrant does not reap what it cannot read", error);
+  }
 }
 
 // The store is exercised against stubbed platform responses; nothing here may

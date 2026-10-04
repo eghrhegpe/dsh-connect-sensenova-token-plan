@@ -24,6 +24,7 @@ import { fetchConsole, fetchModelCatalog } from "./console-client.ts";
 import { parsePools, parseTrend, checkShape, identifyVisionModel } from "./parsers.ts";
 import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
 import { catalogSignature, syncSignaturesAfterPublish, quotaSignatureOf } from "./provider-publish.ts";
+import type { PublishResult } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
 import { str, errMsg } from "./util.ts";
 import { resolveSwitchEnabled, switchSource } from "./switch-precedence.ts";
@@ -159,7 +160,13 @@ export async function buildSnapshotBody({
   publisher: {
     state: any;
     entries?: unknown[];
-    publish: (entries: unknown, enabledIds: unknown, unavailableModelIds?: string[]) => Promise<unknown>;
+    // The publish RESULT is read, so it is typed, not `unknown`: `ok:false`
+    // means this offer was not registered and the previous pair is still
+    // serving — in which case the signature must NOT be adopted, or the next
+    // poll sees "no change" and never retries. Declared as `unknown` this was
+    // unreadable at the call site, which is exactly how the failed-publish
+    // case came to be treated as a landed one.
+    publish: (entries: unknown, enabledIds: unknown, unavailableModelIds?: string[]) => Promise<PublishResult>;
   };
   catalogStore: { listEnabledIds(): Promise<string[]>; replace(entries: unknown, enabledIds?: unknown): Promise<void> };
   panelSwitch: () => Promise<boolean | null>;
@@ -308,6 +315,12 @@ export async function buildSnapshotBody({
   const enabledIds = await catalogStore.listEnabledIds().catch(() => providerState.enabledIds);
   let offered = providerState.entries;
   let catalogChanged = false;
+  // Whether the catalogue branch's publish actually LANDED. It is threaded into
+  // the quota branch below because that branch syncs the same signatures: if
+  // the catalogue publish failed, the quota branch must not "fix up" the
+  // signature for it, or the whole point of not syncing here is undone one
+  // line later.
+  let catalogPublishOk = true;
   if (Array.isArray(catalog)) {
     const freshSignature = catalogSignature(catalog, enabledIds);
     if (freshSignature !== providerState.signature) {
@@ -316,11 +329,23 @@ export async function buildSnapshotBody({
       // `effectiveUnavailable`, never the raw three-state value: a catalogue
       // change still re-registers, and it must re-register with the LAST
       // KNOWN unavailable set rather than an empty one.
-      await publisher.publish(catalog, enabledIds, effectiveUnavailable);
-      // Keep the signatures in lock-step with what was just published — the SAME
-      // formulas the route path uses, so the "did the offer change?" signal has a
-      // single source and cannot drift between the two publish paths.
-      syncSignaturesAfterPublish(providerState);
+      const published = await publisher.publish(catalog, enabledIds, effectiveUnavailable);
+      // A failed publish RETURNS `{ok:false}` (it keeps the pair that was
+      // already serving) instead of throwing, so execution still reaches this
+      // line. Syncing unconditionally used to stamp the NEW catalogue's
+      // signature onto a registration that is still the OLD one: the next poll
+      // compared signatures, saw no change, and never retried. The catalogue
+      // store has already been rewritten above, so the panel quoted the new
+      // model count while the picker served the old list — until the catalogue
+      // changed again or the Host restarted. That is why this class of bug
+      // always presented as "a restart fixes it".
+      catalogPublishOk = published?.ok !== false;
+      if (catalogPublishOk) {
+        // Keep the signatures in lock-step with what was just published — the SAME
+        // formulas the route path uses, so the "did the offer change?" signal has a
+        // single source and cannot drift between the two publish paths.
+        syncSignaturesAfterPublish(providerState);
+      }
     }
     offered = catalog;
   }
@@ -339,12 +364,18 @@ export async function buildSnapshotBody({
   if (unavailableModelIds !== null) {
     const quotaSig = quotaSignatureOf(unavailableModelIds);
     if (quotaSig !== providerState.quotaSignature) {
+      let publishOk = catalogPublishOk;
       if (!catalogChanged) {
-        await publisher.publish(providerState.entries, providerState.enabledIds, unavailableModelIds);
+        const published = await publisher.publish(providerState.entries, providerState.enabledIds, unavailableModelIds);
+        publishOk = published?.ok !== false;
       }
       // Same single-source sync as the catalogue branch above; sets both signatures
-      // from the published offer so the next poll sees a stable signal.
-      syncSignaturesAfterPublish(providerState);
+      // from the published offer so the next poll sees a stable signal. Gated on
+      // the publish having landed, for the reason stated there — and gated on the
+      // CATALOGUE publish too, so a failure up there is not silently adopted here.
+      if (publishOk) {
+        syncSignaturesAfterPublish(providerState);
+      }
     }
   }
   // The counts describe the OFFER, not the catalogue: the adapter is built

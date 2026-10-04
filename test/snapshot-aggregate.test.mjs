@@ -88,7 +88,7 @@ function stubFetch(routes) {
  * registered — stubbing it as `{}` would let these checks pass for the wrong
  * reason.
  */
-function harness({ stateOverrides = {}, published = [] } = {}) {
+function harness({ stateOverrides = {}, published = [], publishResult = { ok: true } } = {}) {
   const state = {
     entries: [],
     enabledIds: [],
@@ -130,7 +130,10 @@ function harness({ stateOverrides = {}, published = [] } = {}) {
           state.entries = Array.isArray(entries) ? entries : [];
           state.enabledIds = Array.isArray(enabledIds) ? enabledIds : [];
           state.unavailableIds = Array.isArray(unavailableModelIds) ? unavailableModelIds : [];
-          return { ok: true };
+          // A build failure is REPORTED, not thrown: the real publisher answers
+          // `{ok:false}` and keeps the pair that was already serving. `publishResult`
+          // lets the F group drive that branch, which is the whole point of it.
+          return publishResult;
         }
       },
       catalogStore: {
@@ -275,6 +278,45 @@ function harness({ stateOverrides = {}, published = [] } = {}) {
   check("E2 the catalogue signature still tracks entries and the allow-list",
     state.signature === catalogSignature([{ id: "b" }, { id: "a" }], ["z"]),
     `${state.signature}`);
+}
+
+// === F. a publish that FAILED must not adopt the signature =================
+// `publisher.publish` reports a build failure by RETURNING `{ok:false}` — it
+// keeps the pair that was already serving — so a bare `await` still reaches
+// the next line. Syncing the signature there stamped the NEW state's signature
+// onto a registration that was still the OLD one, and the next poll's
+// change-detection compared signatures, saw "no change", and never retried.
+// The catalogue store had already been rewritten, so the panel quoted a model
+// count the picker was not serving — until the catalogue changed again or the
+// Host restarted, which is why this class of bug always reported as "a restart
+// fixes it". An OFFER is not a published offer.
+{
+  const { params, state, published } = harness({ publishResult: { ok: false } });
+  const net = stubFetch({ "pool-usage": EXHAUSTED_POOL, "credit-usage-trend": TREND_OK });
+  try {
+    await buildSnapshotBody(params);
+  } finally {
+    net.restore();
+  }
+  check("F1 a failed publish is still attempted (the offer is not silently dropped)",
+    published.length === 1, `published=${published.length}`);
+  check("F2 a failed publish leaves the quota signature unset, so the next poll retries",
+    state.quotaSignature === "", `${state.quotaSignature}`);
+}
+
+// The negative control for F: an `ok` publish must STILL sync. Without this the
+// F group would also pass for someone who simply deleted the sync call — which
+// would reintroduce the churn bug the sync exists to prevent.
+{
+  const { params, state } = harness();
+  const net = stubFetch({ "pool-usage": EXHAUSTED_POOL, "credit-usage-trend": TREND_OK });
+  try {
+    await buildSnapshotBody(params);
+  } finally {
+    net.restore();
+  }
+  check("F3 a successful publish still adopts the signature (the gate did not just delete the sync)",
+    state.quotaSignature === quotaSignatureOf(["glm-5.2", "glm-4.6"]), `${state.quotaSignature}`);
 }
 
 // --- report ----------------------------------------------------------------

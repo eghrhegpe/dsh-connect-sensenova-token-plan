@@ -192,7 +192,28 @@ export async function purgeGrant(wiring: StoreContextWiring, state: TokenStoreSt
   // is `undefined` only on the explicit "forget account" path, where the only
   // correct action is to delete whatever is stored.
   if (accessToken !== undefined) {
-    const onDisk = parseGrant(await backend().readRecord(key).catch(() => undefined));
+    // A READ FAILURE IS NOT A MATCH.
+    //
+    // The old line was `parseGrant(await backend().readRecord(key).catch(() =>
+    // undefined))`, which folded "the credentials document could not be read
+    // right now" together with "the record is absent" — and both then fell
+    // through the `onDisk !== undefined` gate to `deleteRecord` below. So the
+    // one input this compare-and-reap exists to defend against (a second Host
+    // process racing on the same document, PITFALLS §22) was handled correctly
+    // only when the read SUCCEEDED: if process A was mid-rewrite and the read
+    // threw, the gate opened and this call deleted the healthy grant A had just
+    // written, signing out both processes. A gate that fails open is worse
+    // than no gate, because nobody looks for the hole.
+    //
+    // The conservative direction when the record cannot be seen is to leave it
+    // alone: a stale grant costs one failed request that the caller is already
+    // handling, while a deleted one costs the user a silent sign-out.
+    let onDisk: StoredGrant | undefined;
+    try {
+      onDisk = parseGrant(await backend().readRecord(key));
+    } catch {
+      return;
+    }
     if (onDisk !== undefined && onDisk.accessToken !== accessToken) {
       state.cached = onDisk;
       return;
