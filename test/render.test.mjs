@@ -1343,15 +1343,27 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       unmount();
     }
 
-    // 5. `enabled: false` means no loop at all (a tab that must not poll yet).
+    // 5. There is no "off" switch, and that is deliberate. An earlier version
+    // of this suite pinned `enabled: false` meaning "no loop"; the flag is gone
+    // because the invariant behind it was never true — the Raccoon switch gates
+    // registration, not reading, and a login scan reports its `scanUrl` and its
+    // settled outcome through GET alone. A loop that could be switched off was
+    // one `enabled={state?.enabled}` away from deadlocking the QR login. So the
+    // honest assertion is the opposite one: a mount ALWAYS polls, whatever the
+    // caller believes, and a tab with a genuine "don't poll yet" condition must
+    // decline to mount rather than pass a flag here.
     {
       let calls = 0;
       effects.length = 0;
       scheduled = null;
+      // A caller passing a dead `enabled` must not silently regain the meaning
+      // it used to have: the option object is now `{ failed }` only, so this
+      // degrades to the healthy cadence instead of going silent.
       usePollingInterval(() => { calls += 1; }, 30_000, { enabled: false });
       const unmount = mount();
-      check("a disabled loop neither polls nor schedules",
-        calls === 0 && scheduled === null, `calls=${calls} scheduled=${scheduled !== null}`);
+      check("a retired `enabled` flag cannot silence the loop",
+        calls === 1 && scheduled !== null && scheduled?.ms === 30_000,
+        `calls=${calls} scheduled=${scheduled?.ms}`);
       unmount();
     }
 

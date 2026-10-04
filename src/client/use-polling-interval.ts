@@ -14,10 +14,25 @@
  * closed. This module is the one definition, so the next tab inherits both
  * behaviours instead of re-deciding them.
  *
- * Two things it deliberately does NOT own: the request itself (each tab has its
- * own generation guard and AbortController) and the "should I even poll" answer
- * (the Raccoon tab must not poll before it is switched on). The caller passes
- * `enabled` and a stable `run`.
+ * What it deliberately does NOT own: the request itself — each tab has its own
+ * generation guard and AbortController. The caller passes a stable `run`.
+ *
+ * There is deliberately no "should I poll at all" flag here either. An earlier
+ * version of this comment claimed the Raccoon tab must not poll before its
+ * switch is on, and that claim was never true of any code: the switch gates
+ * *registration* (`routes/raccoon.ts` publishes only when it is on), not
+ * reading. Blocking the loop on it would have been a deadlock, not a saving —
+ * `POST /raccoon {action:"login"}` does not consult the switch, the scan's
+ * `scanUrl` reaches the panel only through a GET, and the settled
+ * `loginStatus` event likewise. A user who scanned while the switch was off
+ * would get no QR and no outcome, with nothing to tell them why. The balance
+ * headline is `loggedIn`-driven for the same reason: it is the thing the user
+ * opened the tab to read, and it is answerable while the switch is off.
+ *
+ * So the cadence is the only thing a caller negotiates here. If a future tab
+ * genuinely has a "poll only when X" condition, the honest shape is for that
+ * tab to skip *mounting* the loop — not to grow a flag here that every current
+ * caller would pass as `true`.
  *
  * @module dsh-connect-sensenova-token-plan/use-polling-interval
  */
@@ -43,17 +58,15 @@ export const ERROR_BACKOFF_MS = 60_000;
  *   every render.
  * @param intervalMs - the healthy cadence, in milliseconds.
  * @param options - loop control.
- * @param options.enabled - when false the loop does not run at all (the caller
- *   has decided polling is not wanted); defaults to true.
  * @param options.failed - when true the loop backs off to
  *   {@link ERROR_BACKOFF_MS}, never faster than `intervalMs`.
  */
 export function usePollingInterval(
   run: () => void,
   intervalMs: number,
-  options: { enabled?: boolean; failed?: boolean } = {}
+  options: { failed?: boolean } = {}
 ): void {
-  const { enabled = true, failed = false } = options;
+  const { failed = false } = options;
   // The interval is clamped to at least 1 ms: a cadence of 0 (or a negative
   // number reaching here from a Host-stated field) would make `setInterval`
   // fire as fast as the event loop allows.
@@ -68,7 +81,6 @@ export function usePollingInterval(
   runRef.current = run;
 
   useEffect(() => {
-    if (!enabled) return;
     let alive = true;
     let timer: ReturnType<typeof setInterval> | null = null;
     const fire = () => {
@@ -111,5 +123,5 @@ export function usePollingInterval(
         document.removeEventListener("visibilitychange", onVisibility);
       }
     };
-  }, [effective, enabled]);
+  }, [effective]);
 }

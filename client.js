@@ -2282,19 +2282,16 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	*   every render.
 	* @param intervalMs - the healthy cadence, in milliseconds.
 	* @param options - loop control.
-	* @param options.enabled - when false the loop does not run at all (the caller
-	*   has decided polling is not wanted); defaults to true.
 	* @param options.failed - when true the loop backs off to
 	*   {@link ERROR_BACKOFF_MS}, never faster than `intervalMs`.
 	*/
 	function usePollingInterval(run, intervalMs, options = {}) {
-		const { enabled = true, failed = false } = options;
+		const { failed = false } = options;
 		const healthy = Math.max(1, Math.floor(intervalMs));
 		const effective = failed ? Math.max(healthy, ERROR_BACKOFF_MS) : healthy;
 		const runRef = useRef(run);
 		runRef.current = run;
 		useEffect(() => {
-			if (!enabled) return;
 			let alive = true;
 			let timer = null;
 			const fire = () => {
@@ -2328,7 +2325,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				stop();
 				if (typeof document !== "undefined" && "addEventListener" in document) document.removeEventListener("visibilitychange", onVisibility);
 			};
-		}, [effective, enabled]);
+		}, [effective]);
 	}
 	var ERROR_BACKOFF_MS;
 	var init_use_polling_interval = __esmMin((() => {

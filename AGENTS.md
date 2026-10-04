@@ -111,6 +111,15 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   对方那半一起写进提交，hunk 级暂存就白做了。要么 `git add <文件>` + `git commit`（提交索引），
   要么 `git commit -- <文件>`（提交整个工作树版本）。提交前用 `git diff --cached --stat` 核对，
   提交后用 `git status --short` 确认留下的只剩对方的改动。
+- ⚠️ **路径限定提交只带得上「已跟踪」的文件，新建的一概漏掉**（2026-10-05 撞过）：
+  `git commit -- <路径>` 不含 `--include`/`-a`，**untracked 的新文件不会被纳入**。
+  改过 `src/` 后 `npm run build` 的产物正好踩这条——tsdown 生成的 chunk 文件名带内容
+  hash，于是「旧 chunk 被删、新 chunk 是 untracked」：`-- src lib` 只带上了已跟踪的
+  `lib/index.js`，结果它引用磁盘上不存在的分块，而**GitHub 直装源不跑 prepack，装到就坏**。
+  改 `src/` 的提交里，产物目录要先 `git add <产物目录>` 再 `git commit`（不带路径），
+  或分两次提交（第二次专门补产物，提交信息写明是补漏）。
+  复核姿势：`git status --short` 应为空；再 `git ls-files <产物目录>` 数一遍文件数，
+  对得上构建输出才对。
 
 ## 去哪查（docs/ 地图）
 
