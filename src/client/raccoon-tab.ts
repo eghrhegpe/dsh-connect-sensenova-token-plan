@@ -354,6 +354,19 @@ export function RaccoonTab({
     }
   }, [tt]);
 
+  const toggleWebSearch = useCallback(async (enabled: boolean) => {
+    setLoginNote(null);
+    try {
+      const body = await postJsonOrThrow(RACCOON_PATH, { action: "webSearch", enabled });
+      // The route's answer is the same shape a GET reports, so one round-trip
+      // both saves the switch and re-reads its resolved value — the precedence
+      // (panel store vs config) stays on the Host, not here.
+      if (alive.current) setState((current) => (current ? { ...current, webSearchEnabled: body?.webSearchEnabled === true } : current));
+    } catch (why) {
+      if (alive.current) setLoginNote(format(tt("raccoon.webSearchError"), { error: errorText(why) }));
+    }
+  }, [tt]);
+
   const startLogin = useCallback(async () => {
     setLoginBusy(true);
     setLoginNote(null);
@@ -438,6 +451,7 @@ export function RaccoonTab({
     onLogin: () => void startLogin(),
     onLogout: () => void logout(),
     onSwitch: (enabled: boolean) => void toggle(enabled),
-    onIds: (ids: string[]) => void saveIds(ids)
+    onIds: (ids: string[]) => void saveIds(ids),
+    onWebSearch: (enabled: boolean) => void toggleWebSearch(enabled)
   });
 }

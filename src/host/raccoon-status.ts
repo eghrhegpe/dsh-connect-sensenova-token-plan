@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 import { fetchRaccoonBalance, fetchRaccoonCatalog, RACCOON_FALLBACK_MODELS, RACCOON_QR_POLL_INTERVAL_MS } from "./raccoon.ts";
 import { str, redactSecrets, optional, errMsg, pickDefined } from "./util.ts";
+import { resolveSwitchEnabled } from "./switch-precedence.ts";
 import type { RaccoonState, RaccoonModel } from "../shared/wire.ts";
 
 /**
@@ -126,6 +127,10 @@ export interface RaccoonStatusDeps {
   read: { read: (key: string, producer: () => Promise<any>, ttlMs: number) => Promise<any> };
   /** The route-owned login walk's transient state. */
   login: RaccoonLoginView;
+  /** The web_search opt-in store (`raccoon-web-store.ts`), or absent. */
+  webSearchStore?: any;
+  /** The config-level `webSearchEnabled` (host-config.ts), default off. */
+  webSearchConfig?: boolean;
 }
 
 /**
@@ -342,9 +347,15 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
     ...pickDefined({ accessTokenFingerprint }),
     hostProxyEnv
   } : {};
+  const panelWebSearch = deps.webSearchStore ? await deps.webSearchStore.enabled().catch(() => null) : null;
   return {
     ok: true,
     enabled: effectiveEnabled,
+    // The web_search opt-in, in the SAME precedence the mount-side registration
+    // applies (`resolveSwitchEnabled`): the panel store beats the config, so a
+    // switch flipped here and a `webSearchEnabled: true` in the plugin config
+    // cannot disagree on the card. Absent either, the tool stays off.
+    webSearchEnabled: resolveSwitchEnabled(panelWebSearch, deps.webSearchConfig === true),
     switchSource: switchState === null ? "off" : "panel",
     // The tab's own cadence, stated by the side that owns the cache windows —
     // the same discipline the quota snapshot follows with `pollSeconds`. The

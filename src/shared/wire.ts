@@ -246,6 +246,12 @@ export interface RaccoonModel {
 export interface RaccoonState {
   ok?: boolean;
   enabled?: boolean;
+  /**
+   * The web_search opt-in's CURRENT effective value, as the Host resolves it
+   * (panel store when set, else the `webSearchEnabled` config). Absent on an
+   * older Host: the tab then keeps the switch OFF.
+   */
+  webSearchEnabled?: boolean;
   switchSource?: string;
   loggedIn?: boolean;
   nickname?: string;

@@ -89,11 +89,12 @@ function qrImageOf(scanUrl: string | null | undefined): unknown {
  * @param {() => void} props.onLogin - start a scan.
  * @param {() => void} props.onLogout - forget the credential.
  * @param {(enabled: boolean) => void} props.onSwitch - flip the opt-in switch.
+ * @param {(enabled: boolean) => void} props.onWebSearch - flip the web_search opt-in.
  * @param {(ids: string[]) => void} props.onIds - save the pushed-model list.
  * @returns {unknown} the tab's card tree.
  */
 export function RaccoonCard({
-  state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds
+  state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch
 }: {
   state: RaccoonState | null;
   tt: Tt;
@@ -105,6 +106,7 @@ export function RaccoonCard({
   onLogout: () => void;
   onSwitch: (enabled: boolean) => void;
   onIds: (ids: string[]) => void;
+  onWebSearch: (enabled: boolean) => void;
 }): unknown {
   const enabled = state?.enabled === true;
   const loggedIn = state?.loggedIn === true;
@@ -280,6 +282,19 @@ export function RaccoonCard({
         busy: waiting,
         label: tt("raccoon.switch"),
         title: tt("raccoon.switchTitle")
+      })),
+      // The web_search opt-in (ROADMAP §6.1.7): its own switch, drawn beside the
+      // provider one because it rides the SAME credential — signing in is the
+      // prerequisite for the tool to return anything at all. Drawn from the
+      // route's resolved value (`webSearchEnabled`), so it reflects the panel
+      // store AND the config in one reading, the same precedence the Host's
+      // mount-side registration applies.
+      h("div", { style: { marginTop: 8 } }, h(ToggleSwitch, {
+        checked: state?.webSearchEnabled === true,
+        onChange: () => onWebSearch(state?.webSearchEnabled !== true),
+        busy: waiting,
+        label: tt("raccoon.webSearch"),
+        title: tt("raccoon.webSearchTitle")
       }))
     ),
     loginNote !== null

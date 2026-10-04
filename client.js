@@ -186,8 +186,11 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.clientLink": "下载商汤小浣熊客户端，领取限时积分 →",
 			"raccoon.switch": "启用小浣熊提供方",
 			"raccoon.switchTitle": "开启后向 DSH 注册小浣熊的模型；关闭则从模型下拉框移除，登录与勾选设置都保留，重新开启即恢复。",
+			"raccoon.webSearch": "启用联网搜索（小浣熊）",
+			"raccoon.webSearchTitle": "开启后 DSH 的联网搜索工具改用小浣熊凭据搜索，不需要你再给搜索端点配 key；前提是小浣熊已登录。",
 			"raccoon.switchBusy": "切换中…",
 			"raccoon.switchError": "切换失败：{error}",
+			"raccoon.webSearchError": "联网搜索开关失败：{error}",
 			"raccoon.login": "微信扫码登录",
 			"raccoon.loggingIn": "等待扫码确认…",
 			"raccoon.logout": "退出登录",
@@ -381,6 +384,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.clientLink": "Download the SenseNova Raccoon client for limited-time credits →",
 			"raccoon.switch": "Enable Raccoon provider",
 			"raccoon.switchTitle": "On registers the Raccoon models with DSH; off removes them from the model picker while sign-in and curation stay, so re-enabling restores them.",
+			"raccoon.webSearch": "Enable web search (Raccoon)",
+			"raccoon.webSearchTitle": "On makes DSH's web search tool search through the Raccoon credential, so you no longer need a key for the search endpoint; Raccoon must be signed in.",
+			"raccoon.webSearchError": "Web search switch failed: {error}",
 			"raccoon.switchBusy": "Switching…",
 			"raccoon.switchError": "Switch failed: {error}",
 			"raccoon.login": "Sign in with WeChat QR",
@@ -3226,10 +3232,11 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	* @param {() => void} props.onLogin - start a scan.
 	* @param {() => void} props.onLogout - forget the credential.
 	* @param {(enabled: boolean) => void} props.onSwitch - flip the opt-in switch.
+	* @param {(enabled: boolean) => void} props.onWebSearch - flip the web_search opt-in.
 	* @param {(ids: string[]) => void} props.onIds - save the pushed-model list.
 	* @returns {unknown} the tab's card tree.
 	*/
-	function RaccoonCard({ state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds }) {
+	function RaccoonCard({ state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch }) {
 		const enabled = state?.enabled === true;
 		const loggedIn = state?.loggedIn === true;
 		const scanning = state?.loginStatus === "scanning";
@@ -3324,6 +3331,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			busy: waiting,
 			label: tt("raccoon.switch"),
 			title: tt("raccoon.switchTitle")
+		})), h("div", { style: { marginTop: 8 } }, h(ToggleSwitch, {
+			checked: state?.webSearchEnabled === true,
+			onChange: () => onWebSearch(state?.webSearchEnabled !== true),
+			busy: waiting,
+			label: tt("raccoon.webSearch"),
+			title: tt("raccoon.webSearchTitle")
 		}))), loginNote !== null ? h("div", {
 			style: {
 				...S.formNote,
@@ -3606,6 +3619,21 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				if (alive.current) setLoginNote(format(tt("raccoon.switchError"), { error: errorText(why) }));
 			}
 		}, [tt]);
+		const toggleWebSearch = useCallback(async (enabled) => {
+			setLoginNote(null);
+			try {
+				const body = await postJsonOrThrow(RACCOON_PATH, {
+					action: "webSearch",
+					enabled
+				});
+				if (alive.current) setState((current) => current ? {
+					...current,
+					webSearchEnabled: body?.webSearchEnabled === true
+				} : current);
+			} catch (why) {
+				if (alive.current) setLoginNote(format(tt("raccoon.webSearchError"), { error: errorText(why) }));
+			}
+		}, [tt]);
 		const startLogin = useCallback(async () => {
 			setLoginBusy(true);
 			setLoginNote(null);
@@ -3667,7 +3695,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			onLogin: () => void startLogin(),
 			onLogout: () => void logout(),
 			onSwitch: (enabled) => void toggle(enabled),
-			onIds: (ids) => void saveIds(ids)
+			onIds: (ids) => void saveIds(ids),
+			onWebSearch: (enabled) => void toggleWebSearch(enabled)
 		});
 	}
 	var RACCOON_POLL_MS, RACCOON_SCAN_POLL_MS;

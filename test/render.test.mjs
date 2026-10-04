@@ -1138,11 +1138,13 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       { ok: true, enabled: true, loggedIn: true, models: [{ id: "m", name: "M" }], enabledModelIds: null },
       { idsBusy: true }
     );
+    // The card now carries TWO switches (provider + web search) beside the
+    // roster, so the roster's checkbox is the last of the three in tree order.
     const boxes = findAll(tree, (props) => props.type === "checkbox");
     check("an uncurated roster reads as every model pushed, not as none",
-      boxes.length === 2 && boxes[1].props.checked === true, `boxes=${boxes.length}`);
+      boxes.length === 3 && boxes[2].props.checked === true, `boxes=${boxes.length}`);
     check("a save in flight freezes the roster's own checkboxes",
-      boxes.length === 2 && boxes[1].props.disabled === true, `disabled=${String(boxes[1]?.props?.disabled)}`);
+      boxes.length === 3 && boxes[2].props.disabled === true, `disabled=${String(boxes[2]?.props?.disabled)}`);
   }
 
   // The curation toggle is TWO-WAY, and this is the check that would have

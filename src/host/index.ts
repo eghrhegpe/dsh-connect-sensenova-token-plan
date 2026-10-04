@@ -42,7 +42,7 @@ import { createRaccoonPublisher } from "./raccoon-publish.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { registerRoutes } from "./routes.ts";
-import { startSideEffects, seedRaccoonOnMount, teardown } from "./lifecycle.ts";
+import { startSideEffects, seedRaccoonOnMount, teardown, reconcileWebSearch } from "./lifecycle.ts";
 import { CODE } from "./codes.ts";
 import { writeLoginTrace } from "./trace.ts";
 import {
@@ -322,7 +322,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // Web-search absorption (ROADMAP §6.1.7): reuses the Raccoon credential
     // chain and its own opt-in switch; `webSearchRestore` is filled at mount.
     resolveRaccoonToken,
-    webSearchStore: raccoonWebStore
+    webSearchStore: raccoonWebStore,
+    // What the panel's `webSearch` route calls so a flip applies in-session
+    // (drop the taken-over selection, then re-register against the new value).
+    reconcileWebSearch: () => reconcileWebSearch(ctx, wiring)
   };
 
   // The seven route handlers (trust fence, method allowances, body ceilings,

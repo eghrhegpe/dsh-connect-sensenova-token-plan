@@ -1,7 +1,8 @@
 /**
  * The Raccoon route (ROADMAP §6.1 "second upstream provider"): one GET
  * reporting the secret-free state a tab renders, one POST carrying `{ action }`
- * for the four panel actions. The QR login is a single server-side walk (no
+ * for the five panel actions (provider switch, web search, pushed models, QR
+ * login, logout). The QR login is a single server-side walk (no
  * client long-poll); the credential never touches this plugin's directory,
  * git, or logs — it goes straight to the DSH credentials service through
  * `raccoonStore`.
@@ -48,15 +49,15 @@ export const RACCOON_PATH = `/api/${name}/raccoon`;
  * Register the Raccoon route. Wiring subset: `settings`, `raccoonStore`,
  * `raccoonSwitch`, `raccoonPublisher`, `raccoonCache`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache">} wiring
+ * @param {Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "reconcileWebSearch">} wiring
  *   - the Raccoon half's subset, as assembled by `apply()` in `index.ts`. The
  *   `Pick` is what makes "changing the Raccoon line must not affect the Token
  *   Plan one" (ARCHITECTURE §5.5) a compile-time fact rather than a review
  *   promise: this route physically cannot reach a Token Plan field.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache">) {
-  const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache } = wiring;
+export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "reconcileWebSearch">) {
+  const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache, webSearchStore, reconcileWebSearch } = wiring;
 
   // The Raccoon gateway reads (balance + catalogue) go through the SAME
   // coalescing cache primitive the console route uses, so a scan's fast poll
@@ -134,17 +135,24 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
       // `withDiagnostics` is the one thing a POST never gets: the 401-triage
       // fields ride only on an explicit `?debug=1` GET (see `wantsDiagnostics`),
       // so `answer()` below reports the same state minus the scaffold.
-      const raccoonState = (withDiagnostics = false) =>
-        readRaccoonStatus(
+      const raccoonState = async (withDiagnostics = false) => {
+        const state = await readRaccoonStatus(
           {
             store: raccoonStore,
             switchStore: raccoonSwitch,
             publisher: raccoonPublisher,
             read: raccoonRead,
-            login: walkView
+            login: walkView,
+            // The web_search opt-in is part of the read model, NOT a route
+            // overlay: `readRaccoonStatus` owns `resolveSwitchEnabled` so the
+            // field cannot drift between declaration and production.
+            webSearchStore,
+            webSearchConfig: settings.webSearchEnabled
           },
           withDiagnostics
         );
+        return state;
+      };
 
       const method = request.method === undefined ? "GET" : request.method;
       if (method === "GET") {
@@ -187,6 +195,33 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
             const { rows, officeIdentity } = await collectRaccoonRows(null);
             await raccoonPublisher.publish(rows, officeIdentity);
           }
+        } catch (error) {
+          await answer({ ok: false, error: redactedError(error) });
+          return;
+        }
+        await answer();
+        return;
+      }
+
+      // ── webSearch: save the web-search opt-in and reconcile in-session ──
+      // Unlike the provider `switch` above, the store alone is not the whole
+      // write: the `ctx.web` registration is read-once at mount, so the save
+      // must be followed by a reconcile (drop the taken-over selection, then
+      // re-register against the new value). Best-effort on the reconcile — a
+      // Host without a `web` service just leaves the switch saved for the next
+      // boot, which is the same outcome a save without it would have had.
+      if (action === "webSearch") {
+        if (typeof body.value.enabled !== "boolean") {
+          writeJson(response, 400, { ok: false, error: "expected { action: \"webSearch\", enabled: boolean }" }, { "cache-control": "no-store" });
+          return;
+        }
+        if (webSearchStore === null || webSearchStore === undefined) {
+          await answer({ ok: false, error: "the web-search switch is unavailable" });
+          return;
+        }
+        try {
+          await webSearchStore.save(body.value.enabled);
+          await reconcileWebSearch?.().catch(() => {});
         } catch (error) {
           await answer({ ok: false, error: redactedError(error) });
           return;
@@ -282,7 +317,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
         return;
       }
 
-      writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
+      writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"webSearch\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
     }, settings.allowedHosts)
   });
 

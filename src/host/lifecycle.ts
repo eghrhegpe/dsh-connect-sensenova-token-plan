@@ -403,8 +403,10 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // Web-search absorption (ROADMAP §6.1.7): opt-in, doubly degraded, and the
   // selection is taken over only when the switch is on. Fire-and-forget, like
   // the draw tool — and the restore is remembered on `wiring` so `teardown`
-  // hands the selection back to whichever backend it displaced.
-  void registerWebSearchProvider(ctx, wiring);
+  // hands the selection back to whichever backend it displaced. `reconcile`
+  // rather than the bare register, so the panel's in-session flip can drop
+  // and re-apply the same way this mount does.
+  void reconcileWebSearch(ctx, wiring);
 
   // ------------------------------------------------------------------
   // Vision step two (ARCHITECTURE.md §5.1): publish which of this key's
@@ -613,6 +615,29 @@ export async function registerWebSearchProvider(ctx: { get?: (n: string) => unkn
   // Hand the selection back on teardown (idempotent: the second call sees
   // `owner === false` and does nothing). A fresh boot re-applies it.
   wiring.webSearchRestore = () => applyWebSearchSelection(web, selection, false);
+}
+
+/**
+ * Reconcile the web-search registration to the CURRENT effective value.
+ *
+ * The registration is read-once at mount (`registerWebSearchProvider` above);
+ * the draw tool has the same shape and lives with it, because the tools
+ * registry has no unregister. Here the selection DOES have a restore, so an
+ * in-session flip is safe: drop whatever this plugin had taken over, then
+ * re-register against the new value. Called both at mount (in place of the
+ * bare `registerWebSearchProvider`) and from the panel's `webSearch` route.
+ * @param ctx - the host root context.
+ * @param {WebSearchToolWiring} wiring - see {@link registerWebSearchProvider}.
+ * @returns {Promise<void>}
+ */
+export async function reconcileWebSearch(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: WebSearchToolWiring) {
+  if (wiring.webSearchRestore !== undefined) {
+    try { wiring.webSearchRestore(); } catch { /* a frozen runtime must not sink the reconcile */ }
+    // `delete` rather than an explicit `undefined`: the field is optional, and
+    // `exactOptionalPropertyTypes` forbids assigning `undefined` to it.
+    delete wiring.webSearchRestore;
+  }
+  await registerWebSearchProvider(ctx, wiring);
 }
 
 export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher" | "webSearchRestore">, offs: Array<() => void>) {

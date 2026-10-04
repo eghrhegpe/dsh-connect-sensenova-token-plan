@@ -227,4 +227,7 @@ export interface Wiring {
   webSearchStore: ReturnType<typeof import("./raccoon-web-store.ts").createFileRaccoonWebStore> | null;
   /** Restore the displaced `ctx.web` search selection; filled at mount. */
   webSearchRestore?: () => void;
+  /** Re-register (or drop) the web-search provider to the current switch value;
+   *  what the panel's `webSearch` route calls so a flip is applied in-session. */
+  reconcileWebSearch?: () => Promise<void>;
 }
