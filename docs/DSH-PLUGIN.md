@@ -38,7 +38,7 @@ DSH 插件是一段在 **Host**（桌面版或 `dsh web`）进程内运行的代
   "files": [                            // 发到 registry 时只带这些；必须覆盖构建产物与文档，
                                         // 由 test/package.test.mjs 钉住（src/ 不进包，panel-*.js 是测试基建也不进包）
     "lib", "client.js",
-    "icon.svg",                         // 插件卡图标（与面板 PanelIcon 同一枚「积分币」母题）
+    "icon.svg",                         // 插件卡图标：商汤紫 × 青绿的交织几何母题（圆角方块咬合 + 45° 斜纹窗）
     "locale",                           // locale/{en,zh}.json：插件卡的标题/简介（en.json 是锚点，缺它 zh.json 永不生效）
     "cordis.patch.yml", "README.md", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md", "LICENSE", "screenshots.json"
   ],

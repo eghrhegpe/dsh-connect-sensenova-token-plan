@@ -1,10 +1,40 @@
-<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="18" cy="18" r="13" fill="url(#a)" />
-  <path d="M18 12v12M14 15.2h8M14 20.8h8" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" />
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    SenseTime-style interlocking mark for the Token Plan plugin card.
+
+    Language: 商汤 brand purple + cyan, rounded-corner blocks that interlock
+    around a negative-space centre, and one diagonal-hatched "window".
+    The purple corner (top-left) and the cyan corner (bottom-right) share a
+    rounded outer radius, so the two halves read as one continuous figure.
+  -->
   <defs>
-    <linearGradient id="a" x1="18" y1="5" x2="18" y2="31" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#6FD8B6" />
-      <stop offset="1" stop-color="#0F6E56" />
-    </linearGradient>
+    <path id="cornerTL" d="M41 4H14Q5 4 5 13V41.3H23V22.7H41Z" />
+    <path id="cornerBR" d="M41 41.3H59V51Q59 60 50 60H41Z" />
+    <clipPath id="cornerTL-clip"><use href="#cornerTL" /></clipPath>
+    <clipPath id="window-clip"><rect x="10.4" y="11.8" width="21.2" height="13.8" rx="1.6" /></clipPath>
   </defs>
+
+  <!-- Purple interlocking block with its hatched window -->
+  <g clip-path="url(#cornerTL-clip)">
+    <use href="#cornerTL" fill="#5533D6" />
+    <g clip-path="url(#window-clip)">
+      <line x1="-18" y1="0" x2="46" y2="64" stroke="#00FAC4" stroke-width="2.6" />
+      <line x1="-12.5" y1="0" x2="51.5" y2="64" stroke="#00FAC4" stroke-width="2.6" />
+      <line x1="-7" y1="0" x2="57" y2="64" stroke="#00FAC4" stroke-width="2.6" />
+      <line x1="-1.5" y1="0" x2="62.5" y2="64" stroke="#00FAC4" stroke-width="2.6" />
+      <line x1="4" y1="0" x2="68" y2="64" stroke="#00FAC4" stroke-width="2.6" />
+      <line x1="9.5" y1="0" x2="73.5" y2="64" stroke="#00FAC4" stroke-width="2.6" />
+      <line x1="15" y1="0" x2="79" y2="64" stroke="#00FAC4" stroke-width="2.6" />
+      <line x1="20.5" y1="0" x2="84.5" y2="64" stroke="#00FAC4" stroke-width="2.6" />
+    </g>
+  </g>
+
+  <!-- Cyan interlocking tile, top right -->
+  <rect x="41" y="22.7" width="18" height="18.6" fill="#00FAC4" />
+
+  <!-- Cyan interlocking tile, bottom left -->
+  <rect x="23" y="41.3" width="18" height="18.7" fill="#00FAC4" />
+
+  <!-- Purple interlocking tile with rounded outer corner -->
+  <use href="#cornerBR" fill="#5533D6" />
 </svg>
