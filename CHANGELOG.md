@@ -2,9 +2,19 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
-## [Unreleased] — 2026-10-04
+## [0.5.0] — 2026-10-04
 
-两条小浣熊网关契约的实测修正，都由桌面客户端行为反推后真凭据验证。
+本版把小浣熊的**联网搜索做成 DSH 面板上可开启的工具**：`web_search` 背后接小浣熊托管的 `web_search` MCP，复用它那一份 `RACCOON_CREDENTIAL`，面板上不再需要单独配一条搜索端点 key。同版还带两条小浣熊网关契约的实测修正，都由桌面客户端行为反推后真凭据验证。
+
+- **联网搜索可用（`web_search` 工具走小浣熊）**（`src/host/raccoon-search.ts`、`src/host/lifecycle.ts`、`src/host/routes/raccoon.ts`、`src/host/raccoon-status.ts`、`src/client/raccoon-card.ts`、`raccoon-tab.ts`、`i18n.ts`）：
+  - DSH 的 `web_search` 工具背后换成小浣熊 MCP（`https://xiaohuanxiong.com/api/web/mcp/web_search/v1/mcp`，协议 `2024-11-05`，工具 `web_search`），通过 `ctx.web` 注册 provider（`id=raccoon`），**不复用 `tools.register`**（避免出现第二条并行的搜索工具）；
+  - 「小浣熊」tab 新增「**启用联网搜索（小浣熊）**」开关，与提供方/出图开关同一套 `ToggleSwitch`；`webSearchEnabled` 由 Host 按「面板开关 vs 配置文件」的既有 precedence 解析，保存后立即重新注册；
+  - 搜索实现是 MCP over HTTP streamable 客户端（`initialize` → `Mcp-Session-Id` → `tools/call`），`parseMcpSse` 容忍 keep-alive，错误提取兼容 Raccoon 网关的 `{code,message,details}` 信封（实测 401 就是这形状）；
+  - `web_fetch` 不受影响。用户可感知的差别：不用再为搜索能力单独找一条搜索端点 key。
+
+### 搜索契约基线（发布质量，用户不可见）
+
+`test/raccoon-search.test.mjs` 以 PEER-FREE 单测钉住传输层与挂载层（SSE 解析、会话头、错误信封、provider 去重 / abort / 错误码，18 项）。`test/live-raccoon.mjs` 新增 L2d 层：用真实凭据做一次完整 MCP 握手与单次 `tools/call`（Count=1），实测返回 `WebResults` 并带 `Url/Title/Snippet`。`test/baselines/raccoon-contract.json` 新增 `image-gen` 与 `mcp-web-search` 两条路由，以及 `imageGen` / `mcpWebSearch` 两段契约——`images/gen` 的真实出图**刻意不做自动探针**（每次消耗积分、同步 >600 s、响应格式仍标 `unconfirmed`），只在 L1 档确认路由可达。
 
 - **目录字段漂移修复**（`src/host/raccoon.ts`）：网关 `/model_catalog` 已切换为只发 `model_name` / `tags` / `params` / `billing_multiplier`，旧字段（`id` / `vision` / `input_modalities` / `context_window` / `max_output_*` / `multiplier`）全部消失，目录读取因此恒为空（不报错），面板与模型注册**恒走内置快照表**。实测 `sn-deepseek-v4-1-flash` 支持读图（`chat/completions` 带 `image_url` 回 HTTP 200），快照却标 `vision:false`。现按 v2 字段归一化、`tags` 判定 vision，并新增实测白名单 `RACCOON_VISION_WHITELIST`（实测优先于声明）。
 - **限时免费 / 折扣如实展示**（`raccoon.ts` + `raccoon-roster.ts` + `wire.ts` + `i18n.ts`）：目录行的 `multiplier` 改读**生效倍率**（限免时为 0），并保留 `originalMultiplier` / `billingStatus` / `billingStatusNote`；面板模型清单对促销模型加「限时免费 / 限时折扣」徽章，倍率 tooltip 同时给出当前价与原价。此前只读原价，`sn-sensenova-6-8-flash` 面板显示 ×0.50，实际限免 0 倍（客户端把限免折扣当永久免费读）。
