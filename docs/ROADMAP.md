@@ -429,6 +429,34 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 
 **验证**：修后 `fetchRaccoonCatalog` 读回 6 个真实可见模型，`sn-deepseek-v4-1-flash` 的 descriptor `input: ["text","image"]`；`sn-glm-5-3-flash` 仍 `vision:false`（tags 无 vision、未实测，不猜）。
 
+### 6.1.7 桌面端接口盘点：客户端已调、插件未接的端点（2026-10-04）
+
+> 方法：从桌面客户端安装包（`C:\Program Files\raccoon-ai\resources\app.asar`）按字节提取所有 `/api/...` 路径与 `xiaohuanxiong.com` 引用，对照本插件的调用点（`src/host/raccoon.ts` 常量与 fetch 位置）。**asar 只给出「客户端在调」，不给出「契约」**——下表登记与分级，不背契约。
+
+**本插件已接**：`auth/v1`（`refresh` / `login_with_qrcode_code` / `login/mp`）、`llm/v2`（`model_catalog`、`chat/completions`）、`points/v1`（`balance`）。`llm/v2` 下的显式路径只有 `model_catalog` 与 `images/gen` 两个（`chat/completions` 由 adapter 动态拼接）。
+
+| 分级 | 端点 | 用途 | 处置 |
+|---|---|---|---|
+| A 值得接 | `POST /api/web/llm/v2/images/gen` | **出图**；客户端 `imageGeneration.endpoint` 即此（`type:"remote"`、`provider:"openai"`、apiKey 空）。全 asar 唯一的 image 端点 | 待实测契约（见本节末） |
+| A 值得接 | `GET /api/web/mcp/web_search/v1/mcp` | 内置联网搜索（MCP 协议，`mcp-server-askecho-search-infinity`） | 观望：DSH tools 服务可注册，但属工具层非 provider |
+| B 可选 | `GET /api/web/org/user` | 用户信息（比 JWT `name` claim 全：头像、组织） | 观望 |
+| B 可选 | `office/v3/assets/*` | 文件/资产 CRUD（files、folders、upload、export/import、search） | ➖ 不做：附件管理，provider 形态用不上 |
+| C 不接 | `desktop/v1/conversation-relay/*`、`mobile/v1/*`、`relay-ws/*` | 桌面↔手机会话同步、中继、websocket | ➖ 客户端专属 |
+| C 不接 | `auth/v1/device_pairings` / `devices_current_bind` / `ai_glasses/pairings` | 设备绑定/配对 | ➖ 登录安全域，插件走自有登录 |
+| C 红线 | `desktop/v1/login/points/grant` | 桌面登录一次性奖励 | **永不带凭据**（PITFALLS §28：请求即真实领走、不可逆） |
+| C 不接 | `enterprise/v1/*`（`sensetime/email_code`、`join_office_org`） | 商汤企业组织加入 | ➖ 账号侧 |
+| C 不接 | `community/v1/*`、`change_log/v1`、`setting/v1/settings`、`data-analysis/v1/*`、`office/v3/sessions/*` | 社区、更新日志、设置、数据分析、会话管理 | ➖ 与接入无关 |
+
+**连带实锤**：§6.1.4 登记的 `RACCOON_DESKTOP_PREFIX`（`/api/web/desktop/v1`）「定义了但零引用」不是死路标——它底下有整套 `conversation-relay` 业务端点。对 provider 形态无用，维持零引用是对的。
+
+**`images/gen` 契约实测（2026-10-04，带凭据）**：
+
+- **路由**：仅 `POST`（`GET` → 纯文本 404）；无凭据 → 结构化 `401 authorization_empty_error`；对照组 `POST /images/__canary__` → 纯文本 404（判据见 §6.1.2）。
+- **必填字段只有 `prompt`**：空 body → `500 Router.aimage_generation() missing 1 required positional argument: 'prompt'`。
+- **模型组固定 `raccoon-image-gen`**：带 `model` / `size` / `n` → `400 Invalid request parameters`（网关不接受这些参数）。
+- **同步返回、生成极慢**：`{"prompt":"…"}` 单请求 600 秒超时仍未返回（实测两次），带 `model:"raccoon-image-gen"` 也被接受进入生成但同样阻塞；而客户端配置 `imageGeneration.timeout: 500~1000`——客户端不走同步等待（疑似网关侧队列 / 生成耗时，接入时需长超时或改异步轮询）。
+- **响应格式推断**：客户端经 Vercel AI SDK 的 OpenAI 图像工具链（`/images/generations` + `response_format:"b64_json"` + `openaiImageResponseSchema`），故响应应按 OpenAI images 兼容解析（`{data:[{b64_json|url}]}`）——**未实测确认**（同步阻塞拿不到响应体），接入时先按此解析并设长超时。
+
 ## 7. 优先级与时间盒
 
 | 优先级 | 项 | 侵入性 | 门禁 |
