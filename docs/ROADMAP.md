@@ -362,7 +362,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 |---|---|---|
 | `RACCOON_DESKTOP_PREFIX`（`/api/web/desktop/v1`） | **定义了但零引用**：唯一出处在 `src/host/raccoon.ts` 的常量区，全仓无调用点；构建产物 `lib/` 里连字符串都被 tree-shake 掉。**同类死常量还有两个**：`RACCOON_QR_POLL_INTERVAL_MS` / `RACCOON_LOGIN_TIMEOUT_MS`——`src/host/routes.ts` 把同样的值**又本地定义了一遍**（`RACCOON_LOGIN_DEADLINE_MS` / `RACCOON_POLL_MS`），实际逻辑走本地那对 | ✅ 分两种处置：`routes.ts` 的两个副本**删掉、改从 `raccoon.ts` 导入**（两个真源是唯一会静默漂移的形态）；桌面前缀**保留但写明「故意不接线」**（它是端点级唯一代码路标，删了会把「探针即领取」的知识挤回文档） |
 | 401 诊断六字段 | Host **一直在发**：`accessTokenPrefix` / `credentialSource` / `raccoonEnvShadow` / `envCredentialFingerprint` / `accessTokenFingerprint` / `hostProxyEnv`（`src/host/routes.ts` 的 `raccoonState()`）。客户端**一个都没读**（`client.js` 里只有 `balanceDetail` / `modelsSource`）。是排查 401 时的脚手架，线上无害但属死负载——其中 `hostProxyEnv` 还是**无条件**上报（非 `null` 省略） | ✅ 全部收进 **`?debug=1`** 显式开关（GET 才认；免配置字段、免重启，POST 的回报一律干净），且 `hostProxyEnv` 的**代理 userinfo 一律遮蔽**后才出门 |
-| 目录字段 `model_name` | **从未被读**。目录归一化只认 `id` / `name` / `multiplier` / `vision` / `context_window` / `max_output_*`；`id` 为空的行**显式跳过**（实测前 3 个 `raccoon-*` 隐形模型正是 `id` 空、`model_name` 有值——那是有意过滤，不是静默丢弃）。风险只在：若哪天可见模型的显示名改走 `model_name`，会静默退化成用 `id` 当名字（不炸、但难看） | ➖ 不动（`id === ""` 的跳过是设计），仅登记为「字段已观测、未消费」 |
+| 目录字段 `model_name` | 2026-09 探针时**从未被读**（归一化只认 `id`，`id` 为空的行显式跳过）。**2026-10-04 网关目录改为只发 `model_name` / `name` / `tags` / `params` / `billing_multiplier`**，旧字段（`id` / `vision` / `input_modalities` / `context_window` / `max_output_*` / `multiplier`）全部消失 → 按旧字段读的结果是目录读回 `null`（empty）、不报错，面板与注册**恒走 fallback 快照表**，vision / 上下文 / 倍率全是 2026-09 旧值（实测 `params.max_tokens`=100000，fallback 写 65536；`sn-deepseek-v4-1-flash` 实测读图 200，fallback 标 `vision:false`） | ✅ **已修（2026-10-04）**：`fetchRaccoonCatalog` 字段映射对齐 v2——`id ← model_name ?? id ?? name`（`name` 放最后，它可能是显示名而非 wire id）、`multiplier ← billing_multiplier ?? multiplier`、`vision ← tags ∈ {vision,image,image-understanding} 或实测白名单`、`contextWindow ← params.context_window ?? …`、`maxOutputLength ← params.max_tokens ?? …`；旧字段保留为兜底梯子。详见 §6.1.6 |
 
 余额侧**无静默丢弃**：总量抽 `available_points`（`balance` / `available` / `amount` 兜底），拆分 `daily` / `reward` / `monthly` / `topup_points` 四条零也照报；读失败必报原因（`balanceDetail`），目录侧「读失败」与「读成功但无可见模型」分开报（`modelsSource` 的 `unreadable` vs `empty`）。
 
@@ -407,7 +407,27 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 
 **面板与选择器的显示分工**：小浣熊面板花名册（`raccoon-roster.ts`）显示**同一个 `multiplier` 数字**，但用中文文案 `×0.75` / 免费 `free`（走 i18n `raccoon.rateTitle` 等，tooltip 明说「网关目录声明的积分倍率」）；DSH 选择器用 `· x0.75`。**同一数值、两处格式不同**是有意的：面板是插件自绘 UI 有自己的字典，选择器跟随 WorkBuddy 约定。若两处想改到完全一致，改的是各自 render 层，不涉及数据源。
 
-**契约与复核**：倍率字段的形状与嵌名格式以 `test/raccoon.test.mjs` 的离线 fixture 冻结（`raccoonToDescriptor` 的 name 断言：`0.75 → "· x0.75"`、`0 → "· x0.00"`、`1 → "· x1.00"`、缺失 → 裸名）。改格式必须同步这几条断言，否则 `npm test` 红。网关侧若哪天**改名**或**把倍率挪进 `model_name` 字符串**（§6.1.4 已登记 `model_name` 从未被读），本节格式与 `fetchRaccoonCatalog` 的归一化都要复核——`model_name` 至今只作「已观测、未消费」登记，不消费它。
+**契约与复核**：倍率字段的形状与嵌名格式以 `test/raccoon.test.mjs` 的离线 fixture 冻结（`raccoonToDescriptor` 的 name 断言：`0.75 → "· x0.75"`、`0 → "· x0.00"`、`1 → "· x1.00"`、缺失 → 裸名）。改格式必须同步这几条断言，否则 `npm test` 红。网关侧若哪天**改名**或**把倍率挪进 `model_name` 字符串**（§6.1.4 已登记 `model_name` 从未被读），本节格式与 `fetchRaccoonCatalog` 的归一化都要复核——`model_name` 的「从未被读」登记已在 §6.1.6 随目录字段漂移一并销案（2026-10-04 起作为 id 读取）。
+
+### 6.1.6 目录字段漂移实测与 vision 白名单（2026-10-04）
+
+> 起因：用户报告小浣熊里 DeepSeek V4.1 Flash「读不了图」。实测后结论**反转**——不是网关不支持，是插件的目录字段与网关 v2 schema 全对不上，目录读取从未真正生效。
+
+**实测链（真凭据、只读 + 一次计费请求）**：
+
+1. `POST /api/web/llm/v2/chat/completions`，`model: sn-deepseek-v4-1-flash` + 一张合规 PNG（标准 OpenAI `image_url` + data URL）→ **HTTP 200**，模型正确读出图片内容（描述截图里的游戏名列表、用户消息、模型选择器）。
+2. `GET /api/web/llm/v2/model_catalog`，打印每行完整 schema → 行字段是 `name` / `description` / `visible` / `billing_category` / `model_name` / `display_description` / `tags` / `ability_level` / `params` / `billing_multiplier` / `billing_effective_multiplier` / `billing_status` / `billing_status_note` / `billing_discounts`；**没有** `id` / `vision` / `input_modalities` / `context_window` / `max_output_*` / `multiplier`。
+3. 用插件**真实** `fetchRaccoonCatalog` 跑一次 → 返回 `null`（empty）、`onFail` **未触发**：`str(model.id,"")` 恒空，所有模型被 `id === ""` 跳过，面板与 provider 注册**恒走 fallback 快照表**。这正是 §6.1.4 那条「`id` 为空的行显式跳过」从"防御"变成"吞掉整个目录"的形态。
+
+**后果**：目录读取长期失效，`RACCOON_FALLBACK_MODELS` 快照表顶班。失真清单：实测 `params.max_tokens`=100000，fallback 写 65536；`sn-sensenova-6-8-flash` 真实 `billing_multiplier`=0.5，fallback 写 0（把限免折扣读成永久免费）；`sn-deepseek-v4-1-flash` 实测读图 200，fallback 标 `vision:false`。
+
+**修法**（同日落地，见 `src/host/raccoon.ts`）：
+
+- `fetchRaccoonCatalog` 字段映射对齐 v2：`id ← model_name ?? id ?? name`（`name` 放最后，它可能是显示名而非 wire id）、`multiplier ← billing_multiplier ?? multiplier`、`contextWindow ← params.context_window ?? …`、`maxOutputLength ← params.max_tokens ?? …`；旧字段保留为兜底梯子，防网关再漂移。
+- vision 判定改看 `tags`（`vision` / `image` / `image-understanding`，与桌面客户端 App 同一归一化），并保留旧的 `vision === true` / `input_modalities` 分支。
+- 新增 **`RACCOON_VISION_WHITELIST`**：`sn-deepseek-v4-1-flash` 实测读图 200 但 tags 无 vision → 白名单强制 `vision:true`。**加白名单成员必须真探针，不靠信念**——这是「实测优先于声明」这一贯纪律在这个域的应用。
+
+**验证**：修后 `fetchRaccoonCatalog` 读回 6 个真实可见模型，`sn-deepseek-v4-1-flash` 的 descriptor `input: ["text","image"]`；`sn-glm-5-3-flash` 仍 `vision:false`（tags 无 vision、未实测，不猜）。
 
 ## 7. 优先级与时间盒
 

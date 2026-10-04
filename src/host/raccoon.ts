@@ -424,6 +424,47 @@ export async function refreshRaccoonCredential(
 }
 
 /**
+ * Raccoon models that ARE image-capable on the gateway even though the
+ * catalogue does not say so.
+ *
+ * The gateway's `tags` array is the current authority for vision ability, but
+ * it is not exhaustive: `sn-deepseek-v4-1-flash` carries no vision tag and yet
+ * answered a `chat/completions` request carrying an `image_url` part with
+ * HTTP 200 on 2026-10-04 (it described the picture correctly). This set holds
+ * the models whose image support was PROBED rather than declared, so the
+ * picker keeps offering them pictures instead of silently dropping the
+ * attachment. Adding a model here requires a real probe, not a belief.
+ * @type {ReadonlySet<string>}
+ */
+export const RACCOON_VISION_WHITELIST: ReadonlySet<string> = Object.freeze(new Set([
+  "sn-deepseek-v4-1-flash"
+]));
+
+/**
+ * Whether a raw catalogue row reads as image-capable.
+ *
+ * Field precedence is measured, not guessed: the gateway's current
+ * `/api/web/llm/v2/model_catalog` carries NO `vision` boolean and NO
+ * `input_modalities` array at all — the ability lives in `tags` (the client
+ * normalises `image` / `image-understanding` into `vision` the same way, see
+ * the desktop App bundle). The whitelist is checked FIRST because a probe
+ * beats a declaration; the legacy branches stay as a defensive ladder in case
+ * the catalogue drifts back to the older shape. `tags` is read case-sensitively
+ * — the gateway spells it lowercase, and a case-insensitive read would paper
+ * over a shape drift instead of flagging it.
+ * @param {object} model - a raw `categories[].models[]` entry.
+ * @returns {boolean} true when the model may be offered image input.
+ */
+export function raccoonRowVision(model: any): boolean {
+  const id = str(model.model_name, "") || str(model.id, "") || str(model.name, "");
+  if (RACCOON_VISION_WHITELIST.has(id)) return true;
+  const tags = Array.isArray(model.tags) ? model.tags : [];
+  if (tags.some((tag: unknown) => tag === "vision" || tag === "image" || tag === "image-understanding")) return true;
+  if (model.vision === true) return true;
+  return Array.isArray(model.input_modalities) ? model.input_modalities.includes("image") : false;
+}
+
+/**
  * Fetch the live model catalogue, or `null` when it cannot be read OR when it
  * read fine but lists no visible model.
  *
@@ -464,16 +505,24 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
       for (const raw of models) {
         const model = obj(raw);
         if (model.visible === false) continue;
-        const id = str(model.id, "");
+        // The id must be the machine id, never the display name: the gateway spells
+        // it `model_name` today, the older catalogue shape used `id`, and `name`
+        // is the weakest candidate precisely because it can be a display string
+        // ("DeepSeek-V4.1-Flash") rather than the wire id (`sn-deepseek-v4-1-flash`).
+        const id = str(model.model_name, "") || str(model.id, "") || str(model.name, "");
         if (id === "" || seen.has(id)) continue;
         seen.add(id);
+        const params = obj(model.params);
         out.push({
           id,
           name: str(model.name, id),
-          multiplier: typeof model.multiplier === "number" ? model.multiplier : undefined,
-          vision: model.vision === true || (Array.isArray(model.input_modalities) ? model.input_modalities.includes("image") : false),
-          contextWindow: num(model.context_window ?? model.context_length),
-          maxOutputLength: num(model.max_output_tokens ?? model.max_output_length)
+          multiplier:
+            typeof model.billing_multiplier === "number" ? model.billing_multiplier
+              : typeof model.multiplier === "number" ? model.multiplier
+                : undefined,
+          vision: raccoonRowVision(model),
+          contextWindow: num(params.context_window ?? model.context_window ?? model.context_length),
+          maxOutputLength: num(params.max_tokens ?? params.max_output_tokens ?? model.max_output_tokens ?? model.max_output_length)
         });
       }
       if (out.length > 0) return out;

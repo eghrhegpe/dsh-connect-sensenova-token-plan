@@ -288,13 +288,28 @@ function section(title) {
 
     // The catalog: the chat category's visible models, normalized to the row
     // shape the adapter consumes. A missing/failed read is null → fallback.
+    // The catalogue row shape the gateway sends TODAY (v2): the id is
+    // `model_name`, the ability lives in `tags`, the windows live in `params`,
+    // and the multiplier is `billing_multiplier`. The older shape (`id` /
+    // `vision` / `input_modalities` / `context_window` / `max_output_tokens`)
+    // is kept as a defensive ladder and pinned by the legacy block below.
     const catalog = await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
-      { id: "m1", name: "Model 1", multiplier: 0.5, vision: true, context_window: 200_000, max_output_tokens: 8_000 },
-      { id: "m2", name: "Model 2", visible: false, input_modalities: ["image"] }
+      { model_name: "sn-model-1", name: "sn-model-1", visible: true, billing_multiplier: 0.5, tags: ["general", "vision"], params: { context_window: 200_000, max_tokens: 8_000 } },
+      { model_name: "sn-deepseek-v4-1-flash", name: "sn-deepseek-v4-1-flash", visible: true, billing_multiplier: 0.25, tags: ["general", "code"], params: { context_window: 1_000_000, max_tokens: 100_000 } },
+      { model_name: "m2", name: "Model 2", visible: false, input_modalities: ["image"] }
     ] }] } }));
-    check("the catalog keeps only the visible chat models", catalog?.length === 1 && catalog?.[0]?.id === "m1", JSON.stringify(catalog));
-    check("a catalog row carries its multiplier + vision + window",
-      catalog?.[0]?.multiplier === 0.5 && catalog?.[0]?.vision === true && catalog?.[0]?.contextWindow === 200_000);
+    check("the catalog keeps only the visible chat models",
+      catalog?.length === 2 && catalog?.[0]?.id === "sn-model-1" && catalog?.[1]?.id === "sn-deepseek-v4-1-flash", JSON.stringify(catalog));
+    check("a catalog row carries its multiplier + vision + window (v2 fields)",
+      catalog?.[0]?.multiplier === 0.5 && catalog?.[0]?.vision === true && catalog?.[0]?.contextWindow === 200_000 && catalog?.[0]?.maxOutputLength === 8_000);
+    check("the probed vision whitelist beats a missing tag",
+      catalog?.[1]?.vision === true && catalog?.[1]?.multiplier === 0.25);
+    // The legacy shape must still read: `id` as the id, top-level windows.
+    const legacy = await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
+      { id: "legacy-1", name: "Legacy", visible: true, multiplier: 1, vision: true, context_window: 1000, max_output_tokens: 500 }
+    ] }] } }));
+    check("the legacy catalogue shape still normalizes",
+      legacy?.[0]?.id === "legacy-1" && legacy?.[0]?.multiplier === 1 && legacy?.[0]?.vision === true && legacy?.[0]?.contextWindow === 1000 && legacy?.[0]?.maxOutputLength === 500);
     check("a failed catalog read is null (the fallback roster takes over)",
       (await fetchRaccoonCatalog({ access_token: "t" }, async () => {
         throw new Error("down");
