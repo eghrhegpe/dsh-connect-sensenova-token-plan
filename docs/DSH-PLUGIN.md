@@ -46,9 +46,14 @@ DSH 插件是一段在 **Host**（桌面版或 `dsh web`）进程内运行的代
     "build": "tsdown -c tsdown.config.mjs",        // 重建 lib/index.js + 根 client.js
     "build:client": "tsdown -c tsdown.config.mjs",
     "prepack": "npm run build",                    // 发布前自动重建产物
-    "test": "node test/auth.test.mjs && ... && node test/build-gate.mjs && node test/e2e-gate.mjs",
+    "test": "node test/run-all.mjs",               // 全量离线套件：26 套件 + 4 门禁，跑完汇总、失败项逐个点名（名册见 test/suites.mjs）
+    "test:list": "node test/run-all.mjs --list",   // 只列名册不执行
     "test:live": "node test/live-jwks.test.mjs",
-    "test:e2e": "node test/e2e.mjs"
+    "test:live:contract": "node test/live-contract.mjs",
+    "test:live:raccoon": "node test/live-raccoon.mjs",
+    "test:e2e": "node test/e2e.mjs",
+    "doctor": "node tools/doctor.mjs",
+    "doctor:json": "node tools/doctor.mjs --json"
   },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },   // 本插件向 Host 插入什么
@@ -57,22 +62,25 @@ DSH 插件是一段在 **Host**（桌面版或 `dsh web`）进程内运行的代
       "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-renderer",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-ui-renderer"      // dsh-client-ui-layout 已移出 inject，仅在 peerDependencies
       ]
     }
   },
   "peerDependencies": {                 // 运行时由 Host 提供，不随包安装
     "@deepseek-ai/cordis": ">=4.0.2 <5.0.0",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-client-ui-layout": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.5 <0.3",
     "@deepseek-ai/dsh-credentials": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-home-paths": ">=0.1.5 <0.3",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.5 <0.3",
     "@deepseek-ai/dsh-llm": ">=0.1.5 <0.3",
     "@deepseek-ai/dsh-llm-pi-ai": ">=0.1.5 <0.3",
     "@deepseek-ai/dsh-settings": ">=0.1.5 <0.3",
-    "@deepseek-ai/dsh-home-paths": ">=0.1.5 <0.3",
     "@deepseek-ai/dsh-tools": ">=0.1.5 <0.3",
-    "@deepseek-ai/dsh-host-webserver": ">=0.1.5 <0.3",
     "@deepseek-ai/schemastery": "^3.18.2",
     "@earendil-works/pi-ai": "^0.85.1"
+    // 上列全部 peer 均在 peerDependenciesMeta 中标 optional：Host 缺哪个服务，对应模块就缺席，不拖垮宿主
   },
   "engines": { "node": "^22.19.0 || >=24.0.0" }
 }
@@ -81,7 +89,7 @@ DSH 插件是一段在 **Host**（桌面版或 `dsh web`）进程内运行的代
 要点：
 
 - **`dsh.bundle.patch`** 指向 `cordis.patch.yml`——这是插件声明「我要在 Host 里插入哪一行、带哪些配置」的地方。
-- **`dsh.client`** 声明 Client 半边跑在 `web` 平台、立即注入，并依赖三套 Host 提供的客户端模块（locale / renderer / layout）。
+- **`dsh.client`** 声明 Client 半边跑在 `web` 平台、立即注入，并依赖两套 Host 提供的客户端模块（locale / renderer；`dsh-client-ui-layout` 已移出 `inject`，仅在 peerDependencies 中）。
 - **`peerDependencies`** 是 DSH 运行时（`@deepseek-ai/dsh`、`@deepseek-ai/dsh-credentials`、`react`，以及第三步注册 provider 用的 `@earendil-works/pi-ai` / `@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-llm-pi-ai`）——**由 Host 在运行时提供**，不在公共 registry 上。这与 `dsh-connect-qoder` 的处境完全一致：它的 `.npmrc` 里有 `legacy-peer-deps=true` 正是因为 peer 装不到。本插件同理，不要试图 `npm install` 这些 peer；但**它们必须能从插件文件所在目录解析到**（Node 的裸模块解析只向上找 `node_modules`）：npm 装进 profile 的插件天然满足，开发期 symlink/junction 进 profile 的检出不满足——见 [PITFALLS.md](./PITFALLS.md) §16。
 - **`exports`** 把 Host/Client 各半边与工具模块都暴露出来，`index.js` 的 `apply/name/inject` 是 Host 入口约定。
 
@@ -126,7 +134,7 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 ## 5. 与 Host 的边界（哪些该放插件、哪些归 Host）
 
 - **插件不该做的事**：管理进程生命周期、持有全局状态、碰 Host 隐私数据。插件通过 `ctx`（cordis 容器）拿服务，如 `ctx.webServer`（注册路由）、`ctx.credentials`（凭据服务）、`ctx.slots`（注入 UI）、`ctx.locale`（字典）。
-- **本插件注册的路由**（六条，都在 `registerRoutes` 里，全部过 `isAdmitted` 同源闸，见 [PITFALLS.md](./PITFALLS.md) 第 13 条）：`GET|HEAD snapshot`（只读聚合，始终 HTTP 200，成败在 body 的 `ok`/`code`）、`GET|POST account`（账号配置，POST 校验 body ≤ 4KB）、`GET|POST api-key`（`SENSENOVA_API_KEY` 引用存取，响应永不回显明文）、`GET|POST provider`（面板 provider 热开关，`docs/PROVIDER-HOT-RELOAD.md`）、`POST models`（模型允许清单保存）、`GET|POST draw`（出图工具开关）。路由白名单以 `routes.ts` 为准——文档这里只给清单与约束，不复制契约。
+- **本插件注册的路由**（七条，都在 `registerRoutes` 里——六条 Token Plan + 一条小浣熊，全部过 `isAdmitted` 同源闸，见 [PITFALLS.md](./PITFALLS.md) 第 13 条）：`GET|HEAD snapshot`（只读聚合，始终 HTTP 200，成败在 body 的 `ok`/`code`）、`GET|POST account`（账号配置，POST 校验 body ≤ 4KB）、`GET|POST api-key`（`SENSENOVA_API_KEY` 引用存取，响应永不回显明文）、`GET|POST provider`（面板 provider 热开关，`docs/PROVIDER-HOT-RELOAD.md`）、`POST models`（模型允许清单保存）、`GET|POST draw`（出图工具开关）、`raccoon`（第二上游：开关 / models / webSearch / 扫码登录 / 登出）。路由体在 `src/host/routes/<resource>.ts`（`routes.ts` 只是门面，`routes/http.ts` 是共享原语），白名单以该家族为准——文档这里只给清单与约束，不复制契约。
 - **凭据归 Host 的凭据服务**：账号与 access/refresh token 只经 `@deepseek-ai/dsh-credentials` 落 `~/.dsh/.credentials.yaml`；**密码不落盘**（仅登录瞬间内存使用，`SENSENOVA_PASSWORD` 环境变量是唯一持久来源）。插件自己不写明文文件。没有凭据服务时退化为进程内存（`ephemeral`），重启需重登。
 
 ---
