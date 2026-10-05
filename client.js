@@ -1143,7 +1143,22 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				alignItems: "center",
 				gap: 8
 			},
+			modelRowLabel: {
+				display: "flex",
+				alignItems: "center",
+				gap: 10,
+				flex: "1 1 auto",
+				minWidth: 0
+			},
 			modelRowOff: { opacity: .55 },
+			externalLink: {
+				color: "var(--dsw-alias-label-primary)",
+				fontSize: 12,
+				marginTop: 10,
+				display: "inline-block",
+				textDecoration: "underline",
+				cursor: "pointer"
+			},
 			modelCheck: {
 				flex: "none",
 				width: 15,
@@ -1309,14 +1324,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			href: SENSENOVA_SIGNUP_URL,
 			target: "_blank",
 			rel: "noreferrer",
-			style: {
-				color: "var(--dsw-alias-label-primary)",
-				fontSize: 12,
-				marginTop: 10,
-				display: "inline-block",
-				textDecoration: "underline",
-				cursor: "pointer"
-			}
+			style: S.externalLink
 		}, tt(auth?.hasAccount ? "auth.portalHint" : "auth.registerHint")), h("form", { onSubmit: submit }, h("label", { style: S.field }, h("span", { style: S.fieldLabel }, tt("auth.username")), h("input", {
 			style: S.input,
 			value: username,
@@ -1660,13 +1668,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				...S.modelRowOff
 			},
 			key: "auto"
-		}, h("div", { style: S.modelRowHead }, h("label", { style: {
-			display: "flex",
-			alignItems: "center",
-			gap: 10,
-			flex: "1 1 auto",
-			minWidth: 0,
-			cursor: busy ? "default" : "pointer"
+		}, h("div", { style: S.modelRowHead }, h("label", { style: busy ? {
+			...S.modelRowLabel,
+			cursor: "default"
+		} : {
+			...S.modelRowLabel,
+			cursor: "pointer"
 		} }, h("input", {
 			type: "radio",
 			name: "draw-model",
@@ -1680,13 +1687,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				...S.modelRowOff
 			},
 			key: id
-		}, h("div", { style: S.modelRowHead }, h("label", { style: {
-			display: "flex",
-			alignItems: "center",
-			gap: 10,
-			flex: "1 1 auto",
-			minWidth: 0,
-			cursor: busy ? "default" : "pointer"
+		}, h("div", { style: S.modelRowHead }, h("label", { style: busy ? {
+			...S.modelRowLabel,
+			cursor: "default"
+		} : {
+			...S.modelRowLabel,
+			cursor: "pointer"
 		} }, h("input", {
 			type: "radio",
 			name: "draw-model",
@@ -1761,13 +1767,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		return h("li", { style: {
 			...S.modelRow,
 			...on ? {} : S.modelRowOff
-		} }, h("div", { style: S.modelRowHead }, h("label", { style: {
-			display: "flex",
-			alignItems: "center",
-			gap: 10,
-			flex: "1 1 auto",
-			minWidth: 0,
-			cursor: busy ? "default" : "pointer"
+		} }, h("div", { style: S.modelRowHead }, h("label", { style: busy ? {
+			...S.modelRowLabel,
+			cursor: "default"
+		} : {
+			...S.modelRowLabel,
+			cursor: "pointer"
 		} }, h("input", {
 			type: "checkbox",
 			checked: on,
@@ -1965,8 +1970,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	* up identical to the Host's value shows neither button.
 	*/
 	function ModelPicker({ llm, onDone, tt }) {
-		const models = Array.isArray(llm?.models) ? llm.models : [];
-		const hostIds = Array.isArray(llm?.enabledModelIds) ? llm.enabledModelIds : [];
+		const models = Array.isArray(llm?.models) ? llm.models : NO_MODELS;
+		const hostIds = Array.isArray(llm?.enabledModelIds) ? llm.enabledModelIds : NO_IDS;
 		const [ids, setIds] = useState(() => hostIds.slice());
 		const [busy, setBusy] = useState(false);
 		const [query, setQuery] = useState("");
@@ -2096,6 +2101,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			role: "alert"
 		}, notice) : null));
 	}
+	var NO_MODELS, NO_IDS;
 	var init_model_picker = __esmMin((() => {
 		init_const();
 		init_format();
@@ -2104,6 +2110,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_models();
 		init_runtime();
 		init_styles();
+		NO_MODELS = [];
+		NO_IDS = [];
 	}));
 
 //#endregion
@@ -2228,14 +2236,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			href: SENSENOVA_SIGNUP_URL,
 			target: "_blank",
 			rel: "noreferrer",
-			style: {
-				color: "var(--dsw-alias-label-primary)",
-				fontSize: 12,
-				marginTop: 10,
-				display: "inline-block",
-				textDecoration: "underline",
-				cursor: "pointer"
-			}
+			style: S.externalLink
 		}, tt(llm?.hasApiKey === true ? "llm.keyManageHint" : "llm.keyRegisterHint")));
 		return h("form", { onSubmit: submit }, keyEditor, h(ProviderStatus, {
 			llm,
@@ -3389,14 +3390,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			href: RACCOON_SITE_URL,
 			target: "_blank",
 			rel: "noreferrer",
-			style: {
-				color: "var(--dsw-alias-label-primary)",
-				fontSize: 12,
-				marginTop: 10,
-				display: "inline-block",
-				textDecoration: "underline",
-				cursor: "pointer"
-			}
+			style: S.externalLink
 		}, tt("raccoon.clientLink")));
 	}
 	var QR_SIZE, DAY_MS;

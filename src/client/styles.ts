@@ -190,7 +190,18 @@ export const S = {
   // box, the padding keeps the whole row as the visual unit.
   modelRow: { display: "flex", flexDirection: "column", gap: 2, padding: "8px 4px", borderBottom: "1px solid var(--dsw-alias-border-l1)" },
   modelRowHead: { display: "flex", alignItems: "center", gap: 8 },
+  // The clickable label wrapping a row's checkbox/radio + name. It has to be
+  // the FLEXIBLE child (`flex: 1 1 auto`) while the row itself is the column,
+  // and it has to shrink (`minWidth: 0`) or the name's ellipsis never engages.
+  // Three rows draw this (the Token Plan roster, the draw switch's auto row
+  // and its per-model rows) and all three were repeating it inline verbatim;
+  // `busy` only ever decides whether the pointer still promises a click.
+  modelRowLabel: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0 },
   modelRowOff: { opacity: 0.55 },
+  // The "register an account / open the site" link each card ends with. All
+  // three cards drew it inline, identically; a change to the underline or the
+  // offset had to be made three times and two of them were always forgotten.
+  externalLink: { color: "var(--dsw-alias-label-primary)", fontSize: 12, marginTop: 10, display: "inline-block", textDecoration: "underline", cursor: "pointer" },
   modelCheck: { flex: "none", width: 15, height: 15, cursor: "pointer", accentColor: BRAND, margin: 0 },
   // `0 1 auto` (not `1 1 auto`): the name hugs the rate chip instead of
   // stretching to the right edge; the label shrinks, so ellipsis still works.

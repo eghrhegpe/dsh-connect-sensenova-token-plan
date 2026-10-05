@@ -81,10 +81,7 @@ export function ModelRow({ id, label, on, busy, rateText, rateTitle, badges, met
       h(
         "label",
         {
-          style: {
-            display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto",
-            minWidth: 0, cursor: busy ? "default" : "pointer"
-          }
+          style: busy ? { ...S.modelRowLabel, cursor: "default" } : { ...S.modelRowLabel, cursor: "pointer" }
         },
         h("input", {
           type: "checkbox",

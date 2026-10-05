@@ -227,7 +227,7 @@ export function DrawSwitch({ llm, onDone, tt }: {
               { style: S.modelRowHead },
               h(
                 "label",
-                { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy ? "default" : "pointer" } },
+                { style: busy ? { ...S.modelRowLabel, cursor: "default" } : { ...S.modelRowLabel, cursor: "pointer" } },
                 h("input", {
                   type: "radio", name: "draw-model", checked: preferred === null && enabled, disabled: busy || !enabled,
                   onChange: () => void saveModel(null), style: S.modelCheck
@@ -254,7 +254,7 @@ export function DrawSwitch({ llm, onDone, tt }: {
               { style: S.modelRowHead },
               h(
                 "label",
-                { style: { display: "flex", alignItems: "center", gap: 10, flex: "1 1 auto", minWidth: 0, cursor: busy ? "default" : "pointer" } },
+                { style: busy ? { ...S.modelRowLabel, cursor: "default" } : { ...S.modelRowLabel, cursor: "pointer" } },
                 h("input", {
                   type: "radio", name: "draw-model", checked: preferred === id && enabled, disabled: busy || !enabled,
                   onChange: () => void saveModel(id), style: S.modelCheck

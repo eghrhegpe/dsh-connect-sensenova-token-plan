@@ -13,6 +13,19 @@ import { S } from "./styles.ts";
 import type { LlmData, ModelData } from "./wire.ts";
 
 /**
+ * The single empty roster every "the Host sent no list" fallback resolves to.
+ *
+ * It is a CONSTANT on purpose. A literal `[]` written at the use site is a
+ * fresh object on every render, which silently breaks every `useMemo` /
+ * `useCallback` that lists it as a dependency: the memo recomputes on each
+ * poll, so a search keystroke re-renders the whole catalogue. Freezing one
+ * instance here keeps `models` referentially stable across renders even when
+ * `llm` is null - which is exactly what the memo below claims it is.
+ */
+const NO_MODELS: ModelData[] = [];
+const NO_IDS: string[] = [];
+
+/**
  * The model picker's row list - hook-free, so the Node render suite
  * drives the very rows the browser draws.
  *
@@ -111,8 +124,8 @@ export function ModelPicker({ llm, onDone, tt }: {
   onDone?: () => void;
   tt: Tt;
 }): unknown {
-  const models = Array.isArray(llm?.models) ? llm.models : [];
-  const hostIds = Array.isArray(llm?.enabledModelIds) ? llm.enabledModelIds : [];
+  const models = Array.isArray(llm?.models) ? llm.models : NO_MODELS;
+  const hostIds = Array.isArray(llm?.enabledModelIds) ? llm.enabledModelIds : NO_IDS;
   const [ids, setIds] = useState<string[]>(() => hostIds.slice());
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
@@ -177,9 +190,10 @@ export function ModelPicker({ llm, onDone, tt }: {
   }, [busy, ids, onDone, tt]);
 
   const needle = query.trim().toLowerCase();
-  // `models` keeps its identity between polls (it comes straight off the
-  // snapshot object), so memoising on it and the search text gives `bulk`
-  // dependency values that are stable by REFERENCE — the earlier
+  // `models` holds its identity between renders - it comes straight off the
+  // snapshot object, and the "no list" case resolves to the frozen NO_MODELS
+  // rather than a fresh `[]`. So memoising on it plus the search text gives
+  // `bulk` dependency values stable by REFERENCE; the earlier
   // `JSON.stringify(...)` deps existed only to fake that stability.
   const visible = useMemo(() => models.filter((model) => {
     if (needle === "") return true;

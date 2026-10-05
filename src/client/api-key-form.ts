@@ -132,7 +132,7 @@ export function ApiKeyForm({ llm, onDone, tt }: {
     h("p", { style: S.formNote }, tt("llm.footnote")),
     // The official-site link stays resident: no key yet → sign-up nudge,
     // key configured → quota management.
-    h("a", { href: SENSENOVA_SIGNUP_URL, target: "_blank", rel: "noreferrer", style: { color: "var(--dsw-alias-label-primary)", fontSize: 12, marginTop: 10, display: "inline-block", textDecoration: "underline", cursor: "pointer" } },
+    h("a", { href: SENSENOVA_SIGNUP_URL, target: "_blank", rel: "noreferrer", style: S.externalLink },
       tt(llm?.hasApiKey === true ? "llm.keyManageHint" : "llm.keyRegisterHint"))
   );
   // The SectionCard wrapping this form is the collapse: one fold, not

@@ -198,7 +198,7 @@ export function AccountForm({ auth, onDone, tt, bare, snapshotAt }: {
       rel: "noreferrer",
       // Inline: the shared `styles.ts` is under a concurrent rewrite
       // (roster/model-row restyle), so this one-off link skin lives here.
-      style: { color: "var(--dsw-alias-label-primary)", fontSize: 12, marginTop: 10, display: "inline-block", textDecoration: "underline", cursor: "pointer" }
+      style: S.externalLink
     }, tt(auth?.hasAccount ? "auth.portalHint" : "auth.registerHint")),
     h(
       "form",

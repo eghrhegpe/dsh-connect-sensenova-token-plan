@@ -368,6 +368,6 @@ export function RaccoonCard({
       { style: { ...S.muted, fontSize: 12, marginTop: 14 } },
       tt("raccoon.desc")
     ),
-    h("a", { href: RACCOON_SITE_URL, target: "_blank", rel: "noreferrer", style: { color: "var(--dsw-alias-label-primary)", fontSize: 12, marginTop: 10, display: "inline-block", textDecoration: "underline", cursor: "pointer" } }, tt("raccoon.clientLink"))
+    h("a", { href: RACCOON_SITE_URL, target: "_blank", rel: "noreferrer", style: S.externalLink }, tt("raccoon.clientLink"))
   );
 }
