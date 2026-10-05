@@ -201,6 +201,32 @@ async function withNetwork(stub, body) {
   }).catch((error) => fail("concurrent polls share one acquisition", error));
 }
 
+// --- 3b. concurrent saveAccount (a double-submit) fires ONE sign-in -------
+{
+  const credentials = fakeCredentials(null);
+  const stub = await makeTokenStub(accepted);
+  await withNetwork(stub, async () => {
+    const store = createTokenStore({ credentials, credentialKey: credentialKeyFn, env: {}, skewMs: 120_000 });
+    await Promise.all([
+      store.saveAccount({ username: "u", password: "p" }),
+      store.saveAccount({ username: "u", password: "p" }),
+      store.saveAccount({ username: "u", password: "p" })
+    ]);
+    check("concurrent saveAccount fires one sign-in, not a stampede",
+      stub.log.logins === 1, `logins=${stub.log.logins}`);
+    check("all three submits resolve (first wins, rest wait)", true);
+  }).catch((error) => fail("concurrent saveAccount shares one sign-in", error));
+}
+
+// A submit racing the poll loop is a SEPARATE concern: getToken refreshes with
+// the refresh token (`tokens`) while saveAccount signs in with the password
+// (`logins`) — different endpoints, different credentials, so the two firing
+// together is not the lockout the throttle guards against. The double-submit
+// above is the case that matters; the cross-race is left to the throttle's own
+// attempt accounting rather than forced into a single sign-in (doing so would
+// have saveAccount swallow a refresh or getToken swallow a password login).
+
+
 // --- 4. a rejected refresh token surfaces clearly -------------------------
 {
   const credentials = fakeCredentials(grant(jwtExpiring(1), "dead-refresh", 60));

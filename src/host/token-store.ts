@@ -167,6 +167,13 @@ export function createTokenStore(options: {
      */
     async getToken() {
       if (isFresh(state.cached)) return state.cached.accessToken;
+      // A manual sign-in in flight (`saveAccount`) may be refreshing the grant
+      // this call wants — wait for it instead of starting a SECOND sign-in,
+      // which is the lockout the throttle exists to prevent. Its failure is its
+      // own; if it rejected, fall through to acquire and report what that finds.
+      if (state.saveInflight !== null) {
+        try { await state.saveInflight; } catch { /* proceed to acquire */ }
+      }
       // One acquisition in flight: a panel poll storm must not trigger a
       // login stampede or a burst of refresh-token rotations.
       state.inflight ??= acquire()
@@ -234,27 +241,46 @@ export function createTokenStore(options: {
       // refused by this store's own timer. It is the ONE path that does:
       // every automatic route into `acquire` is still blocked.
       await clearThrottle();
+      // De-dupe with any sign-in the poll loop has already started (the
+      // `inflight` `getToken` set): two sign-ins at once is the lockout the
+      // throttle exists to prevent, and a manual submit must not run alongside
+      // an in-flight refresh. Reuse the one in flight instead of a second.
+      // (A concurrent submit is caught by `saveInflight` below.)
+      if (state.inflight !== null) {
+        try { await state.inflight; } catch { /* its outcome is separate; we still sign in with the new account */ }
+      }
+      // One manual sign-in in flight: a double-submit (or this submit racing a
+      // prior one still settling) reuses the one in flight rather than firing
+      // a second login at the platform. The first to land wins the slot; the
+      // others await it — so the panel shows one "signing in…", never a stampede.
+      state.saveInflight ??= (async () => {
+        try {
+          // The typed account is handed over directly: the password lives only
+          // in this closure, so the env-based `readAccount` must not be asked
+          // for it here.
+          await loginFromAccount({ username, password });
+          // A successful manual sign-in supersedes whatever failure the panel
+          // last saw. `state.lastError` is otherwise cleared only inside
+          // `acquire`'s success path — which never runs while the fresh grant
+          // short-circuits `getToken` — so without this line an old
+          // `login_rejected` would keep the header claiming "needs login" long
+          // after the account works.
+          state.lastError = null;
+        } catch (error) {
+          // A deliberate submit is the one path allowed to spend an attempt, but
+          // a REFUSED one must still be recorded. This call's caller reads
+          // `state()` the moment it rejects, and with no throttle on record the
+          // panel reports "no wait, nothing for the user to do" — so the next
+          // poll walks straight into another attempt with the same bad password,
+          // which is exactly what the park exists to prevent.
+          if (obj(error).code !== CODE.NOT_CONFIGURED) await writeThrottle(error);
+          throw error;
+        }
+      })();
       try {
-        // The typed account is handed over directly: the password lives only
-        // in this closure, so the env-based `readAccount` must not be asked
-        // for it here.
-        await loginFromAccount({ username, password });
-        // A successful manual sign-in supersedes whatever failure the panel
-        // last saw. `state.lastError` is otherwise cleared only inside
-        // `acquire`'s success path — which never runs while the fresh grant
-        // short-circuits `getToken` — so without this line an old
-        // `login_rejected` would keep the header claiming "needs login" long
-        // after the account works.
-        state.lastError = null;
-      } catch (error) {
-        // A deliberate submit is the one path allowed to spend an attempt, but
-        // a REFUSED one must still be recorded. This call's caller reads
-        // `state()` the moment it rejects, and with no throttle on record the
-        // panel reports "no wait, nothing for the user to do" — so the next
-        // poll walks straight into another attempt with the same bad password,
-        // which is exactly what the park exists to prevent.
-        if (obj(error).code !== CODE.NOT_CONFIGURED) await writeThrottle(error);
-        throw error;
+        await state.saveInflight;
+      } finally {
+        state.saveInflight = null;
       }
     },
 

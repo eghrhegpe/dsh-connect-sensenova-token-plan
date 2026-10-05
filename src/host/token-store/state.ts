@@ -131,6 +131,10 @@ export interface TokenStoreState {
   rejected: Set<string>;
   /** One in-flight acquisition, so N concurrent polls share one login. */
   inflight: Promise<string> | null;
+  /** One in-flight manual sign-in (`saveAccount`), so a submit race or a
+   *  submit overlapping the poll loop does not fire a SECOND sign-in at the
+   *  platform — two at once is the lockout the throttle exists to prevent. */
+  saveInflight: Promise<void> | null;
   /** Last failure, surfaced to the panel instead of a bare "not configured". */
   lastError: unknown;
   /** The refusal in force, or `null` when sign-in may be attempted. */
@@ -260,6 +264,10 @@ export function createStoreContext({
     rejected: new Set(),
     /** One in-flight acquisition, so N concurrent polls share one login. */
     inflight: null,
+    /** One in-flight manual sign-in (`saveAccount`), de-duplicated separately
+     *  from `inflight` because its result is `void`, not the token `getToken`
+     *  reuses. See the field's comment. */
+    saveInflight: null,
     /** Last failure, surfaced to the panel instead of a bare "not configured". */
     lastError: null,
     /**
