@@ -26,7 +26,7 @@
 import { obj, degrade } from "./util.ts";
 import { join } from "node:path";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
+import { readStateJson, createStateReadCache, createVersionedJsonWriter, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
 import type { StoreOptions } from "./types.ts";
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
@@ -78,35 +78,16 @@ export function createFileProviderStore(options: StoreOptions = {}) {
   const stateDir = dir ?? providerDir(profile);
   const filePath = join(stateDir, "provider.json");
 
-  /**
-   * Write one payload atomically to this switch's own file.
-   *
-   * The single writer for all three callers (save / forget / the §23 legacy
-   * adoption) — three copies of this is exactly the drift this module keeps
-   * getting bitten by.
-   *
-   * ADR-006 write-side guard: never overwrite a state file this build cannot
-   * read. An unknown NUMERIC version means a NEWER build wrote it; clobbering
-   * it destroys data we cannot even see (see the `tmp/` ADR-006 draft). So the
-   * write is refused with a `degrade` signal, not a silent no-op — the PITFALLS
-   * §37 discipline: swallow the failure, not the reason.
-   * @param {object} body - the JSON body to persist.
-   * @returns {Promise<string|null>} the refusal reason when the write was
-   *   refused (already `degrade`-logged), or `null` when it landed — the caller
-   *   decides whether to surface the refusal to a user.
-   */
-  const writePayload = async (body: object): Promise<string | null> => {
-    const existing = await readStateVersion(filePath);
-    if (!isKnownStateVersion(existing, KNOWN_PROVIDER_VERSIONS)) {
-      const reason = `provider: refusing to overwrite provider.json holding version ${existing} (this build knows ${KNOWN_PROVIDER_VERSIONS.join("/")})`;
-      degrade(reason, null, logger, null);
-      return reason;
-    }
-    const temporary = temporaryOf(stateDir, "provider.json");
-    await ensureStateDir(stateDir);
-    await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
-    return null;
-  };
+
+  // ADR-006 写侧守卫（未知版本拒绝）+ 0600 temp 原子写，收编到 state-store 的
+  // createVersionedJsonWriter —— 四份同构的写路径合一，任何写安全修复只改一处。
+  // 拒绝降级仍走 host 的 degrade（理由见工厂注释）。
+  const writePayload = createVersionedJsonWriter({
+    file: filePath,
+    versions: KNOWN_PROVIDER_VERSIONS,
+    label: "provider",
+    onRefuse: (reason) => degrade(reason, null, logger, null)
+  });
 
   // Pre-§23 machines kept this switch in the SHARED directory. A profile-scoped
   // store inherits it once, when its own file is missing — see the note on
@@ -139,26 +120,15 @@ export function createFileProviderStore(options: StoreOptions = {}) {
   const read = () => cache.read();
 
   return {
-    /**
-     * The saved switch value.
-     * @returns {Promise<boolean|null>} `null` = not set, fall back to config.
-     */
+  
     async enabled() {
       return read();
     },
-    /**
-     * Whether the panel has ever saved a value here.
-     * @returns {Promise<boolean>}
-     */
+  
     async isSet() {
       return (await read()) !== null;
     },
-    /**
-     * Persist a switch value. The write is atomic (temp file + rename) so a
-     * concurrent reader never sees a partial payload.
-     * @param {boolean} value - the new switch state.
-     * @returns {Promise<void>}
-     */
+  
     async save(value: boolean) {
       const enabled = normalizeEnabled(value);
       if (enabled === null) throw new TypeError("provider switch expects a boolean");
@@ -172,10 +142,7 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       if (refusal !== null) throw new Error(refusal);
       cache.remember(enabled);
     },
-    /**
-     * Forget the panel-saved value: the config default rules again.
-     * @returns {Promise<void>}
-     */
+  
     async forget() {
       // No `enabled` key: "not set" is the absence of an answer, not `false`.
       // Remember only once the write landed — a refused write (ADR-006) leaves

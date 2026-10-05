@@ -27,7 +27,7 @@
 import { obj, degrade } from "./util.ts";
 import { join } from "node:path";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
+import { readStateJson, createStateReadCache, createVersionedJsonWriter, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
 import type { StoreOptions } from "./types.ts";
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
@@ -85,33 +85,15 @@ export function createFileDrawStore(options: StoreOptions = {}) {
   const stateDir = dir ?? drawStoreDir(profile);
   const filePath = join(stateDir, "draw.json");
 
-  /**
-   * Write one payload atomically to this switch's own file — the single writer
-   * for save / forget / saveModel / forgetModel / the §23 legacy adoption (see
-   * `provider-store.ts`).
-   *
-   * ADR-006 write-side guard (mirrors `provider-store.ts`): never overwrite a
-   * state file this build cannot read. An unknown NUMERIC version means a NEWER
-   * build wrote it; clobbering it destroys data we cannot see. Refuse with a
-   * `degrade` signal, not a silent no-op — PITFALLS §37: swallow the failure,
-   * not the reason.
-   * @param {object} body - the JSON body to persist.
-   * @returns {Promise<string|null>} the refusal reason when the write was
-   *   refused (already `degrade`-logged), or `null` when it landed — the caller
-   *   decides whether to surface the refusal to a user.
-   */
-  const writePayload = async (body: object): Promise<string | null> => {
-    const existing = await readStateVersion(filePath);
-    if (!isKnownStateVersion(existing, KNOWN_DRAW_VERSIONS)) {
-      const reason = `draw: refusing to overwrite draw.json holding version ${existing} (this build knows ${KNOWN_DRAW_VERSIONS.join("/")})`;
-      degrade(reason, null, logger, null);
-      return reason;
-    }
-    const temporary = temporaryOf(stateDir, "draw.json");
-    await ensureStateDir(stateDir);
-    await writeStateFile(filePath, JSON.stringify(body, null, 2), { temporary });
-    return null;
-  };
+  // ADR-006 写侧守卫（未知版本拒绝）+ 0600 temp 原子写，收编到 state-store 的
+  // createVersionedJsonWriter —— 四份同构的写路径合一，任何写安全修复只改一处。
+  // 拒绝降级仍走 host 的 degrade（理由见工厂注释）。
+  const writePayload = createVersionedJsonWriter({
+    file: filePath,
+    versions: KNOWN_DRAW_VERSIONS,
+    label: "draw",
+    onRefuse: (reason) => degrade(reason, null, logger, null)
+  });
 
   // Pre-§23 machines kept this switch in the SHARED directory; a profile-scoped
   // store inherits it once, when its own file is missing. An explicit `dir`

@@ -5,6 +5,7 @@
 import { createTokenStore, MAX_LOGIN_BACKOFF_MS, DEFAULT_LOGIN_BACKOFF_MS, THROTTLE_ID } from "../src/host/token-store.ts";
 import { purgeGrant } from "../src/host/token-store/grant.ts";
 import { createFileThrottleStore, createMemoryThrottleStore } from "../src/host/throttle-store.ts";
+import { createVersionedJsonWriter } from "../src/host/state-store.ts";
 import { loadPeer, installNetworkGuard, findPeerRoot, isolateStateDir } from "./peer-roots.mjs";
 import { createRequire } from "node:module";
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -1155,6 +1156,37 @@ async function withNetwork(stub, body) {
 
 // The store is exercised against stubbed platform responses; nothing here may
 // reach the real one. See the same guard in test/auth.test.mjs.
+// --- factory: createVersionedJsonWriter (收编后的单一写路径真相源) --------
+// The four switch stores (provider / draw / raccoon-switch / raccoon-web) all
+// delegate their atomic write to this one function. Pin its contract directly
+// so a future edit to the shared path cannot silently change the ADR-006 guard
+// or the refusal reason without a red check.
+{
+  const dir = mkdtempSync(join(tmpdir(), "writer-"));
+  try {
+    const file = join(dir, "x.json");
+    const refused = [];
+    const writer = createVersionedJsonWriter({
+      file, versions: [1], label: "x",
+      onRefuse: (r) => { refused.push(r); }
+    });
+    // Known version: atomic write succeeds, returns null (no refusal).
+    const r1 = await writer({ version: 1, ok: true });
+    check("factory: known version writes and returns null",
+      r1 === null && existsSync(file), `r1=${r1}`);
+    // Unknown on-disk version: refused, and the onRefuse hook fired.
+    writeFileSync(file, JSON.stringify({ version: 99 }));
+    const r2 = await writer({ version: 1, ok: true });
+    check("factory: unknown on-disk version is refused",
+      typeof r2 === "string" && refused.length === 1, `r2=${r2} refused=${refused.length}`);
+    check("factory: refusal reason pins the label and file",
+      refused[0].includes("x: refusing to overwrite x.json holding version 99"),
+      refused[0] ?? "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 const unstubbed = releaseNetworkGuard();
 check("no check escaped its stub to the network", unstubbed.length === 0, unstubbed.join(", "));
 

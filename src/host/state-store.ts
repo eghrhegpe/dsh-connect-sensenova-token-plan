@@ -30,7 +30,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { str } from "./util.ts";
 
 /**
@@ -377,4 +377,48 @@ export async function readStateVersion(file: string): Promise<number | null> {
  */
 export function isKnownStateVersion(version: number | null, known: readonly number[]): boolean {
   return version === null || known.includes(version);
+}
+
+
+/**
+ * 收编 provider / draw / raccoon-switch / raccoon-web 四个 store 各自手写的
+ * `writePayload` 闭包 —— 四份逐行同构（仅文件名、`KNOWN_*_VERSIONS`、label
+ * 前缀三处不同），正是 PITFALLS 反复警告的「同款逻辑漂移」温床。行为与原四份
+ * 字节级等价：ADR-006 写侧守卫（未知版本拒绝）+ 0600 temp 原子写。
+ *
+ * peer-free 纪律保持：本函数不 import `degrade`（那是 Host peer）。拒绝时的
+ * 降级副作用由调用方通过 `onRefuse` 注入——四个 store 都是
+ * `(reason) => degrade(reason, null, logger, null)`，这行转发留在 host 侧，
+ * 守卫逻辑与原子写收编到此。
+ *
+ * @param options.file - 完整文件路径（如 `join(stateDir, "provider.json")`）。
+ * @param options.versions - 本 build 认识的版本号集合。
+ * @param options.label - 拒绝理由前缀（"provider" / "draw" / ...）。
+ * @param options.onRefuse - 拒绝时回调（降级信号）；默认 no-op。
+ * @param options.now - 时钟源，透传给 `temporaryOf`，测试可注入。
+ * @returns 一个 `writePayload(body) => Promise<string|null>`：拒绝返回 reason，
+ *   落盘成功返回 `null`——与原四份签名一致。
+ */
+export function createVersionedJsonWriter(options: {
+  file: string;
+  versions: readonly number[];
+  label: string;
+  onRefuse?: (reason: string) => void;
+  now?: () => number;
+}): (body: object) => Promise<string | null> {
+  const { file, versions, label, onRefuse = () => {}, now = Date.now } = options;
+  const dir = dirname(file);
+  const base = basename(file);
+  return async (body: object): Promise<string | null> => {
+    const existing = await readStateVersion(file);
+    if (!isKnownStateVersion(existing, versions)) {
+      const reason = `${label}: refusing to overwrite ${base} holding version ${existing} (this build knows ${versions.join("/")})`;
+      onRefuse(reason);
+      return reason;
+    }
+    const temporary = temporaryOf(dir, base, now);
+    await ensureStateDir(dir);
+    await writeStateFile(file, JSON.stringify(body, null, 2), { temporary });
+    return null;
+  };
 }

@@ -925,8 +925,16 @@ function section(title) {
 
     // The reason string is load-bearing, same as the other guards.
     const source = readFileSync(new URL("../src/host/raccoon-switch-store.ts", import.meta.url), "utf8");
+    const factory = readFileSync(new URL("../src/host/state-store.ts", import.meta.url), "utf8");
+    // The ADR-006 refusal reason now lives in the shared factory
+    // (createVersionedJsonWriter). Pin the factory phrase AND this switch's
+    // own label + version set registration.
     check("the raccoon refusal marker stays in the source",
-      source.includes("raccoon-switch: refusing to overwrite raccoon-provider.json holding version"), "");
+      factory.includes("refusing to overwrite") &&
+      factory.includes("this build knows") &&
+      source.includes('createVersionedJsonWriter({') &&
+      source.includes('label: "raccoon-switch"') &&
+      source.includes("KNOWN_RACCOON_SWITCH_VERSIONS"), "");
   } catch (error) {
     fail("ADR-006 raccoon-switch write-side version guard", error);
   } finally {
