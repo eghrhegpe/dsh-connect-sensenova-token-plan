@@ -24,7 +24,7 @@ DSH 插件是一段在 **Host**（桌面版或 `dsh web`）进程内运行的代
 ```jsonc
 {
   "name": "dsh-connect-sensenova-token-plan",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "main": "./lib/index.js",              // Host 半边入口：src/host/*.ts 经 tsdown 打成的单条 bundle
   "icon": "./icon.svg",                  // Plugins 页插件卡图标：必须是清单目录内的相对路径，
                                         // SVG/PNG/JPEG/WebP 且 ≤256 KiB（读取端硬校验，超限即报元数据错误）

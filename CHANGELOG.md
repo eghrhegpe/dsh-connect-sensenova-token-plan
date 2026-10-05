@@ -2,9 +2,33 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
-## [Unreleased]
+## [0.5.1] — 2026-10-06
 
-插件卡图标换掉「积分币」母题。原来的青绿渐变圆盘 + 白色记数笔画读起来像一枚通用代币，看不出是谁家；现改为商汤视觉语言（紫 `#5533D6` × 青 `#00FAC4`）的交织几何标记——圆角方块互相咬合、留出一个负空间中心窗，配一扇 45° 斜纹「窗口」。图标仍走仓库根的 `icon.svg`，Plugins 页插件卡的读取端硬校验不变（相对路径、SVG/PNG/JPEG/WebP、清单目录内、≤256 KiB）；本次仅重绘图形内容，未触及任何 Host / Client 行为。
+本版全是修复。主线是一条 0.5.0 时代就已写下的纪律在**失败路径**上反复失效：保护写对了意图，却在元失败那一步朝反方向执行。五处里三处直接落在凭据边界与锁号路径上（AGENTS.md 红线 1 / 5），另两处是并发竞态与一个死参数；末尾是一次插件卡图标重绘。
+
+- **登录失败原因不再可能带出凭据**（`src/host/raccoon-walk.ts`、`src/host/util.ts`）：
+  小浣熊扫码失败的 catch 上方注释写着「sanitized — the store's message may quote the document」，下一行却是裸的 `String(saveError.message)`。这条路径是本模块唯一保证到达浏览器的出口（`takeEvent()` → `raccoon-status.ts` 的 `loginError` → GET 响应 → 面板渲染），而 save 失败时打印的正是凭据记录本身（store / 凭据服务报错时会把输入一起带出来）——中间没有任何一层会拦它。现统一走 `redactSecrets`。
+  顺带补上 `redactSecrets` 漏掉的形态：原规则只吃**带引号**的值，`{ accessToken: eyJ… }` 这种 `util.inspect` 形状（恰好就是凭据记录被打印时的形状）整条原样保留。新增规则覆盖无引号值，并刻意跳过 `null` / `true` / `false` / `undefined` / 数字——字段报「不存在」本身就是诊断依据，脱敏成 `[REDACTED]` 会毁掉唯一线索。
+- **快速双击提交不再双发密码登录**（`src/host/token-store.ts`、`src/host/token-store/state.ts`）：
+  `saveAccount` 直调登录，完全没有 inflight 互斥。用户双击提交、或提交与轮询（`getToken` → `acquire`）重叠时，两次密码登录同时打向平台——这正是红线 5 要防的锁号路径，也是 throttle 闸门想挡却挡不住的：`saveAccount` 绕过了它。现 `saveAccount` 用独立的 `saveInflight` 去重（不与 `getToken` 的 `inflight` 混槽，类型与复用语义都不同），且双方在开头互相等待对方在飞的那一次。并发组合下全局只发一次密码登录。
+- **四处「失败时反向生效」的保护修正**（`src/host/util.ts`、`auth-trace.ts`、`token-store/grant.ts`、`snapshot-aggregate.ts`、`publish-core.ts`、`provider-publish.ts`）：
+  - `redactSecrets` 规则顺序：Basic 的 scheme 词被排在后面的规则先吞掉，base64 载荷原样留下——那串反解就是控制台的 `user:password`。补 `Cookie` / `Set-Cookie`（整条到末尾，不只第一个分号）、`code_verifier`、`client_secret`，键名比对改为分隔符无关（覆盖 camelCase）。
+  - auth-trace 脱敏：先归一键名再比对（去 `_` / `-` 后小写），camelCase 的 `accessToken` / `refreshToken` 不再漏穿；新增按值形态的兜底（裸 JWT / `sk-` / `Bearer`），相对 URL 与 fragment 也走脱敏——以前两者都被原样截断返回。
+  - `purgeGrant` 读失败不再被当成「记录已轮换」：原实现把读失败折成 `undefined` 后放行到 delete，恰好在它要防的双进程竞态下删掉邻进程刚写完的健康凭据。读不到即什么都不删。
+  - 发布签名只在真正落地时采纳：publish 以返回 `ok:false` 报告失败（不抛），原实现无条件 sync 会把新目录的签名盖到仍在服务的旧注册上，下一轮检测不到变化、永不重试。
+  - 适配器工厂解析器只记忆成功、失败清槽可重试：原实现一次 peer 解析失败就把 rejected promise 钉死，用户修好 peer 仍要重启 Host。
+- **`web_search` 全局单例不再被永久顶掉**（`src/host/lifecycle.ts`）：
+  web 搜索 provider 的注册是 fire-and-forget，内部要 `await` 拿 web 服务。若 Host 在挂起期间 dispose，teardown 已读过（当时还是 `null` 的）归还闭包，待接管完成后闭包才装上去却不会再被调用——宿主全局 `searchProviderId` 被小浣熊永久顶掉。这是唯一一处真违反 ARCHITECTURE §5「改 raccoon 对主注册影响恒为零」的破口（导入级隔离零越界，但写的是宿主全局单例）。现接管后、装闭包前检查 `isDisposed()`：已 dispose 则立即归还且不装闭包，正常路径行为不变。
+- **插件卡图标重绘**（`icon.svg`）：
+  换掉「积分币」母题。原来的青绿渐变圆盘 + 白色记数笔画读起来像一枚通用代币，看不出是谁家；现改为商汤视觉语言（紫 `#5533D6` × 青 `#00FAC4`）的交织几何标记——圆角方块互相咬合、留出一个负空间中心窗，配一扇 45° 斜纹「窗口」。图标仍走仓库根的 `icon.svg`，Plugins 页插件卡的读取端硬校验不变（相对路径、SVG/PNG/JPEG/WebP、清单目录内、≤256 KiB）；本次仅重绘图形内容，未触及任何 Host / Client 行为。
+- **`usePollingInterval` 删掉死参数**（`src/client/use-polling-interval.ts`）：
+  退役的 `enabled` 参数不再接收，注释同步纠正——原注释仍在描述一个已删的分支。
+
+### 发布质量（用户不可见）
+
+`1826a81` 的四处保护各带反向对照：`+15` 条断言里 3 条专门钉住「不要只是把保护删掉」（如 publish 成功仍须 sync；`purgeGrant` 的仍要删 / 仍要留两条），防修法的唯一退化路径变成无脑跳过。脱敏另有两条反向对照钉住「无密消息必须原样保留」，防止脱敏退化成静默吞字段。
+
+`store-baseline` 17 场景 48 帧零漂移：并发去重只影响并发路径，顺序行为不变；新增的并发场景按 `docs/TESTING.md` 不进冻结基线，由 `store.test.mjs` 的 double-submit check 单独锁死。
 
 ## [0.5.0] — 2026-10-04
 
