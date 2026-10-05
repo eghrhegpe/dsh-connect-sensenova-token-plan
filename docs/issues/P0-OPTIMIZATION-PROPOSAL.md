@@ -116,7 +116,7 @@ checks 而非冻结 JSON）。
 | `web.searchProviderId` 全局写入本身 | 架构级，按纪律等你拍板 |
 | `grant.ts:127` 的 `10800` 硬编码 | **审查结论有误，我已推翻**：那不是「忽略配置项」。`sensenova-auth.ts:104-107` 已把 `assumedTokenLifetimeSeconds` 用在 `expires_in` 缺失的兜底上，`grant.ts` 的 `num(expiresIn, 10800)` 是第二道兜底，只在`expiresIn` 本身非有限数时才轮到 |
 | `throttleError` 的合成路径 | **审查结论有误，我已推翻**：不是死代码。`acquire.ts:62` 的闸门 `throw throttleError(held)` 不传cause，走的正是合成分支。真实问题只是 `:122` 那个三元不区分——已在 639df2b 修掉 |
-| 六份手抄的 `writePayload` | 抽 `createVersionedJsonStore` 是 6 文件重构，且撞 store-baseline。建议独立一轮，不混进P0 |
+| 六份手抄的 `writePayload`（P1 已收编 4 份同构，见上） | 抽 `createVersionedJsonWriter` 到 state-store；catalog/throttle/api-key 半同构另评 |
 | `qr.ts` 509 行 | 依赖问题（它换一张 `<img>`，且抛错可降级），不是紧急 |
 | `shared/wire.ts` 的 104 行raccoon 专属 | 搬文件收益低、风险中等，留到重构轮 |
 | `token-store` 十三包装 / 假依赖注入 | 拆分本身边界是干净的，收益被注释放大。**砍注释比拆文件划算得多** |
@@ -143,3 +143,37 @@ checks 而非冻结 JSON）。
 - store-baseline 17 场景 48帧零漂移，证实是纯表达性清理，未触发 UPDATE_BASELINE。
 
 验证：typecheck-gate（含负控制）+ panel 75 checks + **全量 30 套件** + 91 e2e 全绿。
+
+---
+
+## P1 收编四份同构 writePayload（已做，2026-10-05，c0333f3）
+
+原说「六份手抄」，实测是**四份逐行同构**（provider / draw / raccoon-switch /
+raccoon-web），其余两份是半同构，不在本轮：
+
+- `catalog-store.ts` 的 `persist()` 与 `throttle-store.ts` 的 `write()` 也走
+  ADR-006 守卫，但返回 `void`、结构化 body、throttle 沉默不 degrade、catalog
+  有 `try/catch rm temp`——强行纳入要改返回语义，留作单独评估。
+- `api-key-store.ts` 完全绕过 `state-store` 原语（引用数=0），独立重构风险
+  更高，留待。
+
+收编动作：
+
+- `state-store.ts` 加 `createVersionedJsonWriter` 工厂。保留 **peer-free**
+  纪律（不 import Host peer 的 `degrade`），拒绝降级副作用由调用方通过
+  `onRefuse` 注入——四个 store 都是 `(reason) => degrade(reason, null, logger, null)`，
+  这行转发留在 host 侧，守卫逻辑与原子写收编到此。
+- 四份本地 `writePayload` 闭包删为各一行工厂调用（净减约 90 行重复）。
+- **行为等价性由 store-baseline 证明：17 场景 48 帧零漂移**——这是等价迁移，
+  不是回归。
+- 撞上 PITFALLS §37 的 **degrade marker 封闭检查**（测试 grep 源码断言理由
+  字面量仍在 store 文件）。按 AGENTS.md 纪律「把新成员补进清单，不放宽/不删」：
+  marker 改为锁定「工厂含安全短语 `refusing to overwrite` / `this build knows`
+  + 本 store 注册正确 `label` / `KNOWN_*_VERSIONS`」。
+- 补 `store.test.mjs` 工厂隔离测试（已知版本写成功返 null；未知磁盘版本拒绝
+  且 `onRefuse` 触发；reason 含 `label`+`file`）。
+
+验证：全量 30 套件 + 91 e2e + store-baseline 全绿。
+
+仍待办（非紧急）：catalog / throttle 半同构收编；api-key-store 拉回共享层；
+砍注释（48% 占比里大量「当初为什么没这么写」是 git/ADR 的活）。
