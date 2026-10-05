@@ -4,7 +4,7 @@
 > 前置护栏：`test/store-baseline.test.mjs`（17 场景 48 帧全行为冻结基线，
 > 见 [TESTING.md §5](./TESTING.md)）。拆分的门禁 = 基线零漂移 + `store.test.mjs` 全绿。
 >
-> **状态（2026-09-29）：6 步全部落地，token-store 从 944 行收口为薄 facade（现 `token-store.ts` 351 行 + `token-store/` 七块子模块）。**
+> **状态（2026-09-29）：6 步全部落地，token-store 从 944 行单体收口为薄 facade（`token-store.ts` + `token-store/` 七块子模块；行数是时点值，别当契约，`(Get-Content src/host/token-store.ts).Count` 自证）。**
 > 各块已抽至 `token-store/{state,grant,throttle,account,renewal,acquire,constants}.ts`（源码已 TS 化，构建产物仍为 .js；`constants.ts` 集中收拢记录地址常量），
 > 全量离线套件 + 基线 48 帧零漂移全绿。剩余：§7 迁移块退役（下次大版本）。
 
@@ -41,8 +41,8 @@ token-store/acquire.js acquire()：节流闸门 → grant 新鲜判定 → 续�
                       （四块交手的唯一缝，留在独立模块，不塞进任何一块）
 ```
 
-现状（2026-10 复核）：`token-store.js` 已 TS 化为**完整的薄 facade**
-`src/host/token-store.ts`——`createTokenStore` 组装 context + 委托六块（实测 351 行），
+现状：`token-store.js` 已 TS 化为**完整的薄 facade**
+`src/host/token-store.ts`——`createTokenStore` 组装 context + 委托六块（行数用 `(Get-Content src/host/token-store.ts).Count` 自证，本文不写死），
 `src/host/index.ts` 直接 `import { createTokenStore } from "./token-store.ts"`，而
 `package.json` **没有** `./token-store` 导出。早期规划中的「再导出 shim」没有落地；
 e2e / wiring 套件的注入面由 facade 的**公开选项名与常量 re-export 面保持不变**（§5）保证。
