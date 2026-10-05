@@ -255,6 +255,9 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
      * hand-copy — `if (isExpired()) refresh()` — now owned here so none of
      * them can drift: check the expiry window and refresh in place when it
      * is crossed.
+     * That check is the last one here — the outer `isExpired` guard in
+     * `raccoon-status.ts` is a fast path, not a duplicate: it lets an
+     * already-live credential skip the `state()` re-read entirely.
      *
      * Never throws: a failed refresh (no credential, a dead session the
      * latch already owns, a network blip) leaves the stored pair in place,

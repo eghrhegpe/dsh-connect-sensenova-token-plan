@@ -669,7 +669,7 @@ async function bootPlugin({ withCredentials = true, withLlm = false, config = {}
   globalThis.fetch = guardFetch;
 }
 
-// === F6. the mount-time effect registry (ADR-008) =======================
+// === F8. the mount-time effect registry (ADR-008) =======================
 // Unmount is `drain(cap)` → `teardown`: a still-settling effect gets up to
 // the cap to finish on its own; a straggler past the cap is named (the label
 // in the warn is the guard's clue) and left to the disposed gates that

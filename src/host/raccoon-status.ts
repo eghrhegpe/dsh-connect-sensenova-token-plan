@@ -194,12 +194,15 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
       nickname = state?.nickname ?? "";
       credentialSource = state?.source ?? null;
       if (loggedIn) {
-        // The same pre-request ritual the seed path uses: a lapsed
+        // The same pre-request ritual the seed path calls — one call into the
+        // store's `prepareForRequest`, never a second copy of it.
         // 3-hour access token with a live 30-day refresh must not 401 the
         // panel. Rotate in place (single-flight, whole-pair re-store, owned
         // by the store so no call site can drift), then re-read state so
         // the surfaced expiry facts describe the pair that
         // will actually serve the calls below.
+        // Fast path: only re-read `state()` if the credential actually
+        // lapsed — a live credential costs no extra round trip.
         if (await store.isExpired().catch(() => false)) {
           await store.prepareForRequest();
           state = await store.state().catch(() => state);

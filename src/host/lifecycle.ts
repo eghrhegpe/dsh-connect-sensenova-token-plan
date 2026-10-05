@@ -258,24 +258,25 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
 
 
 /**
- The Raccoon mount seed (ROADMAP §6.1 second upstream) — the boot
- of the Raccoon half, exported on its own so the orchestrator in
- `index.ts` stays a thin assembly: the seed is a side effect (it touches
- the credential store, the switch, the gateway, and the publisher), not
- part of "what a route may touch", so it belongs with the other mount
- side effects here.
- 
- Tracked in the effect registry (ADR-008): starts without blocking the
- mount, and the unmount drains it before `teardown`. If the switch is
- already on and a credential was stored before this restart, this offers
- the Raccoon models before the first poll (and with no console login at
- all). The roster is rebuilt from the store, NOT from
- `raccoonPublisher.state.rows` — that field is in-memory only and empty
- on a fresh process, so gating on it meant a restarted Host never
- re-registered the provider (the panel said "logged in" and the tab
- listed models, but the picker saw none). With NO credential there is
- nothing to offer, so the publisher stays pristine and the tab keeps its
- "switch on — scan to log in" state.
+ * The Raccoon mount seed (ROADMAP §6.1 second upstream) — the boot
+ * of the Raccoon half, exported on its own so the orchestrator in
+ * `index.ts` stays a thin assembly: the seed is a side effect (it
+ * touches the credential store, the switch, the gateway, and the
+ * publisher), not part of "what a route may touch", so it belongs
+ * with the other mount side effects here.
+ * 
+ * Tracked in the effect registry (ADR-008): starts without blocking
+ * the mount, and the unmount drains it before `teardown`. If the
+ * switch is already on and a credential was stored before this
+ * restart, this offers the Raccoon models before the first poll
+ * (and with no console login at all). The roster is rebuilt from the
+ * store, NOT from `raccoonPublisher.state.rows` — that field is
+ * in-memory only and empty on a fresh process, so gating on it meant
+ * a restarted Host never re-registered the provider (the panel said
+ * "logged in" and the tab listed models, but the picker saw none).
+ * With NO credential there is nothing to offer, so the publisher
+ * stays pristine and the tab keeps its "switch on — scan to log
+ * in" state.
  * @param {object} wiring - the Raccoon half of the mount wiring.
  * @param {object} wiring.raccoonStore - the Raccoon credential store.
  * @param {object} wiring.raccoonSwitch - the Raccoon switch store.
@@ -533,8 +534,8 @@ export { reconcileWebSearch };
  * runs, so by the time these lines execute every mount-time effect has
  * either settled or been reported as a straggler by its label.
  * @param {Wiring} wiring - assembled by `apply()`; only four fields are read
-   (`publisher`, `releaseProvider`, `raccoonPublisher`, `webSearchRestore`),
-   so the type says exactly that shape.
+ *   (`publisher`, `releaseProvider`, `raccoonPublisher`, `webSearchRestore`),
+ *   so the type says exactly that shape.
  * @param {Array<() => void>} offs - the unregister callbacks from
  *   {@link registerRoutes}. `Function[]` was the old spelling and it is
  *   `any[]` in disguise — a `Function` may be called with any arguments and

@@ -41,7 +41,7 @@
 
 - `index.ts`：Host 入口——注册只读路由 `/api/dsh-connect-sensenova-token-plan/snapshot`（聚合控制台数据，401 自动续期重试一次）+ 账号配置路由 + 各 store 接线与 side-effect 编排。
 - `routes.ts`：**路由门面**（2026-10 拆分：先冻结行为再搬，`routes.test.mjs` + `wiring.test.mjs` 拆分前后零漂移）——`registerRoutes(ctx, wiring)` 只做装配与注册顺序，返回 7 个 `off()` 回执；同源闸、body 上限、`writeJson` 等共享原语在 `routes/http.ts`，snapshot / account / api-key / provider / models / draw / raccoon 七条路由各自一个模块（`routes/<resource>.ts`，每个模块声明自己的路径常量）。小浣熊的**读模型**已抽出为 `raccoon-status.ts`（原先它是 handler 内一个 190 行闭包），`routes/raccoon.ts` 只剩扫码 walk 与四个 mutation。
-- `lifecycle.ts`：Host 生命周期——`registerRoutes` / `startSideEffects`（draw 工具注册、catalog seed）/ `teardown`（dispose + release + off×5）。
+- `lifecycle.ts`：Host 生命周期——`registerRoutes` / `startSideEffects`（catalog / raccoon seed、draw 工具注册、web-search restore、vision restore）/ `teardown`（dispose + release + off×7）。
 - `host-config.ts`：配置契约——`CONFIG_DEFAULTS`、`resolveSettings` / `resolveAuthOverrides`（含嵌套 `auth:` 块拒绝）、`isAdmitted` 同源闸、`hostName` 解析。
 - `codes.ts`：全部错误码与 IAM 平台原因码的唯一声明处。`sensenova-auth.ts` 产出、`token-store.ts` 判定是否 parked、`index.ts` 判定是否属于「拿不到令牌」，三处都从这里取。
 - `token-store.ts`：凭据服务里的令牌与账号存取、按期续期、401 拒绝记忆。已按 §TOKEN-STORE-SPLIT.md 拆为薄 facade + 六块子模块（`token-store/{state,grant,throttle,account,renewal,acquire}.ts`）。

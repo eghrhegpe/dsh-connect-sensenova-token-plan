@@ -235,8 +235,9 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   const resolveRaccoonToken = async () => {
     const { credential } = await raccoonStore.resolve();
     if (credential === null) return "";
-    // Keep the credential inside its expiry window before every request: the
-    // refresh token is single-use, so refresh eagerly and re-store.
+    // The store owns the pre-request ritual (single-flight, latched dead
+    // session): keep the credential inside its expiry window before
+    // every request, since the refresh token is single-use.
     await raccoonStore.prepareForRequest();
     const { credential: live } = await raccoonStore.resolve();
     return live?.accessToken ?? "";
