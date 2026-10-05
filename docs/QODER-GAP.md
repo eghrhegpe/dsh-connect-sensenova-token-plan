@@ -1,5 +1,7 @@
 # QODER-GAP：本插件与 `dsh-connect-qoder` 的 client 侧差距对照
 
+> 📦 **冻结档案（2026-10-05）**：本文是一次性的**两插件差距核对**，已退出持续维护面。行号/行数/结论以核对当时的 qoder 磁盘为准；qoder 改版后本文会整体失真，核对前请回 qoder 源码重验。只当历史参考。
+
 **用途**：把本插件（`dsh-connect-sensenova-token-plan`）与相邻插件
 `dsh-connect-qoder` 在 client 侧的**准确差距**钉成一份可复核的档案。
 两个方向都有借鉴价值：qoder 抄本插件的分层，本插件抄 qoder 的 JSX + 产物测试基建。

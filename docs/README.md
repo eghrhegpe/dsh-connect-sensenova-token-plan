@@ -15,9 +15,9 @@ AI 协作会话从根目录 [AGENTS.md](../AGENTS.md) 进入：验证怎么跑�
 |---|---|---|
 | [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | **按症状排查**：额度栏空 / 反复要求登录 / 模型或工具不出现 / 改了代码没生效 / 状态文件对不上 / 配置报错——每条给「先看哪 → 怎么办 → 根因在哪篇」，带稳定症状码供 doctor 与 agent 引用 | **排查问题的第一站**（先有症状、后有主题） |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 双仓库关系（`dsh-connect-sensenova-token-plan` 与 `upstream/`）、Host/Client 分流、数据流、生态定位与大统一路线（§5，同类插件核实见 §5.3、出图对接点源码对照见 §5.4）、与上游 Python 工具差异 | 理解结构、接手、做架构决策、定吸收边界 |
-| [ROADMAP.md](./ROADMAP.md) | 战略执行路线图（2026-09-29 起）：P0 解耦与契约回归（§2，`index.js` 控制面拆模块 + 商汤契约自动化回归）、429 全局自愈、§5「多 Key 池」纠偏、文档精炼、小浣熊网关契约复测与接入面盘点（§6.1），明确不做的边界 | 定吸收顺序 / 优先级、拍板侵入性、防范围漂移 |
+| [ROADMAP.md](./ROADMAP.md) 📦 | 战略执行路线图（2026-09-29 起）：P0 解耦与契约回归、429 全局自愈、§5「多 Key 池」纠偏、小浣熊网关契约复测与接入面盘点，明确不做的边界 | 📦 **历史**：当初按什么顺序做、为什么这么定（冻结，不持续维护） |
 | [DSH-PLUGIN.md](./DSH-PLUGIN.md) | DSH 插件机制总览（bundle 结构、Loader 条目、cordis.patch.yml、安装重启、peer 依赖、与兄弟插件关系） | 理解「这是一个 DSH 插件」、对照 dsh-connect-qoder 范本 |
-| [QODER-GAP.md](./QODER-GAP.md) | 与 `dsh-connect-qoder` 的 client 侧差距对照（可测边界 / 分层线 / JSX / 测试基建），事实带行号、双向可借鉴 | 想对照相邻插件、决定要不要抄它的 JSX 或让它抄本插件的分层 |
+| [QODER-GAP.md](./QODER-GAP.md) 📦 | 与 `dsh-connect-qoder` 的 client 侧差距对照（可测边界 / 分层线 / JSX / 测试基建），事实带行号 | 📦 **历史**：一次性的两插件差距核对（冻结，不持续维护；qoder 改版后整体失真） |
 | [SETUP.md](./SETUP.md) | 安装、配置字段表、改动后必须重启 Host、首次使用、常见信号处置、报错去哪儿看（Host 日志 vs 浏览器控制台） | 装环境、改配置、排「跑的是旧代码」、查面板报错信号、找不到报错该看哪个进程 |
 | [AUTH.md](./AUTH.md) | OIDC+PKCE、密码 JWE 加密、凭据存储、静默续期、防锁号节流 | 改登录/续期、排查登录失败 |
 | [API.md](./API.md) | 本地路由（`snapshot`/`account`）、控制台端点、配置端点清单 | 对接路由、看返回结构、调端点 |
@@ -27,8 +27,8 @@ AI 协作会话从根目录 [AGENTS.md](../AGENTS.md) 进入：验证怎么跑�
 | [PITFALLS.md](./PITFALLS.md) | 38 条真实踩坑（现象→根因→修法） | 改代码前避坑、理解防御性代码的来由 |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | 提交约定、红线（凭据/`upstream/` 不进库）、仓库整洁 | 准备提交、清理历史误跟踪 |
 | [CHANGELOG.md](../CHANGELOG.md) | 公开行为变化的版本记录（非 git log 替代） | 看「这个版本改了什么」 |
-| [IMPROVEMENTS.md](./IMPROVEMENTS.md) | 深化改进研究（定位对齐 / `index.js` 收编 / peer 契约护栏 / 状态·契约·UX·client 四块债），实证引用兄弟插件与本机 peer 源码，附分步落地顺序与门禁 | 定改进优先级、排重构顺序、查每项的投入风险比 |
-| [TOKEN-STORE-SPLIT.md](./TOKEN-STORE-SPLIT.md) | `token-store.ts` 拆分**落地记录**（登录/续期/节流/迁移四块 + 显式 state 容器）：状态归属表、7 步落地门禁（每步=行为基线零漂移）、红线核对表、§3/§7 迁移块退役条件 | 查「token-store 怎么拆的、还欠什么」——拆分已 2026-09-29 六步落地，只剩 §7 迁移退役待下个大版本 |
+| [IMPROVEMENTS.md](./IMPROVEMENTS.md) 📦 | 深化改进研究（定位对齐 / `index.js` 收编 / peer 契约护栏 / 四块债），附分步落地顺序与门禁 | 📦 **历史**：当初的诊断与投入风险比（冻结，不持续维护） |
+| [TOKEN-STORE-SPLIT.md](./TOKEN-STORE-SPLIT.md) 📦 | `token-store.ts` 拆分**落地记录**（四块 + 显式 state 容器）：状态归属表、7 步落地门禁、红线核对表 | 📦 **历史**：token-store 怎么拆的、当时还欠什么（冻结，不持续维护） |
 | [ADR.md](./ADR.md) | 决策账本（大统一定位 / 边界放宽 / 路由拆分 / maxTokens 决策）：裁定事实、理由与取代关系；现行文档只写现状，沿革一律在此 | 查「当初为什么这么定」、改裁定（新增条目而非内联修订） |
 | [REFERENCES.md](./REFERENCES.md) | 参照件索引：`upstream/` 容器（商汤 Token Plan 历史上游 + 生态核实样本）的来源、版本、许可与「承重在哪」；容器纪律与维护 | 查「某条事实当初从哪来」、落盘新参照件、核对参照版本 |
 
@@ -51,3 +51,12 @@ AI 协作会话从根目录 [AGENTS.md](../AGENTS.md) 进入：验证怎么跑�
 - 行尾分布 → 临时 pwsh 统计，用完即弃
 
 **允许写死**的只有两类：**历史/对比**（"拆分前 944 行单体 → 拆分后薄 facade"，承载"改了多少"这个决定依据）与**契约真源**（门禁钉的值：PITFALLS 条数、API 快照键数、baseline 场景/帧数）。写历史数字要注明时点；写契约数字要标注它由门禁钉住、改动要连门禁一起改。判断标准：这个数字**读者用得上吗**？用不上就换命令或删。
+
+### 冻结档案（📦）
+
+**研究档案、一次性核对、已落地的设计蓝图**这类文件，价值在「当初怎么想的」，不在「现在长什么样」——继续维护它们只会持续产出会腐的描述。这些文件**冻结**：正文顶部带 📦 头注、本索引标 📦、「何时查」写成历史参考。规则：
+
+- **冻结 = 退出持续维护面**：不再随代码改动更新，也不再要求"文档与代码一致"。描述失真是**预期内的**，头注已声明以 `src/` / `test/` / `ADR.md` 为准。
+- **现行表述永远在别处**：现行规则看 `docs/ADR.md`（裁定）+ `docs/ARCHITECTURE.md`（结构）+ `docs/PITFALLS.md`（坑）+ `docs/TESTING.md`（测试）。冻结文件里若与它们冲突，**以现行文件为准**。
+- **解除冻结才改**：若某文件的结论又要重新生效（如重做某块设计），先删头注、把结论迁进 `ADR.md` / `ARCHITECTURE.md`，再按现行文档维护——**不要**在冻结文件上打内联修订补丁。
+- 冻结清单（2026-10-05）：`ROADMAP.md`、`IMPROVEMENTS.md`、`QODER-GAP.md`、`TOKEN-STORE-SPLIT.md`。`test/docs.test.mjs` 的考古扫描把它们与账本同等豁免。

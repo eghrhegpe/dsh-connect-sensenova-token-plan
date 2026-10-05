@@ -518,7 +518,13 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
     "ADR.md",
     "CHANGELOG.md",
     "PITFALLS.md",
-    "IMPROVEMENTS.md"
+    "IMPROVEMENTS.md",
+    // 📦 冻结档案（2026-10-05）：时点记录，已退出持续维护面（docs/README.md 索引里标
+    // 冻结、正文带冻结头注）。它们承载的是「当初怎么决策/怎么拆」的历史，不是现行规则，
+    // 所以和账本一样豁免考古扫描。
+    "ROADMAP.md",
+    "QODER-GAP.md",
+    "TOKEN-STORE-SPLIT.md"
   ]);
   const archeo = /(?:\d{4}-\d{2}-\d{2}\s*修订|修订（[一二三四五六七八九]|本节裁定已失效)/;
   let scanned = 0;

@@ -1,5 +1,7 @@
 # token-store.ts 拆分方案（登录 / 续期 / 节流 / 迁移）
 
+> 📦 **冻结档案（2026-10-05）**：拆分已 2026-09-29 全部落地，本文是**设计蓝图 + 落地记录**，已退出持续维护面。现行结构以 `src/host/token-store.ts` + `src/host/token-store/` 为准；行数/文件数是时点值，用时 `(Get-Content …).Count` 自证，别信本文数字。
+
 > 锐评 #5：944 行 `token-store.js` 单体（现 TS 化，见下文状态）。本文是拆分的设计蓝图。
 > 前置护栏：`test/store-baseline.test.mjs`（17 场景 48 帧全行为冻结基线，
 > 见 [TESTING.md §5](./TESTING.md)）。拆分的门禁 = 基线零漂移 + `store.test.mjs` 全绿。
