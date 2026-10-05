@@ -160,7 +160,7 @@ export type DrawToolWiring = Pick<Wiring,
  * with no tools service never sees it, and a peer that fails to load leaves
  * the panel and the provider untouched. Named as a separate export so a test
  * can inject its own `ctx`/`wiring`; `startSideEffects` calls it when enabled.
- * @param ctx - the host root context (reads `ctx.get("tools")` / `ctx.tools`).
+ * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context (reads `ctx.get("tools")` / `ctx.tools`).
  * @param {DrawToolWiring} wiring - the fields listed in that type.
  * @param {object} side - test seams from `apply`'s `deps`.
  * @param {Function} side.loadToolsModule - lazy `@deepseek-ai/dsh-tools` loader.
@@ -368,7 +368,7 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
 /**
  * Run the mount-time side effects: the persisted-catalog seed, the draw tool
  * (when opted in), and vision step two's settings-row writer.
- * @param ctx - the host root context.
+ * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
  * @param {Wiring} wiring - assembled by `apply()`; the fields read here are
  *   `settings` / `visionPublish` / `logger` plus the whole {@link DrawToolWiring}
  *   it forwards to {@link registerDrawTool}. The per-field notes that used to
@@ -596,7 +596,7 @@ export type WebSearchToolWiring = Pick<Wiring,
  * and the selection is never touched; a late `web` service that finally
  * registers is picked up by {@link resolveServiceWithRetry}, never by a
  * duplicate registration.
- * @param ctx - the host root context (reads `ctx.get("web")`).
+ * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context (reads `ctx.get("web")`).
  * @param {WebSearchToolWiring} wiring - the fields listed in that type.
  * @returns {Promise<void>}
  */
@@ -642,7 +642,7 @@ export async function registerWebSearchProvider(ctx: { get?: (n: string) => unkn
  * in-session flip is safe: drop whatever this plugin had taken over, then
  * re-register against the new value. Called both at mount (in place of the
  * bare `registerWebSearchProvider`) and from the panel's `webSearch` route.
- * @param ctx - the host root context.
+ * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
  * @param {WebSearchToolWiring} wiring - see {@link registerWebSearchProvider}.
  * @returns {Promise<void>}
  */

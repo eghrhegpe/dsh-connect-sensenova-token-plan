@@ -44,7 +44,7 @@ import type { Wiring } from "./types.ts";
  * server. Each route is its own module; this assembler only decides what they
  * may touch (the wiring) and hands back the unregister callbacks, in
  * registration order — `teardown` runs them last.
- * @param ctx - the host root context (only `ctx.webServer` is used here).
+ * @param {any} ctx - the host root context (only `ctx.webServer` is used here).
  * @param {Wiring} wiring - assembled by `apply()` in `index.ts`.
  * @returns {Array<() => void>} the seven `off()` unregister callbacks, in
  *   registration order. Spelled out rather than `Function[]` so it matches

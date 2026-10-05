@@ -197,7 +197,7 @@ export interface ResolvedSettings {
  * exception would take the whole plugin down instead of leaving a panel that
  * explains itself. So problems are returned as `configError` and surfaced
  * through the snapshot route.
- * @param config - the row's raw patch config.
+ * @param {unknown} config - the row's raw patch config.
  * @returns {{settings: ResolvedSettings, configError: string|null}}
  */
 export function resolveSettings(config: unknown): { settings: ResolvedSettings; configError: string | null } {
@@ -432,7 +432,7 @@ export function hostName(host: string): string {
  * reader who believes otherwise will build something on top of it. Closing
  * that gap needs a token the Host serves in its own page and the POST carries
  * back, not a header a client can choose.
- * @param request - the incoming HTTP request.
+ * @param {{ headers?: { host?: unknown; origin?: unknown } }} request - the incoming HTTP request.
  * @param {Set<string>} allowedHosts - the host names this Host answers as.
  * @returns {boolean} whether the request may be served.
  */

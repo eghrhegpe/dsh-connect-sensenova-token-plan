@@ -82,16 +82,16 @@ export interface RaccoonWalkView {
  * Build the walk manager.
  *
  * @param options
- * @param options.fetcher - the gateway fetcher (for tests to inject a fake).
- * @param options.saveCredential - called with `{ accessToken, refreshToken, expiresAtMs?, nickname? }`; MUST persist to the credentials service. Errors become a `failed` event.
- * @param options.invalidateCache - called on successful login to drop reads taken under the previous credential.
- * @param options.onSettled - called once at the START of each scan cycle (after
+ * @param {(code: string) => Promise<RaccoonQrPollResult>} options.fetcher - the gateway fetcher (for tests to inject a fake).
+ * @param {(credential: { accessToken: string; refreshToken: string; expiresAtMs?: number; nickname?: string }) => Promise<void>} options.saveCredential - called with `{ accessToken, refreshToken, expiresAtMs?, nickname? }`; MUST persist to the credentials service. Errors become a `failed` event.
+ * @param {() => void} options.invalidateCache - called on successful login to drop reads taken under the previous credential.
+ * @param {() => void} options.onSettled - called once at the START of each scan cycle (after
  *   the QR code is generated, before the poll loop begins), regardless of the
  *   outcome. OPTIONAL: it exists for callers that want to reset per-scan UI
  *   state, and the read model does not use it — `login` reads the walk's own
  *   state (`takeEvent` / `liveScan`) — so the route registers nothing and a
  *   caller with no per-scan UI has nothing to say.
- * @param options.onLoggedIn - called AFTER the credential was persisted and the
+ * @param {() => void} options.onLoggedIn - called AFTER the credential was persisted and the
  *   read cache cleared, with the outcome already `logged_in`. The caller's
  *   provider-registration side effect lives here. Its failures are swallowed:
  *   the credential is already in place, so a publish miss is a degraded-but-

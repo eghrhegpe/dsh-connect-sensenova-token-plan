@@ -32,13 +32,13 @@ import type { ResolvedSettings } from "./host-config.ts";
  * the retry a token that expires mid-poll would leave the panel stuck on an
  * error until the next manual re-login; with it, the panel heals itself.
  *
- * @param settings - resolved plugin settings.
- * @param path - the console path, e.g. `/lite/console/v1/tokenplan/pool-usage`.
- * @param params - optional query parameters.
- * @param cacheMs - how long to keep the response.
- * @param cache - the cache map to use.
- * @param inflight - the in-flight map to share requests through.
- * @param tokenStore - the credentials-backed token store.
+ * @param {ResolvedSettings} settings - resolved plugin settings.
+ * @param {string} path - the console path, e.g. `/lite/console/v1/tokenplan/pool-usage`.
+ * @param {Record<string, string> | undefined} params - optional query parameters.
+ * @param {number} cacheMs - how long to keep the response.
+ * @param {Map<string, { body: unknown; at: number; gen: number }>} cache - the cache map to use.
+ * @param {Map<string, Promise<unknown>>} inflight - the in-flight map to share requests through.
+ * @param {{ getToken(): Promise<string>; invalidate(token?: string): void }} tokenStore - the credentials-backed token store.
  * @returns {Promise<unknown>} the parsed console body.
  */
 export async function fetchConsole(
@@ -99,11 +99,11 @@ export async function fetchConsole(
  * console's `pool-usage` `model_ids`, which is the PLAN's advertised
  * coverage (it lists models this key has no permission for).
  *
- * @param settings - resolved plugin settings.
- * @param cacheMs - how long to keep the response (long: the catalog is stable).
- * @param cache - the cache map to use.
- * @param inflight - the in-flight map to share requests through.
- * @param apiKey - the SenseNova API key.
+ * @param {ResolvedSettings} settings - resolved plugin settings.
+ * @param {number} cacheMs - how long to keep the response (long: the catalog is stable).
+ * @param {Map<string, { body: unknown; at: number; gen: number }>} cache - the cache map to use.
+ * @param {Map<string, Promise<unknown>>} inflight - the in-flight map to share requests through.
+ * @param {string} apiKey - the SenseNova API key.
  */
 export async function fetchModelCatalog(
   settings: ResolvedSettings,

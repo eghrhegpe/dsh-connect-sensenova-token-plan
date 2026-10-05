@@ -218,8 +218,8 @@ export function numOrNull(value: unknown) {
  * Use it as `await optional(store ? store.enabled() : null)`: the guard then
  * sits on the value, where "not a promise" and "a rejected promise" both read
  * as `null`.
- * @param value - the call's result (usually a promise), or `null`.
- * @param fallback - what to read on absence or rejection; `null` by default,
+ * @param {T | Promise<T> | null | undefined} value - the call's result (usually a promise), or `null`.
+ * @param {F} fallback - what to read on absence or rejection; `null` by default,
  *   so callers that only need "no answer" pass nothing.
  * @returns the value, or `fallback` on absence or rejection.
  *
@@ -240,7 +240,7 @@ export function optional<T, F = null>(value: T | Promise<T> | null | undefined, 
  * builders: `...pickDefined({ x })` reads as omit-when-absent in one token.
  * A guard that omits an empty string or requires a specific type is a
  * DIFFERENT policy and keeps its own `typeof` / non-empty test — not this helper.
- * @param fields - the candidate field map.
+ * @param {T} fields - the candidate field map.
  * @returns a new object holding only the defined fields.
  */
 export function pickDefined<T extends Record<string, unknown>>(fields: T): Partial<{ [K in keyof T]: Exclude<T[K], null | undefined> }> {

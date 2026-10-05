@@ -89,12 +89,12 @@ export { catalogSignature } from "./provider-publish.ts";
  * side effects, and hang the unmount effect. The route handlers live in
  * `routes.ts`, the side effects in `lifecycle.ts` — this function only
  * decides what they may touch.
- * @param ctx - host root context.
- * @param config - the row's raw patch config. There is no DSH Config schema, so
+ * @param {any} ctx - host root context.
+ * @param {any} config - the row's raw patch config. There is no DSH Config schema, so
  *   values arrive unvalidated; the endpoint overrides are checked where they
  *   are consumed (`createAuth` throws on a malformed origin) and the failure
  *   is surfaced through the snapshot instead of crashing the route.
- * @param deps - test-only seams (the peer adapter / tools modules, a draw
+ * @param {HostDeps} deps - test-only seams (the peer adapter / tools modules, a draw
  *   fetch replacement). The real Loader passes nothing.
  */
 function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
