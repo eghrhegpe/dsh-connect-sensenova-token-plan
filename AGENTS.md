@@ -151,7 +151,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 
 ## 进入代码库的读取顺序（AI 会话）
 
-1.6 万行 src + 1.4 万行测试，乱序读会把时间花在「重新验证文档已写明的事实」上。
+约 2 万行 src + 1.7 万行测试，乱序读会把时间花在「重新验证文档已写明的事实」上。
 这条顺序是 2026-10-02 全库审查后的复盘：先建坐标系，再读代码。
 
 1. **先文档，后代码**：本文件 → `docs/README.md` 索引 → `docs/ARCHITECTURE.md` §5
@@ -162,7 +162,9 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
    提交半成品，优先读，并先确认 HEAD 再下结论（本次审查就撞上 `useSnapshotPolling`
    在审查中途被另一会话提交）。
 3. **装配点优先**：先读 `src/host/index.ts`（apply 是唯一装配点，建立依赖图），
-   再读 `src/host/routes.ts`（8 资源门面）拿路由家族图；顺着依赖走，别按文件名猜。
+   再读 `src/host/routes.ts`（路由门面：返回 7 个 `off()` 回执——6 条 Token Plan 路由
+   + 1 条 raccoon 路由；`routes/http.ts` 是共享原语，不是资源）拿路由家族图；
+   顺着依赖走，别按文件名猜。
 4. **错误语义先行**：先读 `src/host/codes.ts`（单一 taxonomy + 派生集合）。全仓
    错误分类以它为真源，「按状态码分类 vs 按 body 字段分类」这类不一致只有对照它
    才显形——2026-10 的 refresh 400 误删凭据就是对照登录路径的 `rejectionCode`
@@ -176,9 +178,10 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 7. **改行为前先读测试与基线**：`docs/TESTING.md` 说明每个套件测什么；动
    token-store 前先判断行为冻结面（`store-baseline`）要不要 `UPDATE_BASELINE=1`
    ——要的话是更大的事，先停下来说。测试里 `check(name, condition, detail)` 的
-   `name` 本身就是契约，1.4 万行测试是规格，不是附件。
+   `name` 本身就是契约，1.7 万行测试是规格，不是附件。
 8. **验证闭环**：改完跑对应域单测（`node test/<域>.test.mjs`）→ 全量 `npm test`
-   （26 套件 && 链，失败按链序向前定位，别信「末尾绿」）。
+   （= `node test/run-all.mjs`：跑完 26 套件 + 4 门禁共 30 项再汇总，失败项逐个点名；
+   「末尾绿」「按链序定位」都是旧 `&&` 链的读法，别再用）。
 
 ## 已知的真实坑（改前先看这里有没有）
 

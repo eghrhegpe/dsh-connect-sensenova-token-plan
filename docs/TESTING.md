@@ -97,7 +97,7 @@ npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（�
 
 ## 5. 行为冻结基线（`store-baseline.test.mjs`）
 
-`token-store.ts` 计划拆成登录 / 续期 / 节流 / 迁移四块（锐评 #5：944 行单体），但四块共享闭包状态、迁移挂在读路径上，纯搬文件极易静默改掉细语义。`store.test.mjs` 的手写 check 只断言「作者想到的语义」；`store-baseline.test.mjs` 把 store 的**完整可观察面**冻结在 `test/baselines/token-store-behavior.json`：17 个场景、48 帧，每帧记录凭据服务调用序列（read/modify/delete/resolve/set/unset）、节流存储读视图、grant/ref 落盘内容、抛出的 `{code,message}` 与完整 `state()` 对象。
+`token-store.ts` 已拆成登录 / 续期 / 节流 / 迁移四块（锐评 #5：944 行单体 → 现薄 facade + `token-store/` 六块子模块，落地记录见 [TOKEN-STORE-SPLIT.md](./TOKEN-STORE-SPLIT.md)），但四块共享闭包状态、迁移挂在读路径上，纯搬文件极易静默改掉细语义。`store.test.mjs` 的手写 check 只断言「作者想到的语义」；`store-baseline.test.mjs` 把 store 的**完整可观察面**冻结在 `test/baselines/token-store-behavior.json`：17 个场景、48 帧，每帧记录凭据服务调用序列（read/modify/delete/resolve/set/unset）、节流存储读视图、grant/ref 落盘内容、抛出的 `{code,message}` 与完整 `state()` 对象。
 
 - **驱动方式**：只走公开 API（`getToken`/`invalidate`/`saveAccount`/`forgetAccount`/`state`），注入脚本化 `auth`、内存凭据服务、共享内存节流存储（第二个 store 实例模拟「重启」）、虚拟时钟；无网络、无 peer、无墙钟，干净检出可跑。
 - **已钉死的阴沟语义**：`not_configured` 绝不写节流；parked 跨重启零新登录；本地退避 60s→120s 翻倍且关窗后 attempt 保留；平台声明的 2h 窗口不被 30 分钟本地帽截断；并发轮询单飞（恰好一次 refresh）；compare-and-set 慢者赢（并发旋转的 grant 不被覆盖）；`refresh_rejected` 无账号回收 vs 有账号重登的岔路；被拒令牌不复播；旧命名空间 grant/节流一次性收养（节流只收养第一条、第二条等 `clearThrottle` 扫）；密码不落盘（`autoRecoverArmed` 只报布尔）；无凭据服务降级并标记 `ephemeral`。
@@ -107,4 +107,4 @@ npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（�
   $env:UPDATE_BASELINE='1'; node test/store-baseline.test.mjs; Remove-Item Env:UPDATE_BASELINE
   ```
 
-  重生成不是「让测试变绿」的手段。套件与基线同进 `npm test` 链与 CI 离线 job（三方名册由 `package.test.mjs` 钉住）。
+  重生成不是「让测试变绿」的手段。套件与基线同进 `npm test`（= `test/run-all.mjs`）与 CI 离线 job（三方名册由 `package.test.mjs` 钉住）。
