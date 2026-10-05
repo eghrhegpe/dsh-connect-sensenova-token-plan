@@ -31,7 +31,6 @@ import {
   extractRaccoonNickname,
   raccoonHeaders,
   RACCOON_FALLBACK_MODELS,
-  raccoonThinkingExtraBody,
   refreshRaccoonCredential,
   pollRaccoonQrLogin,
   fetchRaccoonBalance,
@@ -39,8 +38,12 @@ import {
   RACCOON_QR_STATUS,
   RACCOON_CODE,
   isDeadRaccoonSession,
-  isDeadRaccoonEnvelope
+  isDeadRaccoonEnvelope,
 } from "../src/host/raccoon.ts";
+// The thinking dialect is NOT re-exported from the barrel: it has no
+// production caller, so the split pulled it off the public face. Reached by
+// named import from the leaf that owns it.
+import { raccoonThinkingExtraBody } from "../src/host/raccoon-fallback.ts";
 import {
   createRaccoonStore,
   parseRaccoonCredential,
@@ -960,7 +963,12 @@ function section(title) {
     return statSync(path).isDirectory() ? walk(path) : [path];
   });
   const wired = walk(srcRoot)
-    .filter((file) => file.endsWith(".ts") && basename(file) !== "raccoon.ts")
+    // Exclude the DECLARATION site, not "whichever file happens to be named
+    // raccoon.ts": the constant moved to raccoon-consts.ts in the 2026-10-05 split.
+    // Naming the file instead of the role would have made this pin silently
+    // start hunting the declaration itself — the exact drift class it exists
+    // to catch. (It caught this move, which is the pin working.)
+    .filter((file) => file.endsWith(".ts") && basename(file) !== "raccoon-consts.ts")
     .filter((file) => readFileSync(file, "utf8").includes("RACCOON_DESKTOP_PREFIX"));
   check("the desktop one-time reward endpoint stays unwired",
     wired.length === 0, wired.map((file) => file.replace(srcRoot, "src")).join(", "));
