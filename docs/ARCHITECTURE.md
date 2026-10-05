@@ -278,7 +278,7 @@ draw-router 的多源能力时才有意义。
 
 | 维度 | dsh-draw-router（现状） | 本插件（现状） |
 |---|---|---|
-| 出图模型识别 | 名字正则 `DRAW_MODEL_PATTERNS`（line 25-34：`/image/i`、`/u1-fast/i`、`/wan/i`、`/flux/i`…命中才认），探测自己另调一次 `GET /v1/models` | `output_modalities` 含 `"image"` 的结构化判定（`llm-models.js` line 101-114，2026-09 已核真实响应），catalog 每小时已有 |
+| 出图模型识别 | 名字正则 `DRAW_MODEL_PATTERNS`（line 25-34：`/image/i`、`/u1-fast/i`、`/wan/i`、`/flux/i`…命中才认），探测自己另调一次 `GET /v1/models` | `output_modalities` 含 `"image"` 的结构化判定（`llm-models.ts` line 101-114，2026-09 已核真实响应），catalog 每小时已有 |
 | 识别质量 | 实锤会漏：商汤两把出图模型 `u1-fast` / `u1.5-lite`（§5.1）里，`u1-fast` 命中 `/u1-fast/i`，**`u1.5-lite` 一条正则都不命中**——装它配商汤源，`draw_image` 默认永远挑不到 u1.5-lite | 两把都识别 |
 | 出图执行 | `buildEndpoint` 拼 `{base}/v1/images/generations`（line 72-79）→ `POST {model, prompt, n, response_format}` → 取 `data[0].url / b64_json`（line 209-261），约 80 行 | 无（待吸收的全部增量） |
 | 凭据 | 明文写进插件目录 `draw-config.json`（line 140-151） | DSH 凭据服务，不落盘 |

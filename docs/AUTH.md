@@ -76,7 +76,7 @@
 | **时间型**（锁定、频率限制、平台故障） | 带等待窗口，或无窗口 | 等待窗口结束前直接失败，不发请求。平台声明的窗口**照单全收，绝不截短**（声明 2 小时就等满 2 小时）；无窗口时本地指数退避 60s → 2m → 4m … 上限 30 分钟。窗口一到恰好探测一次。 |
 | **凭据型**（密码错误、需验证码） | `invalidAccountOrPassword` 等 | **完全不自动重试**——等待改变不了一个错密码。面板重新提示输入账号，只有用户主动提交才再试。 |
 
-节流状态写在**插件自己的状态文件**（`$DSH_HOME/state/<plugin>/throttle.json`，原子写、0600），因此**跨进程、跨重启**都生效：另一个 Host 进程（桌面版 / `dsh web` 用不同 profile，但可能共用同一 Home）不会在等待期内继续敲门。放在插件自己的文件里而不是凭据服务，是因为节流不是凭据，而凭据服务只认两种记录 kind——发明第三种会让整份凭据文件对 Host 不可解析（见 PITFALLS §6 与 `throttle-store.js` 头注）。旧版曾把节流伪装成 `grant` 记录（marker 字段 `THROTTLE_MARKER`）寄存在凭据服务里，该地址仅作**一次性迁移读取**，之后不再写入。窗口读取同时支持中英文（「try again after 8 minutes」与「请 8 分钟后重试」）以及 `Retry-After` 头。
+节流状态写在**插件自己的状态文件**（`$DSH_HOME/state/<plugin>/throttle.json`，原子写、0600），因此**跨进程、跨重启**都生效：另一个 Host 进程（桌面版 / `dsh web` 用不同 profile，但可能共用同一 Home）不会在等待期内继续敲门。放在插件自己的文件里而不是凭据服务，是因为节流不是凭据，而凭据服务只认两种记录 kind——发明第三种会让整份凭据文件对 Host 不可解析（见 PITFALLS §6 与 `throttle-store.ts` 头注）。旧版曾把节流伪装成 `grant` 记录（marker 字段 `THROTTLE_MARKER`）寄存在凭据服务里，该地址仅作**一次性迁移读取**，之后不再写入。窗口读取同时支持中英文（「try again after 8 minutes」与「请 8 分钟后重试」）以及 `Retry-After` 头。
 
 注意**跨 profile 共享这条只对节流成立**：`catalog` / `provider` / `draw` 三份状态是 **per-profile** 的（`$DSH_HOME/state/<profile>/<name>/`，见 [PITFALLS.md](./PITFALLS.md) §23），与节流**故意相反**——它们答的是「这个 profile 要什么」，而节流答的是「上游要这台机器等多久」。别把两者"统一"成同一种粒度。
 

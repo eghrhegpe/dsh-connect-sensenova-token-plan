@@ -39,7 +39,7 @@
 
 - **刷新令牌**（插件核心，免去 3 小时手动换）：对 token 端点 `grant_type=refresh_token`、`refresh_token`、`client_id`、`scope`。Hydra **会轮换 refresh_token**——忽略返回的新 refresh_token 会导致下次刷新失败，所以本插件每次都落库新值。
 - `scope` 必须含 `offline offline_access`，否则拿不到 refresh_token。
-- JWKS（密码封包公钥）：`https://signin.sensecore.cn/.well-known/jwks.json`，key id `public:hydra.openid.id-token`。JWKS 的获取与缓存已迁到 `sensenova-crypto.js`：缓存**由调用方持有**（`createAuth` 每实例一份 `cfg.jwksCache`），内部再按 `jwksEndpoint` URL 分键——两个实例即便同 endpoint 也不共享；TTL 由 `JWKS_TTL_MS=600_000`（10 分钟）控制。
+- JWKS（密码封包公钥）：`https://signin.sensecore.cn/.well-known/jwks.json`，key id `public:hydra.openid.id-token`。JWKS 的获取与缓存已迁到 `sensenova-crypto.ts`：缓存**由调用方持有**（`createAuth` 每实例一份 `cfg.jwksCache`），内部再按 `jwksEndpoint` URL 分键——两个实例即便同 endpoint 也不共享；TTL 由 `JWKS_TTL_MS=600_000`（10 分钟）控制。
 
 ---
 
@@ -195,7 +195,7 @@ IAM 拒绝登录时返回 `google.rpc.Status` 信封：顶层 `message` 是泛�
 
 `content` 为内容块数组时支持 `image_url`：公网 URL 与 `data:image/*;base64,...` 均可，实测都能正确识别（gstatic 风景图答出「蓝色湖泊+山脉+小岛」、1×1 base64 图答「纯蓝色图片」）。
 
-**注意**：官方示例图 `https://www.sensenova.cn/marketing-home/showcase-hero.png` 实测直接请求 **400「inference request is invalid」且耗时约 91 秒**——该 URL 本机 HEAD 是 200 `image/png`，但体积 **4.28 MB**，是图太大、不是 URL 不可达。插件 `llm-adapter.js` 的 `requestImageMaxBytes: 1_048_576`（1 MB，dsh-llm 默认）比平台容忍度紧，超限图由插件本地处理，属正常保护。
+**注意**：官方示例图 `https://www.sensenova.cn/marketing-home/showcase-hero.png` 实测直接请求 **400「inference request is invalid」且耗时约 91 秒**——该 URL 本机 HEAD 是 200 `image/png`，但体积 **4.28 MB**，是图太大、不是 URL 不可达。插件 `llm-adapter.ts` 的 `requestImageMaxBytes: 1_048_576`（1 MB，dsh-llm 默认）比平台容忍度紧，超限图由插件本地处理，属正常保护。
 
 ### 7.5 逐模型实测（2026-09-29 初测，9 个目录模型；2026-09-30 目录漂移复核）
 
@@ -230,6 +230,6 @@ IAM 拒绝登录时返回 `google.rpc.Status` 信封：顶层 `message` 是泛�
 - **`reasoning_effort`**：平台报错列表 `low/medium/high/xhigh/none` 是**并集**，各模型支持面不同：`max` 仅 glm（实测 200）与 v4.1-flash（文档原生）支持，flash-lite / v4-flash 400；`xhigh` v4-flash 实测 200（文档称映射到 high）。
 - **思考模式采样规则**（DeepSeek v4/v4.1 文档）：temperature / presence_penalty / frequency_penalty **不生效**（传入不报错）；top_p 思考模式最小 0.95、非思考固定 1.0。GLM top_p 默认 0.95。
 - **`max_tokens` 默认（文档）**：flash-lite 65535；v4-flash 非思考 8K / 思考 64K（`max` 档 128K）；v4.1-flash 131072（范围 [1,393216]）；glm 64K（[1,128K]）。目录 `max_output_length` 是权威值（v4.1-flash 目录为 65536，与文档默认 131072 不符——以目录为准）。**2026-10-02 真机探针**：flash-lite `max_tokens:131072` → 400「should be in [1, 65536]」（目录 65536 是硬上限）；v4-flash / glm-5.2 `131072` → 200（目录未声明上限，平台实际接受更高）。**harness 兜底是减半不是无上限**：`dsh-llm-pi-ai` 对未声明的 maxTokens 强制填 `defaultMaxTokens ?? 32768`——本插件 descriptor 自 0.5.0 起声明目录权威值（有则声明、缺则回落不声明），不再让 harness 把输出截在 32768。
-- **U 系列不是对话模型**：`sensenova-u1-fast`/`u1.5-lite` 是图像生成（`output_modalities:["image"]`，独立 images 数组 API），对话端点 404。`llm-models.js` 的 `isChatModel` 按 `output_modalities` 把它们从**选择器 roster、descriptor 列表、注册计数**三处一致排除，杜绝「选了就 404」。
+- **U 系列不是对话模型**：`sensenova-u1-fast`/`u1.5-lite` 是图像生成（`output_modalities:["image"]`，独立 images 数组 API），对话端点 404。`llm-models.ts` 的 `isChatModel` 按 `output_modalities` 把它们从**选择器 roster、descriptor 列表、注册计数**三处一致排除，杜绝「选了就 404」。
 - **可用性抖动**：flash-lite 当天出现整体 404「model is not found」（连 `reasoning_effort:"high"` 对照都 404）。按错误码文档（§14）404 = 模型下线或不存在，遇到先查平台状态，不是参数语义。
 - **目录声明 ≠ 实测能力（2026-09-30 复核）**：`input_modalities` 是平台的**声明字段**，插件 vision 识别（`identifyVisionModel`）按它判定（`"image"` ∈ `input_modalities` 才算看图，方向宽松——缺字段不算）。2026-09-29 初测时 6 家 DeepSeek/GLM/Kimi 系声明 `["text","image"]`，2026-09-30 平台把其中 5 家（`deepseek-v4-flash`/`v4-pro`/`deepseek-flash`/`glm-5.2`/`kimi-k3`，外加 403 的 `deepseek-v4.1-flash`）退回 `["text"]`，`sensenova-6.8-flash-lite` 仍声明 `["text","image"]`。**推理响应方言不受此次目录改动影响**：glm-5.2 复核仍 200 且吐 `reasoning_content`，flash-lite 仍吐 `reasoning`。即：目录回退只影响插件 vision 清单（5 家从「可看图」掉出），不影响思考透出。`test/contract.test.mjs` 按刷新后的基线（`visionInput:false`）全绿；`live-contract` 是抓这类目录漂移的护栏，红了先查基线 `driftLog`，再决定是否随平台刷新。

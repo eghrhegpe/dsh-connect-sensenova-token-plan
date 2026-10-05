@@ -33,7 +33,7 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 
 ### 环境隔离（历史注记）
 
-2026-09-27 本插件曾作为**桌面端必需启动项**（`dsh.profile.bundles`），因往共享凭据库写入宿主不认识的 `kind: throttle` 记录，把桌面端直接炸到 startup failed（爆炸半径是整机插件全卡死）。该问题已修复——节流迁到插件自己的状态文件 `throttle-store.js`（原子写、0600），凭据服务只认 `grant`/`api-key` 两种 kind（见 [PITFALLS.md](./PITFALLS.md) §6）。**2026-09-29 双端实测：web 与桌面端均可正常挂载运行，不再有任何 profile 限制。**
+2026-09-27 本插件曾作为**桌面端必需启动项**（`dsh.profile.bundles`），因往共享凭据库写入宿主不认识的 `kind: throttle` 记录，把桌面端直接炸到 startup failed（爆炸半径是整机插件全卡死）。该问题已修复——节流迁到插件自己的状态文件 `throttle-store.ts`（原子写、0600），凭据服务只认 `grant`/`api-key` 两种 kind（见 [PITFALLS.md](./PITFALLS.md) §6）。**2026-09-29 双端实测：web 与桌面端均可正常挂载运行，不再有任何 profile 限制。**
 
 ---
 
@@ -69,7 +69,7 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 
 端点类字段仅在企业镜像 / 预发环境指向别的主机时才需要动；全部不配即等于平台默认值。任意端点覆盖若不是合法的 http(s) 绝对地址，插件在**挂载时**就报 `config_error`（面板顶部显示），而不是等到第一次轮询才变成莫名其妙的网络错误。
 
-> 上表主机层字段的默认值（含 `allowedHosts` 的 `localhost`/`127.0.0.1`/`::1`）统一定义在 `index.ts` 的 `CONFIG_DEFAULTS`，并由 `test/config.test.mjs` 与 `cordis.patch.yml` 双向钉住；auth 类字段留空即表示"使用平台默认"，其生效值定义在 `sensenova-auth.js` 的 `AUTH_DEFAULTS`，不在此重复。
+> 上表主机层字段的默认值（含 `allowedHosts` 的 `localhost`/`127.0.0.1`/`::1`）统一定义在 `index.ts` 的 `CONFIG_DEFAULTS`，并由 `test/config.test.mjs` 与 `cordis.patch.yml` 双向钉住；auth 类字段留空即表示"使用平台默认"，其生效值定义在 `sensenova-auth.ts` 的 `AUTH_DEFAULTS`，不在此重复。
 
 ---
 

@@ -186,7 +186,7 @@
   `thinking` **字符串形态**（`"enabled"`/`"disabled"`/`true`/`false`）全线 400——文档当字符串写是错的（object 形态 `{"type":...}` 才有效，见第 21 条）；
   `reasoning_effort:"max"` 在 flash-lite / deepseek-v4-flash 上实测 400（glm-5.2 上有效）——平台报错原文 `field ReasoningEffort invalid, should be one of: low, medium, high, xhigh, none`；
   目录 `supported_sampling_parameters` 只声明 `["temperature","stop"]`，文档表格里列的 `top_p`/`frequency_penalty`/`presence_penalty`/`seed`/`n` 一个都不在声明里（思考模式下 temperature 等本就不生效，送不送得动未验证，别假设支持）。
-  另外文档写 `max_tokens` 默认 65535，目录实际 `max_output_length` 是 65536；窗口字段是 `context_length` 不是 `context_window`（曾让 `contextWindowOf` 拿不到真实窗口、全体回退 128k，见 `llm-models.js` 与 `test/provider.test.mjs`）。
+  另外文档写 `max_tokens` 默认 65535，目录实际 `max_output_length` 是 65536；窗口字段是 `context_length` 不是 `context_window`（曾让 `contextWindowOf` 拿不到真实窗口、全体回退 128k，见 `llm-models.ts` 与 `test/provider.test.mjs`）。
 - **修法**：与平台行为有关的契约一律以**实测**为准（见 [SENSENOVA-API.md](./SENSENOVA-API.md) §7），官方文档只当线索、不当依据——且各模型页面互相矛盾（GLM 页说 `thinking.type:disabled` 会失败、实测可用；DeepSeek 页与 flash-lite 页都列 `max`、实测两处 400）。实测要点：默认即思考开（flash-lite `message.reasoning`、deepseek/glm/kimi 是 `reasoning_content`，每请求多约 26 个 prompt token、慢约 2.9 倍）；`reasoning_effort:"none"` 关思考（思考字段消失、`reasoning_tokens=0`）；`role:"developer"` 是 400（`supportsDeveloperRole:false` 的依据）；流式 `delta` 含 `content`/`reasoning`/`role`。
 
 ---

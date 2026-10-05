@@ -118,7 +118,7 @@
 出图工具开关的去密状态：`drawEnabled`（**生效值**）、`drawSource`（`panel` 面板保存过 / `config` 沿用配置默认）。设计见 [PROVIDER-HOT-RELOAD.md](./PROVIDER-HOT-RELOAD.md) §7。
 
 ### `POST /api/dsh-connect-sensenova-token-plan/draw`
-`{ "enabled": true|false }` —— 把出图开关写入插件私有状态文件（`$DSH_HOME/state/<profile>/<plugin>/draw.json`，按 profile 分段、见 [PITFALLS.md](./PITFALLS.md) §23），与 `/provider` 走的是同一套「存私有状态」机制，但**不触发任何即时发布**——agent 工具的实际注册/缺席发生在下一个 Host 启动（或重新安装）时，由 `lifecycle.js` 的 `startSideEffects` 重读生效值。优先级：面板保存的值 > `cordis.patch.yml` 的 `drawEnabled`。非布尔 `enabled` 返回 400；跨域返回 403。
+`{ "enabled": true|false }` —— 把出图开关写入插件私有状态文件（`$DSH_HOME/state/<profile>/<plugin>/draw.json`，按 profile 分段、见 [PITFALLS.md](./PITFALLS.md) §23），与 `/provider` 走的是同一套「存私有状态」机制，但**不触发任何即时发布**——agent 工具的实际注册/缺席发生在下一个 Host 启动（或重新安装）时，由 `lifecycle.ts` 的 `startSideEffects` 重读生效值。优先级：面板保存的值 > `cordis.patch.yml` 的 `drawEnabled`。非布尔 `enabled` 返回 400；跨域返回 403。
 
 `{ "drawModelId": "sensenova-u1.5-lite" }`（或 `null` = 自动选择）—— 把出图模型偏好写入同一个 `draw.json`。生效时机与开关相同：`startSideEffects` 在下一次挂载时用它覆盖 `cordis.patch.yml` 的 `drawModelId`（优先级：面板 > 配置；面板清除后回落配置，配置也为空则自动取目录第一个出图模型）。非空字符串之外的非 null 值返回 400；跨域返回 403。`{ "forget": true }` 同时清除开关与模型偏好的面板保存值。
 
