@@ -620,6 +620,66 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
   note(`ADR 引用闭合：src/ + test/ + docs/ 引用的 ${seen.size} 个编号（${[...seen.keys()].sort().join(", ") || "无"}）全部在账本中存在`);
 }
 
+// 14) 现行文档里源码引用的扩展名必须与 src/ 一致（.js → .ts）
+// 事故教训（2026-10-05）：源码 2026-09-30 全量 .ts 化后，现行手册里仍留着
+// `llm-models.js` / `codes.js` / `throttle-store.js` 这类**按名找不到**的引用——
+// src/ 下是 .ts，lib/ 下是带内容 hash 的 chunk（`llm-models-B1R59IKU.js`），
+// 裸 `llm-models.js` 在磁盘上根本不存在，而门禁 1-13 只查链接/条目数/契约，
+// 不查反引号裸引用，于是全绿放过了整整一类。本次共修 17 处。
+// 豁免两件事：
+//   ① 历史/研究/路线图档与版本账（IMPROVEMENTS / TOKEN-STORE-SPLIT /
+//      ROADMAP / CHANGELOG）的当时名是准确历史，改掉反而失真
+//      （如 `index.js` 1187→778 行的叙述、0.4.2「新增 `routes.js`」）；
+//      本门禁守的是**读者会按名去找文件**的现行操作手册，不是版本账。
+//   ② 构建产物与测试基建（`lib/index.js`、裸 `index.js`、`client.js`、
+//      `client-surface.js`、`panel-decision.js`、`panel-render.js`）是真实
+//      存在的 .js，不受 TS 化影响。
+// 商汤官方文档容器（docs/sensenova-api-reference/）不是本插件文档，跳过。
+// 判定只问「src/ 下有没有同名 .ts」——因此 `client.js`（src 下无 client.ts）
+// 这类天然不会误报，`hosts` / `attempts` 之类英文词也不是 `X.js` 形态。
+{
+  const tsBase = new Set();
+  const walk = (dir) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) { if (name !== "node_modules") walk(p); }
+      else if (name.endsWith(".ts")) tsBase.add(name.slice(0, -3));
+    }
+  };
+  walk(join(ROOT, "src"));
+  const EXEMPT_FILES = new Set([
+    "docs/IMPROVEMENTS.md",
+    "docs/TOKEN-STORE-SPLIT.md",
+    "docs/ROADMAP.md",
+    "CHANGELOG.md"
+  ]);
+  const KNOWN_ARTIFACTS = new Set([
+    "index.js",
+    "client.js",
+    "client-surface.js",
+    "panel-decision.js",
+    "panel-render.js"
+  ]);
+  const rel = (p) => p.slice(ROOT.length + 1).split("\\").join("/");
+  const hits = [];
+  for (const f of mdFiles) {
+    const r = rel(f);
+    if (EXEMPT_FILES.has(r) || r.startsWith("docs/sensenova-api-reference/")) continue;
+    const lines = readFileSync(f, "utf8").split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      for (const m of lines[i].matchAll(/`([A-Za-z0-9_./-]+\.js)`/g)) {
+        const ref = m[1];
+        if (ref.includes("lib/") || KNOWN_ARTIFACTS.has(ref)) continue;
+        const base = ref.split("/").pop().slice(0, -3);
+        if (tsBase.has(base)) hits.push(`${r}:${i + 1} \`${ref}\` 应写 \`${base}.ts\``);
+      }
+    }
+  }
+  for (const h of hits) bad(`现行文档引用了已 TS 化的源码扩展名：${h}——源码 2026-09-30 起全量 .ts，按名找不到 .js`);
+  note(`现行文档源码引用扩展名 ${hits.length} 处漂移（.js 应为 .ts）`);
+}
+
 if (fails.length) {
   console.error(`\n❌ docs.test.mjs 失败 ${fails.length} 项：`);
   for (const f of fails) console.error(`  - ${f}`);
