@@ -391,11 +391,11 @@ export function isKnownStateVersion(version: number | null, known: readonly numb
  * `(reason) => degrade(reason, null, logger, null)`，这行转发留在 host 侧，
  * 守卫逻辑与原子写收编到此。
  *
- * @param options.file - 完整文件路径（如 `join(stateDir, "provider.json")`）。
- * @param options.versions - 本 build 认识的版本号集合。
- * @param options.label - 拒绝理由前缀（"provider" / "draw" / ...）。
- * @param options.onRefuse - 拒绝时回调（降级信号）；默认 no-op。
- * @param options.now - 时钟源，透传给 `temporaryOf`，测试可注入。
+ * @param {string} options.file - 完整文件路径（如 `join(stateDir, "provider.json")`）。
+ * @param {readonly number[]} options.versions - 本 build 认识的版本号集合。
+ * @param {string} options.label - 拒绝理由前缀（"provider" / "draw" / ...）。
+ * @param {(reason: string) => void} [options.onRefuse] - 拒绝时回调（降级信号）；默认 no-op。
+ * @param {() => number} [options.now] - 时钟源，透传给 `temporaryOf`，测试可注入。
  * @returns 一个 `writePayload(body) => Promise<string|null>`：拒绝返回 reason，
  *   落盘成功返回 `null`——与原四份签名一致。
  */
