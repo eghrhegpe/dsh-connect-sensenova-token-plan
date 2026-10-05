@@ -85,6 +85,30 @@ webSearchRestore: { current: null },
    - 直接复用另一路的结果
    - 报「已有登录在进行」
 
+---
+
+## 状态：两条都已修（2026-10-05）
+
+P0-1 走方案 **A**（`65ab2dc`）：`registerWebSearchProvider` 在接管后、
+装还原闭包前加 `publisher.isDisposed()` 检查，已 dispose 则立即归还且不
+装闭包——全局 `searchProviderId` 不再被永久顶掉。补 `raccoon-web.test.mjs`
+disposed 竞态场景（2 check）锁死。
+
+P0-2 用独立 `saveInflight` 锁 + 双向交叉等待（`6bc87f0`）：`saveAccount`
+不再绕过 `inflight` 互斥，双提交只发一次密码登录。并发去重由
+`store.test.mjs` 3b（2 check）锁死；`getToken` 与 `saveAccount` 的跨 race
+是**不同凭据**（refresh vs 密码登录），不强行合并。
+
+产品决定「并发合并时面板显示什么」：采用文档里的选项1（第一个提交占槽，
+其余 await，面板显示一次「登录中…」，用户看不出并发）——已随 P0-2 的锁
+实现落地，未单独提问是因为锁的语义天然就是「第一个赢、其余等」，与
+选项1 一致。若你想要别的行为（复用结果 / 报错提示），告诉我，改锁的
+finally 分支即可。
+
+store-baseline 17 场景 48 帧零漂移（顺序行为不变）；并发场景不进冻结基线
+（按 AGENTS.md 纪律，那是更大的事，故放在 `store.test.mjs` 的 hand-written
+checks 而非冻结 JSON）。
+
 ## 我**没有**动的东西，及原因
 
 | 项| 为什么没动 |
