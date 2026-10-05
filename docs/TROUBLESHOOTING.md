@@ -139,7 +139,7 @@ provider 注册与撤回的热生效设计见 [PROVIDER-HOT-RELOAD.md](./PROVIDE
 
 ## 还有别的问题？
 
-- 想知道**为什么**会有某个设计（不只是怎么办）：[PITFALLS.md](./PITFALLS.md)（37 条
+- 想知道**为什么**会有某个设计（不只是怎么办）：[PITFALLS.md](./PITFALLS.md)（38 条
   现象→根因→修法）、[ARCHITECTURE.md](./ARCHITECTURE.md)（结构与数据流）。
 - 想改配置字段：[SETUP.md](./SETUP.md) §3；想对接协议：[AUTH.md](./AUTH.md)、
   [API.md](./API.md)。

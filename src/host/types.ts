@@ -225,8 +225,21 @@ export interface Wiring {
   resolveRaccoonToken: () => Promise<string>;
   /** The Raccoon `web_search` provider switch; may be absent on some Hosts. */
   webSearchStore: ReturnType<typeof import("./raccoon-web-store.ts").createFileRaccoonWebStore> | null;
-  /** Restore the displaced `ctx.web` search selection; filled at mount. */
-  webSearchRestore?: () => void;
+  /** Hand the displaced `ctx.web` search selection back. A SLOT, always present
+   *  in `apply()`'s literal — `current === null` means "we hold no takeover".
+   *
+   *  It was `webSearchRestore?: () => void` until 2026-10-05, i.e. the
+   *  *presence of an optional property* was the state machine: `apply()` could
+   *  not spell the field, `registerWebSearchProvider` added it, `reconcile`
+   *  `delete`d it, and `exactOptionalPropertyTypes` is why it had to be
+   *  `delete` rather than `= undefined`. Two costs, both real: the wiring
+   *  literal in `index.ts` was NOT a complete contract (a reader could not tell
+   *  `webSearchRestore` from the 22 fields that are simply absent), and every
+   *  reader had to re-derive "absent = not armed" from the delete/re-add dance.
+   *  `visionPublish` above is the same kind of thing — filled in later, no-op
+   *  until then — and was already shaped as a slot. This is now that shape, so
+   *  there is exactly one dialect for "filled in after assembly". */
+  webSearchRestore: { current: (() => void) | null };
   /** Re-register (or drop) the web-search provider to the current switch value;
    *  what the panel's `webSearch` route calls so a flip is applied in-session. */
   reconcileWebSearch?: () => Promise<void>;

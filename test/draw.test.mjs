@@ -497,6 +497,10 @@ async function rejects(fn) {
       const wiring = {
         settings: { writeImageModelIds: true, imageModelIds: [] },
         visionPublish,
+        // Required slot since 2026-10-05 (was `webSearchRestore?`):
+        // startSideEffects reaches reconcileWebSearch, so a wiring that omits
+        // it now throws instead of quietly reading "undefined = not armed".
+        webSearchRestore: { current: null },
         publisher: {
           publish: async () => ({ ok: true }),
           dispose: () => {},

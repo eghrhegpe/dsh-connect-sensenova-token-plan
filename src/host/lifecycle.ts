@@ -576,7 +576,10 @@ export function applyWebSearchSelection(web: WebSearchRuntime, state: WebSearchS
   }
 }
 
-/** The wiring subset {@link registerWebSearchProvider} reads — its own `Pick`. */
+/** The wiring subset {@link registerWebSearchProvider} reads and writes — its
+ *  own `Pick`. `webSearchRestore` is in the `Pick` because this function
+ *  ARMS it (`current = …`), not only because it reads it: a `Pick` that
+ *  listed only what it consumed would be a lie about the mutation. */
 export type WebSearchToolWiring = Pick<Wiring,
   | "settings"
   | "configError"
@@ -614,7 +617,7 @@ export async function registerWebSearchProvider(ctx: { get?: (n: string) => unkn
   applyWebSearchSelection(web, selection, true);
   // Hand the selection back on teardown (idempotent: the second call sees
   // `owner === false` and does nothing). A fresh boot re-applies it.
-  wiring.webSearchRestore = () => applyWebSearchSelection(web, selection, false);
+  wiring.webSearchRestore.current = () => applyWebSearchSelection(web, selection, false);
 }
 
 /**
@@ -631,18 +634,25 @@ export async function registerWebSearchProvider(ctx: { get?: (n: string) => unkn
  * @returns {Promise<void>}
  */
 export async function reconcileWebSearch(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: WebSearchToolWiring) {
-  if (wiring.webSearchRestore !== undefined) {
-    try { wiring.webSearchRestore(); } catch { /* a frozen runtime must not sink the reconcile */ }
-    // `delete` rather than an explicit `undefined`: the field is optional, and
-    // `exactOptionalPropertyTypes` forbids assigning `undefined` to it.
-    delete wiring.webSearchRestore;
+  // Empty the slot BEFORE re-arming, keeping the old closure in a local. Not
+  // a bug fix — the `delete` this replaces was correct: pass 1 deleted the
+  // field and `registerWebSearchProvider` re-armed it, so pass 2 read the new
+  // closure, not `undefined`. The reason to change it is that the state is now
+  // a slot (see `Wiring`), and "is a takeover held?" reads off the slot rather
+  // than off whether a property happens to be present on the object. The
+  // hand-back stays unconditional-when-armed either way: a flip to OFF leaves
+  // the slot `null` because `register` bails before re-arming.
+  const held = wiring.webSearchRestore.current;
+  wiring.webSearchRestore.current = null;
+  if (held !== null) {
+    try { held(); } catch { /* a frozen runtime must not sink the reconcile */ }
   }
   await registerWebSearchProvider(ctx, wiring);
 }
 
 export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher" | "webSearchRestore">, offs: Array<() => void>) {
   try {
-    wiring.webSearchRestore?.();
+    wiring.webSearchRestore.current?.();
   } catch {
     // The web runtime may already be gone during shutdown.
   }

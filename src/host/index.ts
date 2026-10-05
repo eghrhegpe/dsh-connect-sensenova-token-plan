@@ -320,9 +320,15 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     raccoonPublisher,
     raccoonCache,
     // Web-search absorption (ROADMAP §6.1.7): reuses the Raccoon credential
-    // chain and its own opt-in switch; `webSearchRestore` is filled at mount.
+    // chain and its own opt-in switch. `webSearchRestore` is a SLOT, spelled
+    // here with `current: null` = "no takeover held", so this literal is a
+    // complete contract — `registerWebSearchProvider` fills the slot at mount
+    // and `reconcile` empties it again. It used to be an optional property
+    // absent from this literal, which is why `types.ts` had to spell the
+    // absence as the state (`webSearchRestore?: () => void`).
     resolveRaccoonToken,
     webSearchStore: raccoonWebStore,
+    webSearchRestore: { current: null },
     // What the panel's `webSearch` route calls so a flip applies in-session
     // (drop the taken-over selection, then re-register against the new value).
     reconcileWebSearch: () => reconcileWebSearch(ctx, wiring)

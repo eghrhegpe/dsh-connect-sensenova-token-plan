@@ -83,7 +83,7 @@
 - [docs/API.md](docs/API.md) — 路由与控制台端点
 - [docs/TESTING.md](docs/TESTING.md) — 测试体系
 - [docs/SENSENOVA-API.md](docs/SENSENOVA-API.md) — 商汤接口全集（实测）
-- [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（37 条）
+- [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（38 条）
 - [CHANGELOG.md](CHANGELOG.md) — 版本变化
 
 ## 运维诊断：这台机器现在挂没挂 provider？
