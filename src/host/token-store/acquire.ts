@@ -114,11 +114,18 @@ export async function acquire(wiring: StoreContextWiring, state: TokenStoreState
     // Otherwise record the refusal so the next poll does not walk into the
     // lock again. The platform's own error is what the panel shows, since it
     // carries the reason and any stated window; the throttle only governs
-    // when the next attempt may happen.
-    const held = await writeThrottle(error, state.throttle?.attempt);
+    // when the next attempt may happen — so the record is kept for its side
+    // effect and its return value is deliberately not read.
+    //
+    // This used to read `throw held.parked ? error : throttleError(held, error)`,
+    // which is ONE throw wearing a two-branch hat: `throttleError` returns its
+    // `cause` unchanged whenever a cause is passed, so both arms handed back the
+    // identical object. The ternary promised a distinction the code never made.
+    //
     // `error` was thrown by `loginFromAccount` (a pluginError); the throttle
     // contract takes an Error, so the assertion is the semantic the code
     // already relies on.
-    throw held.parked ? error : throttleError(held, error as Error);
+    await writeThrottle(error, state.throttle?.attempt);
+    throw error as Error;
   }
 }
