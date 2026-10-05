@@ -427,14 +427,16 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 
 **已落地：**
 
-- **源码布局**：`src/client/*.ts` 十五个文件，按功能拆——`index.ts`（factory +
+- **源码布局**：`src/client/*.ts` **25 个文件**（2026-09-29 拆分时是 15 个，此后小浣熊 tab 与共享组件又拆出一批），按功能拆——`index.ts`（factory +
   三世界尾巴）、`runtime.ts`（React 缝隙：factory 入口 `provideClientReact`，其余
   模块经转发的 `h`/hooks 取用，调用点与拆分前的闭包形式逐字一致）、`const.ts`
   （路由常量）、`i18n.ts`（zh/en 双语字典，`en: typeof zh` 编译期钉键集齐平）、
   `styles.ts`、`format.ts`、`models.ts`（allow-list 代数）、`snapshot.ts`（决策层
   + 三张码表）、`cards.ts`、`account-form.ts`、`provider-controls.ts`、
-  `model-picker.ts`、`api-key-form.ts`、`panel-page.ts`、`apply.ts`。行为逐字转录，
-  17 个离线套件 + e2e 全绿背书。
+  `model-picker.ts`、`api-key-form.ts`、`panel-page.ts`、`apply.ts`，以及此后新增的
+  小浣熊 tab（`raccoon-tab.ts` / `raccoon-card.ts` / `raccoon-roster.ts`）、
+  `qr.ts`、`toggle-switch.ts`、`use-snapshot-polling.ts` / `use-polling-interval.ts` 等。
+  行为逐字转录，17 个离线套件 + e2e 全绿背书。
 - **构建**：`tsdown.config.mjs` → 根 `client.js` 产物，`npm run build:client`。三个
   关键取值：`format: "iife"`（顶层零 import/export，三世界尾巴活在函数作用域里；
   esm 构建会被 rolldown 的 CJS 语法探测包壳改写 ABI）；`outputOptions.entryFileNames:
@@ -451,7 +453,7 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
   与源码放进**同一个 commit**；只提交源码不提交产物 = build-gate 红。devDeps 安装需
   `--legacy-peer-deps`（peer 是 Host 运行时包，registry 上只发预发布版且整套互相以 peer 咬合；本仓刻意无 lockfile。**2026-10-01 补正**：见 [PITFALLS.md](./PITFALLS.md) §30——正因如此，CI 的 peer 来源必须是整棵 CLI 运行时树）。
 - **【当晚已被取代】「Host 半边不动」**：随后按 workbuddy 规范完成全仓归一——Host 源码迁
-  `src/host/*.ts`（27 个模块），tsdown 多入口构建 `lib/`（ESM bundle + 切分 chunk）。当晚的方案是
+  `src/host/*.ts`（2026-09-29 时点 27 个模块；现已增长，仅 `src/host/` 一层即 55 个模块，再加 `routes/`、`token-store/` 子目录更多），tsdown 多入口构建 `lib/`（ESM bundle + 切分 chunk）。当晚的方案是
   `lib/` 与根 `client.js` 一并 `.gitignore`、**产物彻底不入库**，据此「产物与源码同 commit」纪律一度作废。
   **该方案已于 2026-10-03 被推翻**：DSH 市场 `github:` 安装源走 pnpm git-dep、不跑 prepack，lib 不入库则 GitHub 直装坏——
   现改为 lib/ 与 client.js **版本化入库**，「产物与源码同 commit」纪律恢复。裁定见 [ADR.md](./ADR.md) ADR-005；

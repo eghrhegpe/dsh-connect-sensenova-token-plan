@@ -35,8 +35,8 @@ npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（�
 | `test/store.test.mjs` | 令牌存储与续期、并发轮询只触发一次刷新、401 拒绝记忆、节流状态跨进程、env 账号识别、内存态 ephemeral、**真实凭据服务解析器校验写入记录**（非 `grant` kind 即红） |
 | `test/store-baseline.test.mjs` | **token-store 全行为冻结基线**：17 个场景、48 帧，把凭据服务调用序列（read/modify/delete/resolve/set/unset）、节流存储读写、grant/ref 落盘、错误码与完整 `state()` 逐帧冻结在 `test/baselines/token-store-behavior.json`；拆分/改动 token-store 前后必须零漂移（见 §5） |
 | `test/routes.test.mjs` | 把面板的判断逻辑**原样跑在真实接口响应上**，专门守住「无凭据服务时表单仍可达」这条路径；同源校验、body 上限、跨域拒绝、**一个请求只答一次**；第三步的 api-key 路由（credentials/memory/env 三来源、不回显、forget 不动环境变量）、快照 `llm` 块与 provider 注册/签名去抖/无 llm 降级（假 adapter 工厂经 apply 第三参注入，不碰真 peer） |
-| `test/panel.test.mjs` | 面板「显示什么」的决策，**直接从 `client.js` 抠出决策块求值**（见 `panel-decision.js`），而不是手写副本——逻辑一变测试自动跟；**中英文字典键集一致**；控制台故障不伪装成登录表单；**每个字典键都有消费者**（字面量可达的范围，`entry.label` 曾两边各留一份却零调用）；**卡片名与面板内标题同源**（`locale/<lang>.json` 的 `meta.title` ≡ 字典 `panel.title`，两个名字曾在同一屏并存）；**轮询节奏来自 Host 而非字面量，且两个 tab 共用同一个循环**（这条锚点随循环抽到 `use-polling-interval.ts` 一同迁移，退避不得低于一分钟） |
-| `test/render.test.mjs` | 面板「数字怎么上屏」的渲染，`panel-render.js` 从 `client-surface.js` 物化出的真实 `panel` 测试面取组件、以记录型 `h` 在 Node 求值：`used/limit` 写反、剩余量丢失、进度条色阶错档、除零 NaN 都会红；同一个循环驱动 `ModelRoster` 与 `RaccoonRoster`（行骨架共用 `model-row.ts`，见 PITFALLS §34）；小浣熊 tab 的**各个帧**由无 hook 的 `RaccoonCard` 挂载后逐帧钉住——余额折行、网关拆解、两个凭据时钟、过期告警、两种未注册措辞（PITFALLS §35）；**H 组用会真跑 effect 的微型 React + 可控 `document`/定时器驱动共用轮询循环 `use-polling-interval.ts`**——可见即轮询、隐藏即停（含"挂载时已隐藏"）、错误退避不低于一分钟且不加速慢节奏、`enabled:false` 不排程、0 ms 被钳到 1 ms |
+| `test/panel.test.mjs` | 面板「显示什么」的决策，**从 `client-surface.js` 物化出的真实 `panel` 测试面取决策函数**（见 `panel-decision.js`），而不是手写副本——逻辑一变测试自动跟；**中英文字典键集一致**；控制台故障不伪装成登录表单；**每个字典键都有消费者**（字面量可达的范围，`entry.label` 曾两边各留一份却零调用）；**卡片名与面板内标题同源**（`locale/<lang>.json` 的 `meta.title` ≡ 字典 `panel.title`，两个名字曾在同一屏并存）；**轮询节奏来自 Host 而非字面量，且两个 tab 共用同一个循环**（这条锚点随循环抽到 `use-polling-interval.ts` 一同迁移，退避不得低于一分钟） |
+| `test/render.test.mjs` | 面板「数字怎么上屏」的渲染，`panel-render.js` 从 `client-surface.js` 物化出的真实 `panel` 测试面取组件、以记录型 `h` 在 Node 求值：`used/limit` 写反、剩余量丢失、进度条色阶错档、除零 NaN 都会红；同一个循环驱动 `ModelRoster` 与 `RaccoonRoster`（行骨架共用 `model-row.ts`，见 PITFALLS §34）；小浣熊 tab 的**各个帧**由无 hook 的 `RaccoonCard` 挂载后逐帧钉住——余额折行、网关拆解、两个凭据时钟、过期告警、两种未注册措辞（PITFALLS §35）；**H 组用会真跑 effect 的微型 React + 可控 `document`/定时器驱动共用轮询循环 `use-polling-interval.ts`**——可见即轮询、隐藏即停（含"挂载时已隐藏"）、错误退避不低于一分钟且不加速慢节奏、**退役的 `enabled` 开关已删**（任何挂载都会轮询，传 `{enabled:false}` 也不能静音、照常按 cadence 排程）、0 ms 被钳到 1 ms |
 | `test/parsers.test.mjs` | **控制台响应解析层**（纯函数、无网络）：字符串数值与 epoch 归一（§11）、`reset_at="0"` 不得读成 1970、`checkShape` 双向漂移检测（§12 `shapeWarnings` 的来源）、trend 对 points **求和**而非取首个 |
 | `test/snapshot-aggregate.test.mjs` | **`buildSnapshotBody` 的三态契约**（peer-free，纯函数 + 桩 fetch）：「没有模型被限尽」与「这次轮询失败了」过去都塌成同一个空列表（`parsePools(null)` → `{pools:[]}`），下游因此把一次读失败显示成"额度充足"。这里钉住三态可分，并覆盖聚合器对 token/模型/池各来源的归一 |
 | `test/provider-rollback-guard.test.mjs` | **provider 发布的负向回滚护栏**（peer-free）：`publish-core.ts#swapRegistration` 的失败分支（PITFALLS §19）——旧 pair 已释放后新注册抛错，必须把上一个 pair 放回去，否则一次坏发布会拖垮正在服务的模型。`test/provider.test.mjs` 只驱动 happy path 与 `disposed` 门，这条失败分支只有本套件覆盖 |
@@ -67,9 +67,9 @@ npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（�
 
 ## 3. `panel-decision.js` / `client-surface.js` 为何特殊
 
-面板的渲染决策与渲染组件**不是手写副本、也不再是从源码抠字符串**：`client-surface.js` 把 `client.js` **作为模块加载**（装一个捕获型 `window.__ModuleLoader__`，给工厂喂一个记录型 React 替身），拿到工厂物化出的 `panel` 测试面（`interpretSnapshot` / `viewOf` / 字典 / 错误码表 / 样式令牌 / 组件），`panel-decision.js` 与 `panel-render.js` 再从这个真实对象上取用。若 `client.js` 的结构变了，检查跟着变——测的始终是浏览器真正跑的那段代码。
+面板的渲染决策与渲染组件**不是手写副本、也不再是从源码抠字符串**：`client-surface.js` 把 **client 源码入口 `src/client/index.ts`** 作为模块加载（Node 直接 import `.ts`、原生剥类型；装一个捕获型 `window.__ModuleLoader__`，给工厂喂一个记录型 React 替身），拿到工厂物化出的 `panel` 测试面（`interpretSnapshot` / `viewOf` / 字典 / 错误码表 / 样式令牌 / 组件），`panel-decision.js` 与 `panel-render.js` 再从这个真实对象上取用。若 client 侧的结构变了，检查跟着变——测的是浏览器真正跑的那段**源码**，不是打包产物。
 
-> 机制有两代：早期一版是手写 `panelDecision` 副本（会漂移，且漏了节流字段）；再一版是从 `client.js` 源码用平衡括号抠函数体、`new Function` 求值（锚点绑死源码排版）。现版把 `client.js` 物化成模块后两者都取代了。
+> 机制有两代：早期一版是手写 `panelDecision` 副本（会漂移，且漏了节流字段）；再一版是从 `client.js` 打包产物用平衡括号抠函数体、`new Function` 求值（锚点绑死源码排版）。现版改为直载 client 源码模块，两者都取代了。
 
 ---
 

@@ -47,7 +47,7 @@
 > fork 副本与统计口径不同会显著改变数值——原稿的 8119/7566/9642/18006 与复核值有
 > 出入，不作追溯。**只取"同量级单包"的定性结论，数字不作门禁。**
 
-本插件（≈1.7 万行 JS：根 25 文件 ≈8.6k + test 21 文件 ≈8.1k，不含 docs/upstream）
+本插件（≈4.2 万行 TS：`src/` 20,845 行 + `test/` 21,734 行，不含 docs/upstream）
 与同族（5.9k–21.8k 行）同量级。**"把面板做大了"不是缺陷，是这类 connect 插件的
 常态**。锐评里"积分面板被过度设计 3 倍"的潜台词——"应该更小"——在 DSH 生态里
 不成立：生态的同类**全部**是全家桶单包。
@@ -308,12 +308,14 @@ no-op 兼容层，**不删**——老 peer 仍需要它）。**不删补丁**是
 ### 4.2 契约基线 → 加 CI live-contract job（best-effort，同 e2e 纪律）
 
 - **现状**：`test/live-contract.mjs`（手动 `npm run test:live:contract`）+
-  `test/live-jwks.test.mjs`（手动 `npm run test:live`）都**不进** `npm test`，
-  也没进 `CI`。`.github/workflows/ci.yml` 只有 `offline`（硬门禁）+ `e2e`
-  （best-effort）两档。→ **平台方言漂移只能靠人工手动跑才看得见**（ROADMAP
+  `test/live-jwks.test.mjs`（手动 `npm run test:live`）都**不进** `npm test`。
+  当时 `.github/workflows/ci.yml` 只有 `offline`（硬门禁）+ `e2e`
+  （best-effort）两档（**现已扩到 4 个 job**：offline 硬 / e2e 硬（2026-10-02 起去掉
+  `continue-on-error`）/ build-freshness 硬 / live-contract best-effort）。
+  → **平台方言漂移只能靠人工手动跑才看得见**（ROADMAP
   §2.2 自己也写了"修法走注释层，不静默改代码"，但没有自动触发点）。
-- **改进**：在 `ci.yml` 加第三档 `live-contract`（best-effort，`continue-on-error:
-  true`，同 e2e），跑 `node test/live-contract.mjs`。需要一个平台凭据（API key）
+- **改进（已落地）**：`ci.yml` 已加第三档 `live-contract`（best-effort，`continue-on-error:
+  true`，同 e2e 最初形态），跑 `node test/live-contract.mjs`。需要一个平台凭据（API key）
   来源：CI secret `SENSENOVA_API_KEY`（owner 注入，不进代码）。无凭据时 job
   SKIP（与 e2e "没有 dsh CLI 就 SKIP" 同形）。
 - **收益**：平台改 `reasoning_effort` 取值 / 400 语义 / 目录字段时，**漂移当天
@@ -700,7 +702,7 @@ strictNullChecks 翻转。
 
 | 优先级 | 借鉴项 | 对应现状 | 门禁 |
 |---|---|---|---|
-| **P0** | 拆 `../src/host/routes.ts` 为 8 个资源路由 + facade（先冻结 `routes.test.mjs` 再搬） | **✅ 已落地（2026-10-02）**——`routes/` 8 模块 + facade，`routes`/`wiring`/`config`/`raccoon` 拆分前后零漂移 | `routes` + `wiring` + `e2e-gate` |
+| **P0** | 拆 `../src/host/routes.ts` 为 7 个资源路由 + `routes/http.ts` 共享原语 + facade（先冻结 `routes.test.mjs` 再搬） | **✅ 已落地（2026-10-02）**——`routes/` 8 个文件（7 资源 + http 共享原语）+ facade，`routes`/`wiring`/`config`/`raccoon` 拆分前后零漂移 | `routes` + `wiring` + `e2e-gate` |
 | **P0** | 真机探针钉 SenseNova 的 `max_tokens` 平台上限（验证是否也吃 32768 兜底） | **✅ 已落地（2026-10-02）**——live-contract 新增 §2c 探针；harness 兜底坐实（未声明强制 32768），flash-lite 硬上限 65536 / v4-flash、glm-5.2 接受 131072；descriptor 改声明目录权威值 | `live-contract`（best-effort）+ `contract` + `provider` + `typecheck` |
 | **P1** | 建 `docs/ADR.md` 账本 + docs.test 的 `ARCHAEOLOGY` 检查，把 §5 内联修订迁出正文 | **✅ 已落地（2026-10-02）**——ADR-001~004 入账本，§5 内联修订迁为现状表述，`docs.test` 新增考古纪律检查 | `docs` |
 | **P1** | 三份开关 store 收敛为共享 `switch-store` + `switch-precedence` | **✅ 已落地（2026-10-02）**——`switch-precedence.ts` 单一裁决处（resolveSwitchEnabled/Value/Source）替换 provider/models/draw 三处手抄方言；store 底层原语本就共享 `state-store`；`switch-precedence.test.mjs` 进 `npm test` + CI | `store` + `routes` + `switch-precedence` + `package` |

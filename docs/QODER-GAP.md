@@ -83,14 +83,14 @@
 
 | 纯模块（Node 可 import） | 承载的规则 | 谁来测 |
 |---|---|---|
-| `src/client/snapshot.ts` | `interpretSnapshot` / `viewOf` / `decidePanelView` / `errorOfStatus` / 表 `GUIDANCE_BY_CODE` 等——**面板"显示什么"的决策** | `panel.test.mjs`（经 `panel-decision.js` → `client-surface.js`） |
+| `src/client/snapshot.ts` | `interpretSnapshot` / `viewOf` / `errorOfStatus` / 表 `GUIDANCE_BY_CODE` 等——**面板"显示什么"的决策**（`decidePanelView` 是测试侧薄壳，在 `test/panel-decision.js:86`，由 `viewOf(data,error,identity)` 派生） | `panel.test.mjs`（经 `panel-decision.js` → `client-surface.js`） |
 | `src/client/models.ts` | `modelIsOn` / `allowListFor` / `toggleModelIn` / `setAllModelsIn` / `bulkModelsIn` / `raccoonModelIsOn` / `toggleRaccoonModelIn`——**模型是否启用、允许清单** | 同一 `panel` 测试面 |
 | `src/client/format.ts` | `clock` / `clockLong` / `when` / `count` / `format` / `tokenSize` / `statedCadenceMs`——**时间与数字呈现** | 同一 `panel` 测试面 |
 | `src/client/cards.ts` | `PoolCard` / `PoolExhaustionNotice` / `QuotaCard` / `TrendTable` / `SectionCard`——**hook-free 展示件**（与 qoder 的 `QuotaBlock` 同类） | `render.test.mjs`（经 `panel-render.js` 遍历 `h()` 树） |
 
 **唯一带 hooks 的是生命周期层**：`panel-page.ts` / `raccoon-tab.ts` /
 `account-form.ts` / `api-key-form.ts` / `model-picker.ts` /
-`provider-controls.ts` / `use-snapshot-polling.ts`——与 qoder 那 3 个容器同类。
+`provider-controls.ts` / `use-snapshot-polling.ts` / `use-polling-interval.ts`（两个 tab 共用的轮询循环，TESTING §2 的 H 组直测它）——与 qoder 那 3 个容器同类。
 
 **本插件没有的**：JSX（用 `h()` 换取 Node 直载源码的可测性，理由见 §2 与
 `src/client/runtime.ts` 头注）、jsdom 真渲染断言。

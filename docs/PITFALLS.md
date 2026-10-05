@@ -136,8 +136,7 @@
   走的不是插件自己的解析链。
 - **根因**：三个 peer（`@earendil-works/pi-ai`、`@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-llm-pi-ai`）由 `llm-adapter-core.ts` 导入（2026-10-02 §32 的「adapter 装配共用」收敛后落在那里，并声明在 `peerDependencies`），而 Node 的裸模块解析是从**该文件所在目录**逐级向上找
   `node_modules`。npm 装进 profile 的插件（`profiles/web/node_modules/<name>` 是**真实目录**）会向上走到
-  `profiles/node_modules`，那里有 Host 的 peer；开发期的 `~/.dsh/plugins/<name>` 是**符号链接/junction** 进
-  profile 的，Node 默认把链接解成 realpath，于是解析链从插件目录向上只剩 `~/.dsh/plugins`、`~/.dsh`、`~`，
+  `profiles/node_modules`，那里有 Host 的 peer；开发期的 `~/.dsh/plugins/<name>` 是**真实目录**，profile 侧的 `node_modules/<name>` 才是指向它的**符号链接/junction**（web 侧）或**安装副本**（desktop 侧，见 §22），Node 默认把链接解成 realpath，于是解析链从插件目录向上只剩 `~/.dsh/plugins`、`~/.dsh`、`~`，
   一路都没有这些包。
 - **修法**：三个 peer 进 `peerDependencies`（npm 安装时由 profile 侧提供）；开发检出要么用 plugin manager
   以真实目录安装，要么把这三个包链接进插件自己的 `node_modules`（与 `dsh-connect-qoder` 的开发检出做法一致，
@@ -258,7 +257,7 @@
 
 ## 25. 形式门禁全绿，不代表文档说了实话
 
-- **现象**：`docs.test.mjs` 十条检查全绿——127 条内部链接可解析、37 张表无跨文件重复、README 76 行远低于 140 上限、API 快照 14 键契约一致。同一时刻的 README：① **零处**提到当期头条特性（第三个 tab「小浣熊」）；② 三处仍写「侧边栏」，而代码早已迁到 Plugins 页，第 31 行「打开侧边栏「积分面板」」让用户**找不到入口**；③ 仍挂着「面板**只读**」的承诺，而它已经会注册推理通道、挂出图工具、写 DSH settings。
+- **现象**：`docs.test.mjs` 十条检查全绿——127 条内部链接可解析、37 张表无跨文件重复、README 远低于 140 行上限、API 快照 15 键契约一致。同一时刻的 README：① **零处**提到当期头条特性（第三个 tab「小浣熊」）；② 三处仍写「侧边栏」，而代码早已迁到 Plugins 页，第 31 行「打开侧边栏「积分面板」」让用户**找不到入口**；③ 仍挂着「面板**只读**」的承诺，而它已经会注册推理通道、挂出图工具、写 DSH settings。
 - **根因**：那套门禁验的全是**形式**——对一个题材「文档断言的事是否与代码一致」毫无感知。而 README 进了 npm 的 `files` 白名单，是用户安装完成后读到的**唯一**说明书；`cordis.patch.yml` 同样在包里，也藏着过期的「sidebar panel」注释。
 - **修法**（2026-10-01 已做，两道新检查进 `docs.test.mjs`）：
   - **检查 9：README 必须覆盖面板的每一个 tab。** 文案不写死，从两个真源派生——`panel-page.ts` 里 `activeTab` 的联合类型给出 tab id 集合，`i18n.ts` 的 `tab.<id>` 给出中文文案；README 少了任何一个就红。于是「加一个 tab 忘了告诉用户」和「改了 tab 名而不跟」都必然红。
@@ -312,11 +311,11 @@
 - **现象**：CI 每一次 push 都红，回溯至少一整天（`0.4.3` / `0.4.4` / `0.4.5` 三个 release 全在红着的门禁下发出）。日志永远是同一句，出现在 offline job（唯一的硬门禁）的**第二个**套件：`Error: cannot resolve the peer dependency @deepseek-ai/dsh-credentials. Looked in: <repo>/node_modules: no @deepseek-ai scope`。而本机 `npm test` 全绿。
 - **根因**（三层，缺一层都不至于此）：
   1. **依赖来源与 runner 不匹配**：`test/peer-roots.mjs` 的候选根全是「装了 DSH 的机器」形状（`$DSH_HOME` → 插件 `node_modules` → `~/.dsh/dsh-asar-unpacked` → 打包安装目录）。干净 runner 上只剩 `<repo>/node_modules`，而 `npm install --legacy-peer-deps` 对它**跳过 peer**——`--force` 也不行，实测 `dsh-credentials` / `cordis` 都没落地，只有未被声明为 peer 的 `dsh-credentials-local` 进去了。**门禁在这台机器上永远不可能绿。**
-  2. **`set -e` + 19 个套件写在同一个 step**：第 2 个套件一抛错，后面 17 个（含 `build-gate`）**一次都没跑过**。于是「门禁红」看起来像某个用例失败，实际是**门禁根本没在验证**。
+  2. **`set -e` + 19 个套件写在同一个 step**（2026-10-01 时点名册共 19 项，现已扩到 30 项）：第 2 个套件一抛错，后面 17 个（含 `build-gate`）**一次都没跑过**。于是「门禁红」看起来像某个用例失败，实际是**门禁根本没在验证**。
      **已修（2026-10-05）**——本条曾长期是「写进 lesson 却没修」的活例子：§30 的验收只处理了根因 1 与 3，而根因 2 恰恰是唯一一条**当时就在文档里写着、却没人动**的。修法见下方新增的第 4 条。
   3. **注释替这堆问题背了书**：workflow 写着这些套件「resolve peers from stubs」——`peer-roots.mjs` 里**没有任何 stub**，只有真实运行时查找；又写 peer「cannot resolve from any registry」——包其实都在 registry 上，只是**只发预发布版**，而声明范围 `>=0.1.5 <0.3` 在 npm 默认 semver 规则下**不匹配预发布**（`npm view '@deepseek-ai/dsh-credentials@>=0.1.5 <0.3'` 直接 E404）。两条加起来，读注释的人会得出「CI 本来就这样」——**这正是它红了一整天没人管的原因**。
 - **修法**（2026-10-01 已做）：offline job 增加 `npm install -g @deepseek-ai/dsh`（**全局**装：不读本仓 manifest，npm 才会去拉运行时自己的 peer 闭包），`test/peer-roots.mjs` 新增 `cliRuntimeModules()`（从 `test/e2e.mjs` 抽出并共享；`npm root -g` → `<prefix>/@deepseek-ai/dsh/node_modules`，marker `dsh-base`，每进程 memo 一次）作为**最后**一个候选根。本地优先级不变，开发机仍优先跑它真正运行的那份运行时。
-- **验证**（不 push 也能验，且必须这么做）：把开发机的运行时候选**全部屏蔽**——`USERPROFILE` / `LOCALAPPDATA` / `DSH_HOME` 指向空目录（`APPDATA` 不能动：Windows 上 npm 的全局前缀取自它）——此时 `findPeerRoot()` 必须落到 CLI 运行时树，然后跑**完整 19 套件 + build-gate**，全绿才算修好（本机实测：屏蔽后 19 套件 + build-gate 全绿，`e2e` 44/44）。反证也做过：该条件下只装 2–3 个 registry 包，`store.test.mjs` 会以 `Cannot find package '@deepseek-ai/dsh-atomic-write'` 崩——**DSH 整套包互相以 peerDependencies 咬合，装子集必留悬空 import**，这就是「必须整棵运行时」的判据。
+- **验证**（不 push 也能验，且必须这么做）：把开发机的运行时候选**全部屏蔽**——`USERPROFILE` / `LOCALAPPDATA` / `DSH_HOME` 指向空目录（`APPDATA` 不能动：Windows 上 npm 的全局前缀取自它）——此时 `findPeerRoot()` 必须落到 CLI 运行时树，然后跑**完整 19 套件 + build-gate**（2026-10-01 时点名册），全绿才算修好（本机实测：屏蔽后 19 套件 + build-gate 全绿，`e2e` 44/44）。反证也做过：该条件下只装 2–3 个 registry 包，`store.test.mjs` 会以 `Cannot find package '@deepseek-ai/dsh-atomic-write'` 崩——**DSH 整套包互相以 peerDependencies 咬合，装子集必留悬空 import**，这就是「必须整棵运行时」的判据。
 - **教训**：**门禁的依赖获取方式也是门禁的一部分**。判据不是「CI 红没红」，而是「**这个门禁在目标环境上有没有可能变绿**」——恒红的门禁与没有门禁等价，甚至更糟：它把真回归淹进噪音，还让 release 照发。三条纪律：① **clean runner 上必须能绿**；做不到就把来源写进 workflow，**不要**在测试里加 SKIP（把 peer 依赖 SKIP 掉 = 绿着什么都没测）；② **别把 N 个套件塞进一个 `set -e` step**，一次失败会吞掉其余套件的全部信号；③ **注释里的「为什么这样做」必须与实现同步**——本次三条根因里最难发现的恰恰是那条说谎的注释，它让每个人都以为这是已知且可接受的红色。
 - **修法 4（2026-10-05 补做，唯一一条当时没动的根因）**：把「跑完所有再汇总」做成 **runner**，而不是把套件摊平成更多 step。套件名册收进单一声源 `test/suites.mjs`（30 项，每项带 `kind` 与 `note`），`npm test` 与 `ci.yml` 的 offline job 调**同一个** `node test/run-all.mjs`（CI 传 `--skip=e2e-gate`，因为端到端在那边是独立 job）。退出码仍是「全部的与」，所以门禁该拦还是拦——变的只是它**报告**什么：以前「红」可能意味着后面 26 项根本没跑，现在每项都有 verdict，且汇总会点名「N 项跑过并通过」。
   - **为什么是 runner 而不是多 step**：step 只让 GitHub UI 逐项显示，仍要人翻日志找「哪些没跑」；runner 能自己汇总、能在本机用（`--only=` / `--skip=` 把 AGENTS.md 那条「按域裁剪」从口头约定变成一等公民），还让「**空选择必须红**」成为可能——一条没跑的门禁和一个通过的门禁长得一模一样。

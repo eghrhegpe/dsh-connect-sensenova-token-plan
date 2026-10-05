@@ -143,4 +143,4 @@ DSH 与插件都**没有内存环形日志（ring buffer）**；插件用**落�
 因此：
 
 - 排 **Host 侧**（登录 / 节流 / 注册）→ 看 `dsh web` 终端 stdout 或 `logs/sensenova-login-*.json`。
-- 排 **面板渲染决策** → 对照 `decidePanelView` / `test/panel.test.mjs` 那套决策函数，比翻控制台快。
+- 排 **面板渲染决策** → 对照 `test/panel-decision.js` 的 `decidePanelView` / `test/panel.test.mjs` 那套决策函数，比翻控制台快。
