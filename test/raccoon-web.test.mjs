@@ -142,6 +142,24 @@ try {
     await registerWebSearchProvider({ get: (n) => (n === "web" ? panelOffWeb : null) }, panelOffWiring);
     check("a panel-saved OFF beats the config default",
       panelOffWeb.registered.length === 0 && panelOffWiring.webSearchRestore.current === null);
+
+    // The dispose race (P0-1): `startSideEffects` fires this without awaiting,
+    // so `await resolveServiceWithRetry` can be pending when the host disposes
+    // the plugin. The teardown has then already run and read `current` before
+    // it is armed, so a late-arriving take-over must hand the selection straight
+    // back instead of arming an unreachable restore — otherwise the global
+    // `searchProviderId` stays hijacked by Raccoon after the plugin exits.
+    const disposedWeb = makeWeb("deepseek-official");
+    const disposedWiring = makeWiring({
+      settings: { webSearchEnabled: true },
+      webSearchStore: { enabled: async () => true },
+      publisher: { isDisposed: () => true }
+    });
+    await registerWebSearchProvider({ get: (n) => (n === "web" ? disposedWeb : null) }, disposedWiring);
+    check("disposed mid-flight: selection is NOT hijacked",
+      disposedWeb.searchProviderId === "deepseek-official", disposedWeb.searchProviderId);
+    check("disposed mid-flight: no unreachable restore is armed",
+      disposedWiring.webSearchRestore.current === null, typeof disposedWiring.webSearchRestore.current);
   }
 
   // --- 2b. the restore SLOT (reconcile / teardown) ------------------------

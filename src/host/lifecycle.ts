@@ -615,6 +615,19 @@ export async function registerWebSearchProvider(ctx: { get?: (n: string) => unkn
   const selection = webSearchSelection();
   web.registerSearchProvider(new RaccoonSearchProvider({ resolveToken: resolveRaccoonToken }));
   applyWebSearchSelection(web, selection, true);
+  // `startSideEffects` fires this without awaiting (index.ts:351), so the
+  // `await` above can be pending when the host disposes the plugin — and
+  // `teardown` reads `webSearchRestore.current` BEFORE the line below arms it,
+  // so it hands back nothing. If we are already gone here, hand the selection
+  // straight back instead of arming an unreachable teardown closure, or the
+  // global `searchProviderId` stays hijacked by Raccoon after the plugin exits
+  // (ARCHITECTURE §5's "raccoon's effect on the main registration is zero"
+  // violated). `applyWebSearchSelection(…, false)` is idempotent, so the
+  // normal teardown path below is untouched.
+  if (publisher.isDisposed()) {
+    applyWebSearchSelection(web, selection, false);
+    return;
+  }
   // Hand the selection back on teardown (idempotent: the second call sees
   // `owner === false` and does nothing). A fresh boot re-applies it.
   wiring.webSearchRestore.current = () => applyWebSearchSelection(web, selection, false);
