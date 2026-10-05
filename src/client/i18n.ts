@@ -21,10 +21,9 @@ export const zh = {
   // ACTIVE tab, a title repeating "积分面板" would misdescribe two of three tabs.
   //
   // It reads the SAME string as the Plugins-page card (`locale/<lang>.json`'s
-  // `meta.title`): both are on screen at once once the card is opened, and they
-  // used to say different things — 「商汤 Token Plan 接入全家桶」 on the card,
-  // 「商汤接入」 inside it. `test/panel.test.mjs` pins the pair, so change this
-  // and the locale file together.
+  // `meta.title`): both are on screen at once once the card is opened, and
+  // `test/panel.test.mjs` pins the pair, so change this and the locale file
+  // together.
   "panel.title": "商汤 Token Plan 接入全家桶",
   "panel.back": "返回会话",
   "panel.refresh": "刷新",
