@@ -573,9 +573,38 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
   };
   walk(join(ROOT, "src"));
   walk(join(ROOT, "test"));
-  const rel = (p) => p.replace(ROOT + "\\", "").replace(/\\/g, "/");
+  const rel = (p) => p.slice(ROOT.length + 1).split("\\").join("/");
+  // The DOCS are scanned too, not just code. Trigger (2026-10-05): the walk
+  // covered only src/ + test/, so the day ARCHITECTURE §5.6 gained its pointer
+  // to a new ledger entry, deleting that entry from ADR.md left this whole
+  // suite green — verified by actually deleting it. A ruling that only prose
+  // points at is exactly as untraceable as one only code points at; the
+  // original 2026-10-03 accident (a state-guard ruling referenced 27× from
+  // src/, absent from the ledger) is the same hole one level over.
+  //
+  // NOTE for whoever edits this comment: this file is itself scanned, and the
+  // scan is a bare regex over the whole text. Do NOT spell a ruling id out in
+  // prose here — a comment citing "ADR-0NN" registers as a reference and will
+  // fail the build if that entry is ever renamed or removed. Referring to
+  // rulings by section number only is the convention that keeps this comment
+  // honest. docs/ADR.md is excluded because a ledger legitimately cites its
+  // own superseded rulings.
+  const docFiles = [];
+  const walkDocs = (dir) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const q = join(dir, name);
+      if (statSync(q).isDirectory()) {
+        if (["node_modules", "upstream", ".git"].includes(name)) continue;
+        walkDocs(q);
+      } else if (name.endsWith(".md")) docFiles.push(q);
+    }
+  };
+  walkDocs(join(ROOT, "docs"));
+  for (const name of readdirSync(ROOT)) if (name.endsWith(".md")) docFiles.push(join(ROOT, name));
+  const scan = [...codeFiles, ...docFiles.filter((f) => rel(f) !== "docs/ADR.md")];
   const seen = new Map(); // id -> 首个引用处
-  for (const f of codeFiles) {
+  for (const f of scan) {
     const text = readFileSync(f, "utf8");
     for (const m of text.matchAll(/ADR-\d{3}/g)) {
       if (!seen.has(m[0])) seen.set(m[0], `${rel(f)}:${text.slice(0, m.index).split(/\r?\n/).length}`);
@@ -585,10 +614,10 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
   // 但 docs/ADR.md 不在 codeFiles 里（只 walk src/ 与 test/），故无需豁免。
   for (const [id, where] of [...seen.entries()].sort()) {
     if (!ledger.has(id)) {
-      bad(`代码引用了账本里没有的裁定 ${id}（首个引用 ${where}）——在 docs/ADR.md 补一条 "## ${id} …" 条目`);
+      bad(`引用了账本里没有的裁定 ${id}（首个引用 ${where}）——在 docs/ADR.md 补一条 "## ${id} …" 条目`);
     }
   }
-  note(`ADR 引用闭合：src/ 与 test/ 引用的 ${seen.size} 个编号（${[...seen.keys()].sort().join(", ") || "无"}）全部在账本中存在`);
+  note(`ADR 引用闭合：src/ + test/ + docs/ 引用的 ${seen.size} 个编号（${[...seen.keys()].sort().join(", ") || "无"}）全部在账本中存在`);
 }
 
 if (fails.length) {
