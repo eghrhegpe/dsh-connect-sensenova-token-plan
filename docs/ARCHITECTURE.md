@@ -39,44 +39,41 @@
 
 > `src/shared/wire.ts` 是两端共读的**线契约声明**（快照体 + 小浣熊 state），**纯 `interface`/`type`、零运行时值**：tsdown 在两端构建时都把它擦除，所以 client 产物照旧只依赖 `react`，host 产物不因此多带任何浏览器代码。它是 host 源图闭包（`test/package.test.mjs` §2）唯一声明例外——**只许放类型**：一旦放进运行时真值，就是第一批 host 逻辑进入浏览器产物，§5 的隔离就开始松动。客户端原先在 `src/client/wire.ts` 手写的镜像已退为它的再导出面；host 侧 `buildSnapshotBody` / `readRaccoonStatus` / `identifyVisionModel` 均以这里的类型为返回标注，`tsc`（本就同编两端）是第一道守门员，`docs.test.mjs` §5b 那套正则对账降为兜底。
 
-- `index.ts`：Host 入口——注册只读路由 `/api/dsh-connect-sensenova-token-plan/snapshot`（聚合控制台数据，401 自动续期重试一次）+ 账号配置路由 + 各 store 接线与 side-effect 编排。
-- `routes.ts`：**路由门面**（2026-10 拆分：先冻结行为再搬，`routes.test.mjs` + `wiring.test.mjs` 拆分前后零漂移）——`registerRoutes(ctx, wiring)` 只做装配与注册顺序，返回 7 个 `off()` 回执；同源闸、body 上限、`writeJson` 等共享原语在 `routes/http.ts`，snapshot / account / api-key / provider / models / draw / raccoon 七条路由各自一个模块（`routes/<resource>.ts`，每个模块声明自己的路径常量）。小浣熊的**读模型**已抽出为 `raccoon-status.ts`（原先它是 handler 内一个 190 行闭包），`routes/raccoon.ts` 只剩扫码 walk 与四个 mutation。
-- `lifecycle.ts`：Host 生命周期——`registerRoutes` / `startSideEffects`（catalog / raccoon seed、draw 工具注册、web-search restore、vision restore）/ `teardown`（dispose + release + off×7）。
-- `host-config.ts`：配置契约——`CONFIG_DEFAULTS`、`resolveSettings` / `resolveAuthOverrides`（含嵌套 `auth:` 块拒绝）、`isAdmitted` 同源闸、`hostName` 解析。
-- `codes.ts`：全部错误码与 IAM 平台原因码的唯一声明处。`sensenova-auth.ts` 产出、`token-store.ts` 判定是否 parked、`snapshot-aggregate.ts` 判定是否属于「拿不到令牌」（`isAuthFailure` 的消费方，2026-10 已从 `index.ts` 移出），三处都从这里取。
-- `token-store.ts`：凭据服务里的令牌与账号存取、按期续期、401 拒绝记忆。已按 §TOKEN-STORE-SPLIT.md 拆为薄 facade + 六块子模块（`token-store/{state,grant,throttle,account,renewal,acquire}.ts`）。
-- `throttle-store.ts`：登录节流状态，写在插件自己的状态文件（`$DSH_HOME/state/<plugin>/throttle.json`，原子写、0600），跨进程跨重启生效。
-- `sensenova-auth.ts`：OIDC 授权码流登录 + `refresh_token` 静默续期。
-- `sensenova-crypto.ts`：密码 JWE 封包（RSA-OAEP(SHA-1) + A256GCM）、PKCE 派生、JWT 解析、JWKS 缓存（由调用方持有、非模块级单例）。
-- `console-client.ts`：控制台与模型目录的网络请求，带短生命周期缓存与 single-flight。
-- `parsers.ts`：响应解析层——字符串数值 / epoch 归一、`checkShape` 漂移检测、`parseTrend` 对 points 求和、`identifyVisionModel` 视觉模型识别。
-- `trace.ts`：登录 trace 落盘到 `$DSH_HOME/logs/sensenova-login-<时间戳>-<结果>.json`（成功/失败，值级脱敏，仅留最近 20 个，权限 0600；排障入口见 [SETUP.md](./SETUP.md) §7）。
-- `util.ts`：共享工具函数（`str` / `num` / `obj` 等类型安全读取器）+ 两个共享原语：`retryBounded`（有界重试窗口，PITFALLS §31 的重试收敛）与 `optional`（可选 store 调用的守卫，PITFALLS §33）。
-- `types.ts`：Host 侧共享类型定义。
-- `state-store.ts`：状态文件公共原语——版本载荷 + 原子写 + 0600 + `createStateReadCache`（TTL 读缓存）+ `profileSegment` / `profileStateDir`（profile 分段，见 PITFALLS §23）。
-- `catalog-store.ts`：模型目录缓存（version 载荷、allow-list）；`provider-store.ts`：provider 开关（面板值 > 配置默认值）；`draw-store.ts`：出图开关与模型偏好；`api-key-store.ts`：推理 Key 存取（credentials → memory → env 优先级）。四个 store 同纪律：版本化、temp + rename 原子写、0600、损坏即忽略、按 profile 分段。
-- `switch-precedence.ts`：**开关优先级的唯一裁决处**（peer-free，2026-10-02 抽出）——`resolveSwitchEnabled` / `resolveSwitchValue` / `switchSource` 承载所有 opt-in 开关的「面板存过的值 vs 补丁声明的默认」判定并随答案返回来源（panel / config）。此前该规则手抄在 provider / models / draw 三条路由（两种长得像但语义不同的方言）；统一后任何一处再自己拼 `?? settings.x` 都会由 `test/switch-precedence.test.mjs` 钉红。Raccoon 开关无配置默认（无默认那一型落到 `off`），不经过此模块。
-- `provider-publish.ts`：直接注册的 provider 的发布状态机（peer-free）——`publishChain` 串行化、`disposed` 闸、单点 `registerPair` 与回滚路径（PITFALLS §18/§19）。
-- `snapshot-aggregate.ts`：快照路由的数据聚合（peer-free）——并行取数 / 解析 / 形状漂移 / 可调用-vs-锁定拆分 / 配额耗尽标记 / vision 识别 / `llm` 状态块组装。
-- `llm-models.ts`：目录条目 → pi-ai descriptor 映射（vision 自动识别、`supportsDeveloperRole:false`、声明目录权威 maxTokens 值（有则声明、缺则回落不声明——harness 对未声明值强制填 32768，2026-10-02 真机探针钉住）、`buildDescriptors` / `rosterWithAvailability` / `exhaustedModelIds`）。对话/出图的方向性判定由 `modality.ts` 单一裁决（`isChatModel` 宽松方向与 `isImageGenModel` 严格方向读同一份 `outputModalityOf`，缺字段不会让两份清单朝相反方向失手——2026-10-02 抽出，姊妹插件 Agnes 同款结构见其 ARCHITECTURE §5.4「前提反转」）。
-- `llm-adapter.ts`：LLM provider adapter 装配（动态 import peer、`resolveApiKey` 每次请求现取、429 分诊委托 `llm-error-fix.ts`）。
-- `llm-retry.ts`：peer-free 的 429 重试策略配置（`buildRetryPolicyConfig`，排除 QUOTA/ACCOUNT_QUOTA、保留 RATE_LIMIT）。
-- `llm-error-fix.ts`：host 侧 Proxy 包裹 `PiAiAdapter` 流出口，把误判的限频 QUOTA 纠正回 RATE_LIMIT（PITFALLS §20/§21 的 429 分诊）。
-- `draw.ts`：出图模块（peer-free）——结构化识别 image-output 模型、端点拼接、wire body 钳制、响应解析、失败分诊（429 配额 vs 限频）、失败冷却。
-- `doctor.ts`：只读状态文件诊断（peer-free，`npm run doctor` / `doctor:json`）——回答「这台机器上 provider 到底是开是关」（PITFALLS §22）。
-- `raccoon.ts`：第二上游协议层的**门面**（barrel，自身不含定义）——把下列六个模块原样转出，消费者的 import 不因此改变。
-  2026-10-05 按**实测的跨段引用边**（不是按口味）从原 683 行单文件切出，依赖图无环：`raccoon-consts.ts` 端点前缀与扫码时限 / `raccoon-codes.ts` 轮换失败分类（与 Token Plan 的 `codes.ts` **故意不合并**，§5.5）/ `raccoon-http.ts` 头部、信封、JWT 读数（`headers` / `parseRaccoonEnvelope` / `decodeRaccoonJwtExpMs` / `extractRaccoonNickname`）/ `raccoon-auth.ts` 扫码码生成、QR 轮询、refresh 轮换 / `raccoon-catalog.ts` 目录行变换、目录与余额读取（含 `numOrNullSafe`）/ `raccoon-fallback.ts` 静态 roster。
-  拆分是**纯搬运**：导出集合 29 → 29 零增零减，typecheck 0 错。`raccoonThinkingExtraBody` 有意**不再从门面转出**——它无生产调用者（adapter 注册 `reasoning: false`），留在叶子由套件具名取用；门禁那条「桌面前缀不得被接线」的 marker grep 当场抓出了这次移动（它按文件名排除声明处），已改成按**角色**排除。
-  **这不是「协议层已解耦」**：切分解决的是「一个文件 29 个导出」，协议知识（尤其 `raccoon-codes.ts` 那 100 行注释与表）的审阅负担仍在，只是各自成文件了。
-- `raccoon-status.ts`：小浣熊面板的**读模型**（peer-free）——把 switch / 凭据 / 余额 / roster / 注册态 / `?debug=1` 脚手架组装成一次 GET 的答案。余额 60 s、目录 300 s，按**凭据指纹**走 `coalesced-fetch`；终态登录事件在**首个 await 之前**读取（PITFALLS §31 的 T3 修复）。答案里一并**播报 tab 的两档轮询节奏**（`pollSeconds` / `scanPollSeconds`，取自本模块的窗口常量与路由的 QR 间隔）——与 snapshot 用 `pollSeconds` 播报节奏同一纪律：节奏归拥有缓存与网关预算的一侧定义，客户端只负责照用（内置常量降级为「首帧兜底」，并与这里的值钉死）。吃 `store` / `switchStore` / `publisher` / `read` / `login` 五个注入项，因此可脱开路由单测（`test/raccoon-status.test.mjs`）；walk 本身仍归 `routes/raccoon.ts`。
-- `raccoon-store.ts`：小浣熊凭据（DSH 凭据服务引用）；`raccoon-switch-store.ts`：小浣熊开关（按 profile 分段）；`raccoon-models.ts`：小浣熊模型目录归一化与描述符映射；`raccoon-publish.ts` + `raccoon-llm-adapter.ts`：小浣熊独立 provider 注册与 adapter（与 Token Plan 注册完全隔离——**隔离的是状态与凭据，不是代码**：两个 publisher 实例的 `state`、开关、凭据引用互不相干，而两者的发布状态机与 adapter 装配共用 `publish-core.ts` / `llm-adapter-core.ts`，理由见 §5.5）。
-- `client.js`：Plugins 页内的配置卡与三个 tab（积分额度 / 接入 API / 小浣熊）+ 账号表单（React，纯主题令牌样式）。内部 `interpretSnapshot` 把 Host 的响应读成 `(data, error)` 对，再交给决策块。客户端也按「能否脱离 hook 被挂载」分层：`cards.ts` / `provider-controls.ts`（状态行）/ `model-picker.ts` / `model-row.ts` / `raccoon-roster.ts` / `raccoon-card.ts` 全部是**无 hook 组件**，因此渲染套件挂的就是浏览器画的同一棵树；`panel-page.ts` / `raccoon-tab.ts` / 各表单持有 hook，是各 tab 的**生命周期**层（轮询、cadence、四个 mutation、向 header 上报新鲜度），渲染委托给上面那层。
-- `use-polling-interval.ts`：**两个 tab 共用的那一个轮询循环**（2026-10-03 抽出）。此前额度 tab 与小浣熊 tab 各写一份「起 interval、到点跑 load、卸载时清」，两份随即漂移：额度那份学会了页面隐藏就停，小浣熊那份没有——用户在后台窗口留着 tab，它照样每 60 秒（扫码中 2 秒）敲网关，而 README 的「关掉即停」只对前者成立；两条也都没有错误退避，Host 挂了就按原速重试到面板关闭。现在可见性暂停与 `ERROR_BACKOFF_MS`（60 s，且不低于调用方的健康节奏）都在这一处，调用方只回答「这次读失败了吗」与给出健康节奏。它**不拥有请求**：代数守卫与 AbortController 仍归各 tab 的 `load`，共用 hook 只决定何时点火（行为由 `test/render.test.mjs` H 组逐条钉住）。
+### Host 半边（`src/host/`）——职责一句话 + 承重锚点
 
-它**也不拥有「要不要轮询」**——这条曾经写反过。抽出时的注释断言「小浣熊未开开关不得轮询」，但开关门控的是**注册**（`routes/raccoon.ts` 只在开启时 publish），不是**读**：`POST /raccoon {action:"login"}` 不看开关，二维码的 `scanUrl` 与扫码终态的 `loginStatus` 都只经 GET 下发，余额卡片也由 `loggedIn` 驱动（关着开关照样显示——那正是用户来看的东西）。照那条断言接一个 `enabled` 进去，等于把扫码锁死：点了登录，二维码不来、结果不来、界面不给任何提示。因此该参数已删除：真有「暂不轮询」的 tab 应该**不挂这个循环**，而不是在这里长一个所有现存调用方都得传 `true` 的开关。
-- `model-row.ts`：两个模型列表共用的**行骨架**（`li` + `modelRowHead` + label/checkbox/name/rate + badges + 参数行）。领域事实留在调用方——`on` 怎么判（Token Plan 读 allow-list、小浣熊把 `null` 读成"整份 roster"）、费率为 0 怎么措辞（`×0` 是运营侧伪系数、小浣熊的 0 真是免费）、tooltip 用哪个键、哪些 badge 值得报、参数行有没有思考阶梯——所以它吃的是**渲染好的内容**，不是模式开关（理由见 PITFALLS §34）。
-- `raccoon-card.ts`：小浣熊 tab 的**帧**，无 hook，`state` 走 props。这一层存在的唯一理由是**可断言性**：`RaccoonTab` 的数据是内部 `useState`，无论怎么挂载都只渲染登出帧，于是余额行/拆解/两个凭据时钟/过期告警/两种未注册措辞在抽出前没有任何断言（理由见 PITFALLS §35）。
-- 测试基建：`client-surface.js` / `panel-decision.js` / `panel-render.js` —— 把 `client.js` 作为模块加载后物化 `panel` 测试面。不进运行时、不进 `files` 打包清单。`client-surface.js` 另导出 `reactStandin`（`runtime.ts` 的 React 接缝原物），供必须真跑 effect 的套件临时换上自己的记录型 React 再还原。
+> 逐文件的完整现状**不在这里复述**：那是会腐的副本，读的人应以 `src/host/**/*.ts` 为真源。
+> 下表只登记**跨文件承重的锚点**——哪些被别处依赖、哪些决定是别处推不出来的。
+> 文件清单用 `git ls-files "src/host/**/*.ts"` 自证；逐文件的细节看代码，别看本文。
+
+| 模块 | 一句话职责 | 为什么值得单独记 |
+|---|---|---|
+| `index.ts` | Host 入口：注册只读 `/snapshot` 路由（聚合控制台数据，401 自动续期重试一次）+ 账号配置路由 + 各 store 接线与 side-effect 编排 | 唯一装配点；读代码从这里进（AGENTS.md 读取顺序第 3 步） |
+| `routes.ts` + `routes/` | 路由门面：`registerRoutes(ctx,wiring)` 只做装配与注册顺序，返回 7 个 `off()` 回执；共享原语（同源闸 / body 上限 / `writeJson`）在 `routes/http.ts`；snapshot / account / api-key / provider / models / draw / raccoon 各一模块、各自声明路径常量 | 2026-10 拆分（先冻结行为再搬，`routes.test.mjs` + `wiring.test.mjs` 零漂移）；小浣熊读模型已抽到 `raccoon-status.ts`（原先是 handler 内 190 行闭包），`routes/raccoon.ts` 只剩扫码 walk 与四个 mutation |
+| `lifecycle.ts` | Host 生命周期：`registerRoutes` / `startSideEffects`（catalog、raccoon seed、draw 工具注册、web-search restore、vision restore）/ `teardown`（dispose + release + off×7） | 挂载与卸载的收口处 |
+| `host-config.ts` | 配置契约：`CONFIG_DEFAULTS`、`resolveSettings` / `resolveAuthOverrides`（含嵌套 `auth:` 块拒绝）、`isAdmitted` 同源闸、`hostName` | auth overrides 嵌套块会被静默忽略（红线 3，锁过一次号） |
+| `codes.ts` | 全部错误码与 IAM 原因码的**唯一声明处** | `sensenova-auth.ts` 产出、`token-store.ts` 判 parked、`snapshot-aggregate.ts` 判「拿不到令牌」（`isAuthFailure` 消费方 2026-10 从 `index.ts` 移出） |
+| `token-store.ts` + `token-store/` | 凭据服务里的令牌与账号存取、按期续期、401 拒绝记忆 | 已拆为薄 facade + 七块（六功能 + `constants.ts`）；行为冻结在 `store-baseline` |
+| `throttle-store.ts` | 登录节流状态，写在插件状态文件（原子写、0600），跨进程跨重启生效 | 节流与凭据 grant **故意共享** state 分段（PITFALLS §23） |
+| `sensenova-auth.ts` / `sensenova-crypto.ts` | OIDC 授权码流登录 + `refresh_token` 静默续期 / 密码 JWE 封包（RSA-OAEP(SHA-1) + A256GCM）、PKCE 派生、JWT 解析、JWKS 缓存（由调用方持有、非模块级单例） | 登录路径每次尝试必须经 `onTrace` 落盘（红线 5）；PKCE verifier 必须 `Uint8Array` + 长度自检 43–128（红线 4） |
+| `console-client.ts` / `parsers.ts` | 控制台与目录的网络请求（短缓存 + single-flight）/ 响应解析（字符串数值、epoch 归一、`checkShape` 漂移、`parseTrend` 求和、`identifyVisionModel`） | `parseTrend` 是对 points 求和，不是取首个（AGENTS.md 已知坑） |
+| `trace.ts` / `util.ts` / `types.ts` | 登录 trace 落盘（值级脱敏、仅留 20、0600）/ 共享工具 + `retryBounded` + `optional` 守卫 / Host 侧共享类型 | trace 是「浏览器能登、面板不能」的对照真源（红线 5） |
+| `state-store.ts` / `catalog-store.ts` / `provider-store.ts` / `draw-store.ts` / `api-key-store.ts` | 状态文件公共原语（版本载荷、原子写、0600、TTL 读缓存、profile 分段）/ 目录缓存 / provider 开关 / 出图开关与模型偏好 / 推理 Key 存取 | 四个业务 store 同纪律；`draw-store` 存 `drawModelId`——`POST /draw` 的 `forget` 只清开关、**刻意保留模型偏好**（见 API.md） |
+| `switch-precedence.ts` | 开关优先级的**唯一裁决处**（peer-free）：`resolveSwitchEnabled` / `resolveSwitchValue` / `switchSource` 承载所有 opt-in 开关的「面板值 vs 补丁默认」判定并随答案返回来源 | 2026-10-02 抽出；此前手抄在 provider / models / draw 三条路由（两种长得像但语义不同的方言）；Raccoon 无配置默认，不经过此模块 |
+| `provider-publish.ts` / `snapshot-aggregate.ts` / `llm-models.ts` / `llm-adapter.ts` / `llm-retry.ts` / `llm-error-fix.ts` / `draw.ts` | 注册 provider 的发布状态机（`publishChain` 串行、`disposed` 闸、单点 `registerPair` + 回滚）/ 快照数据聚合（并行取数、形状漂移、可调用-vs-锁定、配额耗尽标记）/ 目录→descriptor 映射（vision 自动识别、声明目录权威 maxTokens）/ adapter 装配（动态 import peer、`resolveApiKey` 现取、429 分诊）/ 429 重试策略配置 / 429 误判纠正 Proxy / 出图模块 | 发布状态机与 adapter 装配是 `publish-core.ts` / `llm-adapter-core.ts` 上仅有的两处 peer 导入（PITFALLS §32）；maxTokens 不声明会被 harness 填 32768（2026-10-02 真机探针）；出图模型识别真源在 `modality.ts:75` |
+| `modality.ts` | 对话 / 出图方向性判定**单一裁决**：`isChatModel`（宽松）与 `isImageGenModel`（严格）读同一份 `outputModalityOf` | 缺字段不会让两份清单朝相反方向失手（2026-10-02 抽出） |
+| `doctor.ts` | 只读状态文件诊断（`npm run doctor` / `doctor:json`）——回答「这台机器上 provider 到底是开是关」 | PITFALLS §22 |
+| `raccoon.ts` + `raccoon-*.ts` | 第二上游协议层：`raccoon.ts` 是门面 barrel（自身不含定义，把六模块原样转出）；`raccoon-status.ts` 是面板**读模型**（peer-free，按凭据指纹 `coalesced-fetch`，余额 60s / 目录 300s，登录事件在首个 await 前读） | 2026-10-05 按**实测跨段引用边**切出（不是按口味），依赖图无环；`raccoon-codes.ts` 与 Token Plan 的 `codes.ts` **故意不合并**（§5.5）；节奏归拥有缓存与网关预算的一侧定义，客户端只照用 |
+| `raccoon-store.ts` / `raccoon-switch-store.ts` / `raccoon-models.ts` / `raccoon-publish.ts` + `raccoon-llm-adapter.ts` | 小浣熊凭据（DSH 凭据服务引用）/ 开关（按 profile 分段）/ 目录归一化与描述符映射 / 独立 provider 注册与 adapter | **隔离的是状态与凭据，不是代码**：两个 publisher 实例互不相干，但发布状态机与 adapter 装配共用 `publish-core.ts` / `llm-adapter-core.ts`（§5.5） |
+
+### Client 半边（`src/client/`）——分层理由
+
+客户端按「能否脱离 hook 被挂载」分层，这是**可测试性**决策，不是美观：
+
+- **无 hook 组件**（渲染套件挂的就是浏览器画的同一棵树）：`cards.ts`、`provider-controls.ts`（状态行）、`model-picker.ts`、`model-row.ts`、`raccoon-roster.ts`、`raccoon-card.ts`。
+- **hook 层**（各 tab 的生命周期：轮询、cadence、四个 mutation、向 header 上报新鲜度；渲染委托给上面那层）：`panel-page.ts`、`raccoon-tab.ts`、各表单（`account-form.ts` / `api-key-form.ts`）。
+- `use-polling-interval.ts`：**两个 tab 共用的那一个轮询循环**（2026-10-03 抽出）。此前两份各自写、随即漂移；现在可见性暂停与 `ERROR_BACKOFF_MS`（60s）都在这一处，调用方只答「这次读失败了吗」与给出健康节奏。**它不拥有请求**（代数守卫与 AbortController 仍归各 tab 的 `load`），也**不拥有「要不要轮询」**——开关门控的是**注册**不是读，照「关着就停轮询」去接会把扫码锁死。
+- `model-row.ts`：两个模型列表共用的行骨架，领域事实留在调用方（PITFALLS §34）。`raccoon-card.ts`：小浣熊 tab 的帧，无 hook、`state` 走 props——这层存在的唯一理由是**可断言性**（PITFALLS §35）。
+- 测试基建（不进运行时、不进 `files` 打包清单）：`client-surface.js` / `panel-decision.js` / `panel-render.js` —— `client-surface.js` **直载 client 源码入口 `src/client/index.ts`** 物化 `panel` 测试面（测的是源码不是打包产物，机制见 [TESTING.md](./TESTING.md) §3），另导出 `reactStandin`（`runtime.ts` 的 React 接缝原物）。
 
 ---
 
