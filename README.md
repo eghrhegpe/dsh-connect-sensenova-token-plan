@@ -34,7 +34,7 @@
 - 在「API Key」卡粘贴 `sk-` Key 保存后，Host 即以 `sensenova-token-plan` 之名注册 OpenAI 兼容 provider
 - **语言模型**：模型列表随 `/v1/models` 自动刷新、可看图模型自动带图片输入；
 - **出图工具**：Host 给 agent 注册工具 `sensenova_draw_image`；模型由 catalog 的 `output_modalities` 结构化判定。
-- 开关与勾选都在面板热生效，无需重启,但工具的实际挂载 / 缺席发生在**下一次 Host 启动**。细节见 [docs/SETUP.md](docs/SETUP.md) §3 与 [docs/PROVIDER-HOT-RELOAD.md](docs/PROVIDER-HOT-RELOAD.md)。
+- 开关与勾选都在面板热生效，无需重启**，**但工具的实际挂载 / 缺席发生在**下一次 Host 启动**。细节见 [docs/SETUP.md](docs/SETUP.md) §4 与 [docs/PROVIDER-HOT-RELOAD.md](docs/PROVIDER-HOT-RELOAD.md)。
 
 ![「接入 API」tab](assets/panel-API-provider.png)
 
@@ -45,6 +45,7 @@
 - 上游限流较宽松，适合当作 Token Plan 硬配额池之外的日常通道
 - 登录后显示积分余额与模型清单
 - 每个模型带**上下文窗口 / 最大输出**与积分倍率（`free` / `×0.75` 这类，由网关目录声明；目录没给就不显示，不猜）
+- **联网搜索**（默认关）：开启后 DSH 的 `web_search` 工具后端换成小浣熊托管的 MCP，复用小浣熊凭据，无需再单独配搜索端点 key
 
 ![「小浣熊」tab](assets/panel-xiaohuanxiong.png)
 
@@ -52,7 +53,7 @@
 
 - 面板**不代你操作账务**：不改套餐、不代扣积分、不碰 Key 明文
 - 数据来自商汤控制台自己的 API，与网页控制台口径一致
-- 真正会「动」的三部分——注册 provider、挂出图工具、接第二个上游——全部 opt-in 且**默认关闭**，不打开时插件退化为纯信息展示
+- 真正会「动」的四部分——注册 provider、挂出图工具、接第二个上游、切换联网搜索——全部 opt-in 且**默认关闭**，不打开时插件退化为纯信息展示
 
 ## 安装
 
@@ -85,6 +86,9 @@
 - [docs/SENSENOVA-API.md](docs/SENSENOVA-API.md) — 商汤接口全集（实测）
 - [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（38 条）
 - [CHANGELOG.md](CHANGELOG.md) — 版本变化
+- [docs/README.md](docs/README.md) — docs/ 全量索引（含 ADR / ROADMAP / PROVIDER-HOT-RELOAD / TROUBLESHOOTING 等上表未列的）
+
+> 装到 npm 的那一份 **不含 `docs/`**（`package.json` 的 `files` 白名单只带 `cordis.patch.yml` / README / CHANGELOG / THIRD_PARTY_NOTICES 等），上列 `docs/*` 链接在已安装副本上不可用，请到 GitHub 仓库看。
 
 ## 运维诊断：这台机器现在挂没挂 provider？
 

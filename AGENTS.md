@@ -54,13 +54,15 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   `continue-on-error`——缺 dsh CLI 时它 SKIP 退出 0，有则真跑且红即拦）。手工排查用 `node test/e2e.mjs` 单跑即可。
 - **e2e 只跑一次**。它要启动真实 Host 进程；需要看两段输出就跑一次落盘再读文件，
   不要把同一条命令串两遍。
-- **peer 套件红 ≠ 回归（只对本机成立）**。`store/routes/wiring.test.mjs` 依赖
-  `@deepseek-ai/dsh-credentials`（随 DSH runtime 发行，不在插件目录）。
+- **peer 套件红 ≠ 回归（只对本机成立）**。`store.test.mjs` / `routes.test.mjs` /
+  `raccoon.test.mjs` 依赖 `@deepseek-ai/dsh-credentials`（随 DSH runtime 发行，不在插件目录）。
   本机报 `cannot resolve the peer dependency` 是环境问题：查 `test/peer-roots.mjs`
   候选根（`$DSH_HOME` → 插件 `node_modules` → 桌面运行时 → npm 全局 CLI 运行时树）。
   **CI 不适用这条**：offline job 已装 CLI 供应运行时（`.github/workflows/ci.yml`），
   那里报同一句 = 真回归（2026-10-01 的 §30 事故：硬门禁红了一整天没人管）。
-- 测试数会随并行会话变化（68/38 是某一时点快照），只看自己域的增减。
+- 测试数会随并行会话变化，只看自己域的增减。套件名册共 **30 项**（26 套件 + 4 门禁，
+  真源 `test/suites.mjs`，`npm run test:list` 只列不跑）；单套件计数看
+  `test/<域>.test.mjs` 结尾的 passed/total 行。
 - **动了契约/接缝文件，跑全量，别按域裁剪**。`src/shared/*`、`client.js`、`lib/index.js`
   以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约（实测：只给面板加一个
   渲染分支，draw/render/typecheck 全绿，全量才在 `panel.test.mjs` 的 table-driven tt 白名单上红）。
@@ -143,7 +145,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 加配置字段 / 改路由 | `docs/API.md`、`docs/SETUP.md`；提供方开关见 `docs/PROVIDER-HOT-RELOAD.md` |
 | 改测试前 | `docs/TESTING.md` |
 | 改任何代码前扫一眼 | `docs/PITFALLS.md`（38 条现象→根因→修法） |
-| **改文件时工具「什么都没做」**（`replace` 不匹配、`Edit` 反复失败、多半是行尾）| `docs/PITFALLS.md` §38（40 CRLF / 86 LF / 1 混合；**先量行尾再写锚点**，`replace` 后必须断言变化） |
+| **改文件时工具「什么都没做」**（`replace` 不匹配、`Edit` 反复失败、多半是行尾）| `docs/PITFALLS.md` §38（41 CRLF / 97 LF / 0 混合；**先量行尾再写锚点**，`replace` 后必须断言变化） |
 | 排查「这条配置到底生效没」 / 改了源码却没变 | `docs/PITFALLS.md` §22（bundles 装载 → patch overlay → `$DSH_HOME/state/<profile>/<name>/` 三层，desktop 是安装副本、web 是 symlink） |
 | 加/改 **state 文件**、读 `profileContext`、判断某状态该不该按 profile 分段 | `docs/PITFALLS.md` §23（catalog/provider/draw 分段；throttle 与凭据 grant **故意共享**，别统一） |
 | 提交约定、`upstream/` 红线 | `docs/CONTRIBUTING.md` |
@@ -151,7 +153,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 
 ## 进入代码库的读取顺序（AI 会话）
 
-约 2 万行 src + 1.7 万行测试，乱序读会把时间花在「重新验证文档已写明的事实」上。
+约 2 万行 src + 约 1.8 万行测试（`test/**/*.mjs`；含测试支撑文件约 2.2 万行），乱序读会把时间花在「重新验证文档已写明的事实」上。
 这条顺序是 2026-10-02 全库审查后的复盘：先建坐标系，再读代码。
 
 1. **先文档，后代码**：本文件 → `docs/README.md` 索引 → `docs/ARCHITECTURE.md` §5
@@ -178,7 +180,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 7. **改行为前先读测试与基线**：`docs/TESTING.md` 说明每个套件测什么；动
    token-store 前先判断行为冻结面（`store-baseline`）要不要 `UPDATE_BASELINE=1`
    ——要的话是更大的事，先停下来说。测试里 `check(name, condition, detail)` 的
-   `name` 本身就是契约，1.7 万行测试是规格，不是附件。
+   `name` 本身就是契约，1.8 万行测试是规格，不是附件。
 8. **验证闭环**：改完跑对应域单测（`node test/<域>.test.mjs`）→ 全量 `npm test`
    （= `node test/run-all.mjs`：跑完 26 套件 + 4 门禁共 30 项再汇总，失败项逐个点名；
    「末尾绿」「按链序定位」都是旧 `&&` 链的读法，别再用）。

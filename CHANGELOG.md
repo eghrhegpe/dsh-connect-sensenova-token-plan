@@ -33,7 +33,7 @@
   - 两个凭据时钟（凭据有效至 / 续期至）与提供方开关移入账号卡：它们讲的是「这次登录」，不是额度数字；余额卡只留用户第一眼要读的东西；
   - 模型清单表头去掉机制说明（「勾选决定哪些模型推送进 DSH…」「以下为内置备用模型」），降到列表底部做脚注，与走势图图例同一层级——读者先看到计数与状态徽标，读完列表再读到原理。
 - **Retry-After 支持 RFC 7231 的 HTTP-date 形式**（`src/host/sensenova-auth.ts`）：此前只认秒数，网关返回 `Sat, 03 Oct 2026 12:00:00 GMT` 这类绝对时间时退避预算读不到，429 会立刻重试。
-- **错误响应统一走 `redactedError`**（`src/host/routes/http.ts` 及其余八个路由文件）：收口错误消息里回流凭据明文的缺口。
+- **错误响应统一走 `redactedError`**（`src/host/routes/http.ts` 及其余七个路由文件，共 8 个）：收口错误消息里回流凭据明文的缺口。
 - **跨进程并发协议补齐两处缺口**（`src/host/throttle-store.ts`、`src/host/token-store/grant.ts`）：节流状态写入加版本护栏，读到异版的旧值不再覆盖新值；凭据 grant 改为条件回收，读到别的进程已续期的新 grant 时不再回收。
 - **小浣熊模型描述符不再猜 `contextWindow` / `maxTokens`**（`src/host/raccoon-models.ts`）：改为「目录声明为准，缺则交给 harness 决定」。此前硬钉的猜数会让模型声明比网关实际支持的更大，请求落到 400。
 - **小浣熊面板轮询收敛**（`src/client/raccoon-tab.ts`）：删掉为追扫码状态而写的补偿轮询，改由服务端状态驱动的双档轮询，客户端不再持有比 walk 活得更久的定时器。
