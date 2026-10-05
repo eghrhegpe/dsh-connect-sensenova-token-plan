@@ -180,50 +180,6 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 - **client.js 文件级分解（2026-09-29 定界不拆；2026-09-30 tripwire 触发、决策重开并执行完毕——client 半边 TS 化 + 按功能拆文件一步到位，见 §6.2）**。
   该边界条目的「不拆」部分就此退役；Host 半边免构建 + checkJs 的现状不变。
 
-## 6.2 构建链与 Client 拆分（2026-09-30：先干跑验证，当日决策重开并执行完毕）
-
-原计划「拆分先行、.ts 化稳定后再说」被合并为一步（touch 每个文件一遍而非两遍），
-用户拍板采纳；本节是既成事实的执行记录。
-
-**已落地：**
-
-- **源码布局**：`src/client/*.ts` 十五个文件，按功能拆——`index.ts`（factory +
-  三世界尾巴）、`runtime.ts`（React 缝隙：factory 入口 `provideClientReact`，其余
-  模块经转发的 `h`/hooks 取用，调用点与拆分前的闭包形式逐字一致）、`const.ts`
-  （路由常量）、`i18n.ts`（zh/en 双语字典，`en: typeof zh` 编译期钉键集齐平）、
-  `styles.ts`、`format.ts`、`models.ts`（allow-list 代数）、`snapshot.ts`（决策层
-  + 三张码表）、`cards.ts`、`account-form.ts`、`provider-controls.ts`、
-  `model-picker.ts`、`api-key-form.ts`、`panel-page.ts`、`apply.ts`。行为逐字转录，
-  17 个离线套件 + e2e 全绿背书。
-- **构建**：`tsdown.config.mjs` → 根 `client.js` 产物，`npm run build:client`。三个
-  关键取值：`format: "iife"`（顶层零 import/export，三世界尾巴活在函数作用域里；
-  esm 构建会被 rolldown 的 CJS 语法探测包壳改写 ABI）；`outputOptions.entryFileNames:
-  "client.js"`（产物路径/文件名不变，`package.json#exports` 与 `files` 不动）；
-  `clean: false`（outDir 是仓库根）。factory 参数命名 `loaderRequire` 而非
-  `require`——避免裸 `require` 被打包器当模块系统语法改写；react 仍由 loader 注入
-  （`deps.neverBundle` 钉住）。三世界尾巴保留在源码里，CJS require 世界照旧声明。
-- **门禁**：`test/build-gate.mjs`（npm test 链尾、e2e-gate 之前；文件名不含
-  `.test.`，不入 `package.test.mjs` 三方名册，同 e2e-gate 范式）——**freshness**
-  （重建与提交产物做换行归一化的逐字节比对，过期即红并提示提交新产物）+ **形状**
-  （无顶层 import/export、ESM 导入恰好注册一份、react-only 替身可物化、panel 测试面
-  键齐全）。tsdown 缺席则醒目 SKIP 退出 0。
-- **新纪律**：改 `src/client/*.ts` 后必须 `npm run build:client`，并把根 `client.js`
-  与源码放进**同一个 commit**；只提交源码不提交产物 = build-gate 红。devDeps 安装需
-  `--legacy-peer-deps`（peer 是 Host 运行时包，registry 上只发预发布版且整套互相以 peer 咬合；本仓刻意无 lockfile。**2026-10-01 补正**：见 [PITFALLS.md](./PITFALLS.md) §30——正因如此，CI 的 peer 来源必须是整棵 CLI 运行时树）。
-- **【当晚已被取代】「Host 半边不动」**：随后按 workbuddy 规范完成全仓归一——Host 源码迁
-  `src/host/*.ts`（27 个模块），tsdown 多入口构建 `lib/`（ESM bundle + 切分 chunk）。当晚的方案是
-  `lib/` 与根 `client.js` 一并 `.gitignore`、**产物彻底不入库**，据此「产物与源码同 commit」纪律一度作废。
-  **该方案已于 2026-10-03 被推翻**：DSH 市场 `github:` 安装源走 pnpm git-dep、不跑 prepack，lib 不入库则 GitHub 直装坏——
-  现改为 lib/ 与 client.js **版本化入库**，「产物与源码同 commit」纪律恢复。裁定见 [ADR.md](./ADR.md) ADR-005；
-  同段的后半句不再有效，读者请以 ADR 为准。测试面与门禁已适配，build-freshness 为硬门禁，「删 lib 可重建」验收通过。
-  checkJs 的 JSDoc 投入随 .ts 化自然并入类型标注。
-
-**遗留项已闭合（2026-09-30）**：CI 离线 job 现已安装 devDeps（`npm install
---legacy-peer-deps`；setup-node 以 `package.json` 为 key 做 npm 缓存——本仓刻意无
-lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI 即红，不再恒 SKIP。
-「无构建」表述已全库同步（`DSH-PLUGIN.md` §7、`ARCHITECTURE.md` 半边表、
-`TESTING.md` 链条枚举、`AGENTS.md` 验证段、`PITFALLS.md` §22）。
-
 ## 6.1 竞品参照：raccoon 的机制点（可选模式范本）
 
 > 仅作**机制参考，不抄代码**。参照对象：`liudapeng0311/dsh-raccoon-work`（DSH 小浣熊 Connect，接入商汤小浣熊桌面 App 模型）。
@@ -463,6 +419,50 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 - **凭据**：**小浣熊扫码凭据（`Bearer <access_token>`）直接可用**——`initialize` 返回 `200` + `Mcp-Session-Id` 头 + SSE `event: message` 信封，serverInfo 为「联网搜索 API MCP Server」v1.27.0，协议 `2024-11-05`；`notifications/initialized` 回 `202`；后续请求带 `Mcp-Session-Id` 头。
 - **工具**：`tools/list` 返回 1 个 `web_search`，参数 `Query`（1~100 字符）、`Count`（web 最多 50 / image 最多 5）、`SearchType`（web / image）、`TimeRange`。
 - **返回**：`tools/call` 回 `200`，结果为 `ResponseMetadata.RequestId` + `Result.ResultCount` + `WebResults[{Id, SortId, Title, SiteName, Url, Snippet, Summary}]`（实测 `Query:"商汤科技"` 返回 sensetime.com 真实结果）。后端特征为腾讯云 TC3 搜索 API 形态。
+
+## 6.2 构建链与 Client 拆分（2026-09-30：先干跑验证，当日决策重开并执行完毕）
+
+原计划「拆分先行、.ts 化稳定后再说」被合并为一步（touch 每个文件一遍而非两遍），
+用户拍板采纳；本节是既成事实的执行记录。
+
+**已落地：**
+
+- **源码布局**：`src/client/*.ts` 十五个文件，按功能拆——`index.ts`（factory +
+  三世界尾巴）、`runtime.ts`（React 缝隙：factory 入口 `provideClientReact`，其余
+  模块经转发的 `h`/hooks 取用，调用点与拆分前的闭包形式逐字一致）、`const.ts`
+  （路由常量）、`i18n.ts`（zh/en 双语字典，`en: typeof zh` 编译期钉键集齐平）、
+  `styles.ts`、`format.ts`、`models.ts`（allow-list 代数）、`snapshot.ts`（决策层
+  + 三张码表）、`cards.ts`、`account-form.ts`、`provider-controls.ts`、
+  `model-picker.ts`、`api-key-form.ts`、`panel-page.ts`、`apply.ts`。行为逐字转录，
+  17 个离线套件 + e2e 全绿背书。
+- **构建**：`tsdown.config.mjs` → 根 `client.js` 产物，`npm run build:client`。三个
+  关键取值：`format: "iife"`（顶层零 import/export，三世界尾巴活在函数作用域里；
+  esm 构建会被 rolldown 的 CJS 语法探测包壳改写 ABI）；`outputOptions.entryFileNames:
+  "client.js"`（产物路径/文件名不变，`package.json#exports` 与 `files` 不动）；
+  `clean: false`（outDir 是仓库根）。factory 参数命名 `loaderRequire` 而非
+  `require`——避免裸 `require` 被打包器当模块系统语法改写；react 仍由 loader 注入
+  （`deps.neverBundle` 钉住）。三世界尾巴保留在源码里，CJS require 世界照旧声明。
+- **门禁**：`test/build-gate.mjs`（npm test 链尾、e2e-gate 之前；文件名不含
+  `.test.`，不入 `package.test.mjs` 三方名册，同 e2e-gate 范式）——**freshness**
+  （重建与提交产物做换行归一化的逐字节比对，过期即红并提示提交新产物）+ **形状**
+  （无顶层 import/export、ESM 导入恰好注册一份、react-only 替身可物化、panel 测试面
+  键齐全）。tsdown 缺席则醒目 SKIP 退出 0。
+- **新纪律**：改 `src/client/*.ts` 后必须 `npm run build:client`，并把根 `client.js`
+  与源码放进**同一个 commit**；只提交源码不提交产物 = build-gate 红。devDeps 安装需
+  `--legacy-peer-deps`（peer 是 Host 运行时包，registry 上只发预发布版且整套互相以 peer 咬合；本仓刻意无 lockfile。**2026-10-01 补正**：见 [PITFALLS.md](./PITFALLS.md) §30——正因如此，CI 的 peer 来源必须是整棵 CLI 运行时树）。
+- **【当晚已被取代】「Host 半边不动」**：随后按 workbuddy 规范完成全仓归一——Host 源码迁
+  `src/host/*.ts`（27 个模块），tsdown 多入口构建 `lib/`（ESM bundle + 切分 chunk）。当晚的方案是
+  `lib/` 与根 `client.js` 一并 `.gitignore`、**产物彻底不入库**，据此「产物与源码同 commit」纪律一度作废。
+  **该方案已于 2026-10-03 被推翻**：DSH 市场 `github:` 安装源走 pnpm git-dep、不跑 prepack，lib 不入库则 GitHub 直装坏——
+  现改为 lib/ 与 client.js **版本化入库**，「产物与源码同 commit」纪律恢复。裁定见 [ADR.md](./ADR.md) ADR-005；
+  同段的后半句不再有效，读者请以 ADR 为准。测试面与门禁已适配，build-freshness 为硬门禁，「删 lib 可重建」验收通过。
+  checkJs 的 JSDoc 投入随 .ts 化自然并入类型标注。
+
+**遗留项已闭合（2026-09-30）**：CI 离线 job 现已安装 devDeps（`npm install
+--legacy-peer-deps`；setup-node 以 `package.json` 为 key 做 npm 缓存——本仓刻意无
+lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI 即红，不再恒 SKIP。
+「无构建」表述已全库同步（`DSH-PLUGIN.md` §7、`ARCHITECTURE.md` 半边表、
+`TESTING.md` 链条枚举、`AGENTS.md` 验证段、`PITFALLS.md` §22）。
 
 ## 7. 优先级与时间盒
 
