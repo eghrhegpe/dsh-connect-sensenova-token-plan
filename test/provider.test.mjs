@@ -596,8 +596,18 @@ const BASE_URL = "https://token.sensenova.cn/v1";
 
     // The reason string is load-bearing, same as the other two guards.
     const source = readFileSync(new URL("../src/host/catalog-store.ts", import.meta.url), "utf8");
+    const factory = readFileSync(new URL("../src/host/state-store.ts", import.meta.url), "utf8");
+    // The ADR-006 refusal reason now lives in the shared factory
+    // (createVersionedJsonWriter) — one source of truth instead of a copy. Pin
+    // BOTH the safety phrase in the factory and that this store still registers
+    // its own label + version set, so a future edit cannot silently retarget or
+    // downgrade the guard (PITFALLS §37: add the new member, never weaken).
     check("the catalog refusal marker stays in the source",
-      source.includes("catalog: refusing to overwrite catalog.json holding version"), "");
+      factory.includes("refusing to overwrite") &&
+      factory.includes("this build knows") &&
+      source.includes("createVersionedJsonWriter({") &&
+      source.includes('label: "catalog"') &&
+      source.includes("KNOWN_CATALOG_VERSIONS"), "");
   } catch (error) {
     fail("ADR-006 catalog write-side version guard", error);
   } finally {

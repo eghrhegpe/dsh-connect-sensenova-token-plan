@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { str, num } from "./util.ts";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, stateDir as pluginStateDir } from "./state-store.ts";
+import { ensureStateDir, readStateJson, stateDir as pluginStateDir, createVersionedJsonWriter } from "./state-store.ts";
 import type { HeldThrottle } from "./token-store/state.ts";
 
 /**
@@ -122,6 +122,11 @@ function parse(raw: unknown, now: () => number): HeldThrottle | null {
  */
 export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } = {}) {
   const file = join(dir, "throttle.json");
+  // ADR-006 write-side guard + atomic write shared via createVersionedJsonWriter
+  // (state-store.ts). A refusal is SILENT — this store is deliberately
+  // logger-less (see state-segmentation.test.mjs) — so `onRefuse` is omitted and
+  // the in-memory record keeps serving, the "degrade, not error" the others log.
+  const writeThrottle = createVersionedJsonWriter({ file, versions: KNOWN_THROTTLE_VERSIONS, label: "throttle" });
 
   /**
    * Move a throttle written before the rename into the current location.
@@ -160,32 +165,14 @@ export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } 
     },
     async write(state: HeldThrottle) {
       await adoptLegacyFile();
-      // ADR-006 write-side guard (mirrors catalog/provider/draw/raccoon-switch):
-      // never overwrite a throttle file this build cannot read. An unknown
-      // NUMERIC version means a NEWER build wrote it; clobbering it would
-      // destroy the one thing the red line says must survive — a parked
-      // wrong-password refusal — and let the next poll retry it into a lock.
-      // This store is intentionally logger-less (called with no args,
-      // see state-segmentation.test.mjs), so the refusal is silent: the
-      // in-memory record keeps serving this process, which is exactly the
-      // "degrade, not error" behaviour the other stores log.
-      const existing = await readStateVersion(file);
-      if (!isKnownStateVersion(existing, KNOWN_THROTTLE_VERSIONS)) return;
-      const temporary = temporaryOf(dir, "throttle.json");
-      try {
-        await ensureStateDir(dir);
-        const body = JSON.stringify({
-          version: THROTTLE_FILE_VERSION,
-          code: state.code,
-          parked: state.parked === true,
-          until: state.parked === true ? null : state.until,
-          attempt: state.attempt
-        });
-        await writeStateFile(file, body, { temporary });
-      } catch {
-        // A read-only Home must not break the panel: the caller still honours
-        // the wait for this process, it just will not outlive it.
-      }
+      const body = {
+        version: THROTTLE_FILE_VERSION,
+        code: state.code,
+        parked: state.parked === true,
+        until: state.parked === true ? null : state.until,
+        attempt: state.attempt
+      };
+      await writeThrottle(body).catch(() => {});
     },
     async clear() {
       try {

@@ -22,7 +22,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { str, obj, num, degrade } from "./util.ts";
 import { name } from "./host-config.ts";
-import { ensureStateDir, temporaryOf, writeStateFile, readStateJson, readStateVersion, isKnownStateVersion, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
+import { readStateJson, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir, createVersionedJsonWriter } from "./state-store.ts";
 import type { StoreOptions } from "./types.ts";
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
@@ -152,6 +152,17 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
   const { dir, profile = null, now = Date.now, ttlMs = STATE_READ_TTL_MS, logger } = options;
   const stateDir = dir ?? catalogDir(profile);
   const file = join(stateDir, "catalog.json");
+  // ADR-006 write-side guard + atomic write are shared via createVersionedJsonWriter
+  // (state-store.ts): never overwrite a catalog file this build cannot read; a
+  // refusal degrades (not errors) through `onRefuse`, so the in-memory record
+  // keeps serving. `held == null` means "nothing to persist" (after clear()).
+  const writeCatalog = createVersionedJsonWriter({
+    file,
+    versions: KNOWN_CATALOG_VERSIONS,
+    label: "catalog",
+    onRefuse: (reason) => degrade(reason, null, logger, null),
+    now
+  });
   /**
    * Last known record, mirrored from {@link cache} so the writers can reuse the
    * allow-list without a second read. `undefined` means "never synced from
@@ -189,37 +200,9 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
     return held;
   };
 
-  /**
-   * Persist the held record atomically; a write failure only loses the cache.
-   *
-   * The temp path is process-plus-clock unique (`state-store.ts`'s
-   * `temporaryOf`), so two Host processes sharing this directory never write
-   * the same temp name and `rename` each other's half-written file away.
-   */
   const persist = async () => {
-    if (held === null) return;
-    // ADR-006 write-side guard (mirrors `provider-store.ts` / `draw-store.ts`):
-    // never overwrite a catalog file this build cannot read. An unknown NUMERIC
-    // version means a NEWER build wrote it; clobbering it destroys data we
-    // cannot see. The in-memory record keeps serving either way (a refusal only
-    // stops the DISK write), so this is a `degrade`, not an error — PITFALLS
-    // §37: swallow the failure, not the reason.
-    const existing = await readStateVersion(file);
-    if (!isKnownStateVersion(existing, KNOWN_CATALOG_VERSIONS)) {
-      degrade(
-        `catalog: refusing to overwrite catalog.json holding version ${existing} (this build knows ${KNOWN_CATALOG_VERSIONS.join("/")})`,
-        null, logger, null
-      );
-      return;
-    }
-    const temporary = temporaryOf(stateDir, "catalog.json", now);
-    try {
-      await ensureStateDir(stateDir);
-      await writeStateFile(file, JSON.stringify(held), { temporary });
-    } catch {
-      // The in-memory record still serves this process.
-      await rm(temporary, { force: true }).catch(() => {});
-    }
+    if (held == null) return;
+    await writeCatalog(held).catch(() => {});
   };
 
   return {
