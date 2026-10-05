@@ -6,7 +6,7 @@
 
 ## 0. 已锁死的前提（来自 §5，这里不复制其表）
 
-- **三条不变量**：每个新模块 opt-in 默认关；凭据红线不动；只吸与商汤 Key / 账号线强相关的能力。
+- **三条不变量**：每个新模块 opt-in 默认关；凭据红线不动；只吸与商汤（SenseTime）**产品线**强相关的能力（划线依据 2026-10-01 已由「Key/认证域」放宽为「厂商归属」，沿革见 [ADR.md](./ADR.md) ADR-002）。
 - **能力事实**：本插件**可**向 DSH 注册推理 provider（`sensenova-token-plan`）。它是否成为某台机器的默认推理通道，由该机的 profile 与用户模型选择决定，**不随插件注册自动成立**（`agent-default-model` 是宿主的选择记录服务，见 [IMPROVEMENTS.md](./IMPROVEMENTS.md) §1.2 的撤销注记）；一旦某 profile 真的把它选作默认模型，故障域就从「Plugins 页里的只读面板」升级为「推理可用性」，这是**条件性**的爆炸半径，不是既成事实。
 - **角色**：从「只下发信息」升级为「信息 + 执行」，但每块执行都挂在三条不变量下。
 
@@ -45,8 +45,8 @@ F3（并发 publish「最后发起者最终注册」门控）依赖对 `index.js
 | 步骤 | 内容 | 门禁 |
 |---|---|---|
 | ① 抽模块 | 新建 `provider-publish.js`：`createProviderPublisher({ settings, panelSwitch, loadAdapterModule, getLlm, onEvent, logger })` 返回 `{ publish, release, dispose, state }`；内部持有 `publishChain` / `disposed` / `registerPair` 单点定义（PITFALLS §18/§19 语义原样迁移） | `test/wiring.test.mjs` F3 改为对新模块注入（gate 语义不变），原 F3 红→绿即完成 |
-| ② 瘦 router | `index.js` 只留路由 handler + 快照组装 + 各 store 接线；`providerState` 改为 `publisher.state` 只读引用；目标 `index.js` < 700 行 | `test/routes.test.mjs` + `test/provider.test.mjs` 全绿；快照 14 键契约零改动（`docs.test.mjs` §5 门禁） |
-| ③ 第二个 IIFE 收编 | draw 注册（`index.js:558-597` 的 `void (async () => {...})()`）改走 publisher 的 `onEvent` 钩子或独立 `draw-register.js`，与 ① 同批评审 | `test/draw.test.mjs` 全绿；快照契约仍零改动（工具缺席时 14 键不变） |
+| ② 瘦 router | `index.js` 只留路由 handler + 快照组装 + 各 store 接线；`providerState` 改为 `publisher.state` 只读引用；目标 `index.js` < 700 行 | `test/routes.test.mjs` + `test/provider.test.mjs` 全绿；快照 15 键契约零改动（`docs.test.mjs` §5 门禁） |
+| ③ 第二个 IIFE 收编 | draw 注册（`index.js:558-597` 的 `void (async () => {...})()`）改走 publisher 的 `onEvent` 钩子或独立 `draw-register.js`，与 ① 同批评审 | `test/draw.test.mjs` 全绿；快照契约仍零改动（工具缺席时 15 键不变） |
 
 **不变量**：① 并发语义（`publishChain` 串行、`disposed` 闸、慢者赢修复）与 ② 回滚语义
 （`registerPair` 单点、factory 结果 await + 形状校验）必须**原样**迁过去，不是重写；
@@ -97,7 +97,7 @@ live 档在 `package.json` 加 `test:live:contract` 脚本（与 `test:live` 并
 
 | 检查点 | 结论 |
 |---|---|
-| `retryPolicy` 落点 | `llm-adapter.js:127` 唯一 `profiles` 条目（`LLM_PROVIDER_ID`），**provider 全局级**，非 model 级 |
+| `retryPolicy` 落点 | `llm-adapter-core.ts:218` 的 `resolveRetryPolicy(buildRetryPolicyConfig(), …)`，命名空间 `<plugin>.<providerId>.retryPolicy`；由 §5.5「adapter 装配共用」收敛，SenseNova 与小浣熊两 adapter 共用同一份；**provider 全局级**，非 model 级 |
 | descriptor 是否带 per-model retry | `llm-models.ts` `toPiDescriptor` 无 retry/quota 字段，全局策略即全 model 一刀切 |
 | quota 数据源粒度 | `parsers.ts` `parsePools` 每个 pool 带 `modelIds`，额度是 **pool 级归组**，model 级差异化无数据支撑 |
 | 推论 | 保持**全局** retry 策略（最低侵入）+ **per-model 可用性标记**（descriptor 重建时按 pool 耗尽打标） |
@@ -122,7 +122,7 @@ per-model 可用性标记即用户要的「清单自带识别」——但它是 
 
 - **重试策略（全局，1 行 peer 改动）— 已实现**：`llm-retry.ts` 导出 peer-free 的
   `buildRetryPolicyConfig()`（显式 `mode:"normal"`、`retryableCodes` 排除 `QUOTA`/`ACCOUNT_QUOTA`、保留
-  `RATE_LIMIT` 并略调 backoff 对共享池更温和），`llm-adapter.ts:127` 改为
+  `RATE_LIMIT` 并略调 backoff 对共享池更温和），`llm-adapter-core.ts:218` 已调用
   `resolveRetryPolicy(buildRetryPolicyConfig(), ...)`。peer 已默认对 `RATE_LIMIT` 退避、对 `QUOTA` 快速失败，本改动是把意图固定下来并防未来 peer 默认漂移。
 - **quota→provider 桥 — 已实现**：快照处理器用 `exhaustedModelIds(pools)`（`llm-models.ts`）算出借尽池覆盖的模型集，经 `publishProvider(entries, enabledIds, unavailableModelIds)` 透传给 `createSensenovaAdapter`，由 `buildDescriptors` 在 picker 侧排除（避免发出必 429 的请求）；另以 `quotaSignature`（`index.ts`）去抖，仅在额度跨越零点时触发一次重注册（memoize 约束下唯一生效路径）。
 - **per-model 可用性（「清单自带识别」）— 已实现**：`buildDescriptors`（`llm-models.ts`）按 `pool.remaining<=0` 在 picker 侧排除借尽模型；面板则通过 `rosterWithAvailability(entries, pools)` 列出全部 chat 模型并附 `available`/`quotaExhausted` 标记（始终可见、灰色显示原因）。不依赖 peer 钩子，随 `publishProvider` 重建即生效。

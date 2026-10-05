@@ -48,7 +48,7 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 | `trendMultipliers` | `{"glm-5.2":10,"kimi-k3":20,"sensenova":1,"deepseek":1}` | 消耗趋势的**伪倍率**（自定义对比用，非官方数据）：键为模型 id 的大小写不敏感子串（按书写顺序首个命中生效），值为正数。面板以 `×N` 角标显示并附「非官方」说明，消耗趋势与「模型接入」花名册用**同一匹配器、同一取值**；显式设 `{}` 可全部关闭。非法条目（键空 / 值 ≤0 或非数字）被静默丢弃 |
 | `cacheSeconds` | `60` | Host 侧缓存秒数；面板脚注直接引用此值 |
 | `pollSeconds` | `30` | 面板轮询间隔，由 Host 下发、面板跟随（不再硬编码 30s） |
-| `allowedHosts` | — | 追加可信 `Host` 名（默认 `localhost` / `127.0.0.1` / `::1`，只增不替） |
+| `allowedHosts` | — | 追加可信 `Host` 名（默认 `localhost` / `127.0.0.1` / `[::1]` / `::1`，只增不替；`[::1]` 是浏览器 IPv6 `Host` 头的常见形态，`hostName()` 专门保留括号） |
 | `tokenSkewSeconds` | `120` | 提前多久续期，避免撞过期边界 |
 | `apiBase` | `https://token.sensenova.cn/v1` | 推理 API 源站（模型目录） |
 | `iamBase` | `https://iam.sensecoreapi.cn` | 接受加密密码的 IAM 源站 |
@@ -66,10 +66,11 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 | `drawEnabled` | `false` | 出图吸收（§5.4 接法 B）：**opt-in**，是否给 agent 注册 `sensenova_draw_image` 工具（POST `{apiBase}/images/generations`，用面板保存的 `SENSENOVA_API_KEY`）。出图模型由 catalog 的 `output_modalities` 结构化识别（不用名字正则），Key 每次调用现取；失败后 30s 冷却。默认关——agent 工具是 Host 级变更；无 tools 服务的 Host 上该工具静默缺席。0.4.2 起面板「模型接入」区有真开关（`POST /api/<name>/draw`），勾选保存后在插件私有状态文件里记录，立即生效、无需重启 Host；未动过面板开关的部署，行为与 `false` 一致 |
 | `drawModelId` | `""` | 首选出图模型 id；留空 = catalog 里第一把出图模型（如 `sensenova-u1-fast`）。工具调用显式传 `model` 时以调用为准 |
 | `drawTimeoutMs` | `120000` | 单次出图请求超时（出图模型很慢，别用对话级超时）；下限 5000 |
+| `webSearchEnabled` | `false` | 小浣熊内置联网搜索（见 [ROADMAP.md](./ROADMAP.md) §6.1.7）：**opt-in**，向 `ctx.web` 注册 Raccoon 托管的 `web_search` provider，复用 Raccoon 凭据链，并按 commandcode 方式**接管** `searchProviderId`（防 `WEB_PROVIDER_AMBIGUOUS`），保存后即时生效、teardown 恢复被顶掉的后端。需 Host 暴露 `ctx.web` 服务，无则静默缺席 |
 
 端点类字段仅在企业镜像 / 预发环境指向别的主机时才需要动；全部不配即等于平台默认值。任意端点覆盖若不是合法的 http(s) 绝对地址，插件在**挂载时**就报 `config_error`（面板顶部显示），而不是等到第一次轮询才变成莫名其妙的网络错误。
 
-> 上表主机层字段的默认值（含 `allowedHosts` 的 `localhost`/`127.0.0.1`/`::1`）统一定义在 `index.ts` 的 `CONFIG_DEFAULTS`，并由 `test/config.test.mjs` 与 `cordis.patch.yml` 双向钉住；auth 类字段留空即表示"使用平台默认"，其生效值定义在 `sensenova-auth.ts` 的 `AUTH_DEFAULTS`，不在此重复。
+> 上表主机层字段的默认值（含 `allowedHosts` 的 `localhost`/`127.0.0.1`/`[::1]`/`::1`）统一定义在 `src/host/host-config.ts` 的 `CONFIG_DEFAULTS`（`src/host/index.ts` 仅 import 并在末尾再 export，非定义处），并由 `test/config.test.mjs` 与 `cordis.patch.yml` 双向钉住；auth 类字段留空即表示"使用平台默认"，其生效值定义在 `src/host/auth-config.ts` 的 `AUTH_DEFAULTS`（2026-10 从 `sensenova-auth.ts` 拆出，见该文件头注释），不在此重复。
 
 ---
 
