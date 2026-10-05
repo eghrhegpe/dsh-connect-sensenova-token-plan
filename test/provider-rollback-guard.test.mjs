@@ -21,7 +21,9 @@ import {
   createPairReleaser,
   registerProviderPair,
   swapRegistration,
-  createAdapterFactoryResolver
+  createAdapterFactoryResolver,
+  resolveRegistrationService,
+  NO_LLM_SERVICE_ERROR
 } from "../src/host/publish-core.ts";
 
 const PROVIDER_ID = "test-rollback-guard";
@@ -150,6 +152,39 @@ function check(name, condition, detail = "") {
   const third = await resolver();
   check("the resolver still loads the module once on the happy path",
     attempts === 2 && third === "factory", `attempts=${attempts} third=${String(third)}`);
+}
+
+// --- The `!llmAvailable` branch must clear `state.built` too ----------------
+// A stale `built` survives into the NEXT publish as its rollback target
+// (`previousBuilt = state.built`), so a later failed publish would re-register
+// an adapter whose release has already been called — the rollback only runs
+// once something else has already gone wrong, which is the worst moment to
+// find out. This branch used to hand-roll `release(); registered = false`
+// instead of routing through `unregister`, and `unregister` is the one place
+// that clears it.
+{
+  let releasedCount = 0;
+  const state = {
+    registered: true,
+    built: { adapter: { id: "adapter-A" }, providerIds: [PROVIDER_ID] },
+    error: null,
+    llmAvailable: true,
+    releaseAdapter: () => { releasedCount += 1; },
+    releaseDirectory: null
+  };
+  const service = resolveRegistrationService({
+    state,
+    getLlm: () => null,
+    release: createPairReleaser(state)
+  });
+  check("no llm service resolves to null", service === null, String(service));
+  check("the pair was released rather than left registered",
+    releasedCount === 1 && state.registered === false,
+    `released=${releasedCount} registered=${state.registered}`);
+  check("the reason is the shared constant",
+    state.error === NO_LLM_SERVICE_ERROR, String(state.error));
+  check("the stale built adapter was cleared (no dead rollback target)",
+    state.built === null, JSON.stringify(state.built));
 }
 
 console.log(`\nprovider-rollback-guard: ${passed} passed, ${failed} failed`);

@@ -271,6 +271,13 @@ export function warnBuildFailure(logger: { warn?: (message: string) => void } | 
  * fact about the Host — not about the provider — so it is one copy: a Host
  * with no `llm` service gets no registration and a stated reason, never a
  * half-built one.
+ *
+ * The absence routes through {@link unregister}, not a hand-rolled
+ * `release(); registered = false`: `state.built` must go down with it. A
+ * stale `built` survives into the NEXT publish as its rollback target, so a
+ * later failed publish would re-register an adapter whose release has already
+ * been called — a rollback path running against a dead pair, which is the
+ * worst possible moment to discover the divergence.
  * @param {object} job
  * @param {object} job.state - the publisher state.
  * @param {(service: string) => object|null} job.getLlm - the service resolver.
@@ -281,9 +288,7 @@ export function resolveRegistrationService({ state, getLlm, release }: { state: 
   const llm = getLlm("llm");
   state.llmAvailable = llm !== null && typeof llm.registerAdapter === "function";
   if (!state.llmAvailable) {
-    release();
-    state.registered = false;
-    state.error = NO_LLM_SERVICE_ERROR;
+    unregister({ state, release, error: NO_LLM_SERVICE_ERROR });
     return null;
   }
   return llm;
