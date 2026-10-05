@@ -2,10 +2,23 @@
 /**
  * Build configuration. `src/` holds ALL sources (host + client); `lib/` and the
  * root `client.js` are build artifacts that are **versioned on purpose** — the
- * DSH marketplace installs from `github:`, and that install path does not run
- * `prepack`, so an untracked `lib/` ships a package whose `main` does not
- * exist. Rationale and the freshness gate that protects it: `test/build-gate.mjs`
- * and `.gitignore`'s own comment; decided in ADR-005.
+ * DSH marketplace installs plugins with pnpm, and pnpm refuses to run build
+ * scripts for git deps outright (`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`; the fix
+ * is an `allowBuilds` allowlist entry, which a plugin installer does not have).
+ * So "swap `prepack` for `prepare` and let the install build itself" is a DEAD
+ * END: npm does run `prepare` on a git install (verified 2026-10-05), pnpm does
+ * not. Without a committed `lib/`, the GitHub-direct install ships a package
+ * whose `main` does not exist. The npm registry channel is unaffected (`prepack`
+ * builds the tarball), but it cannot rescue the GitHub channel. Rationale and the
+ * freshness gate that protects it: `test/build-gate.mjs` and `.gitignore`'s own
+ * comment; decided in ADR-005.
+ *
+ * Chunk names carry NO content hash (`chunkFileNames: "[name].js"`, host entry
+ * below): a rebuild then edits the same filenames in place, so `git status` shows
+ * one `M` per changed chunk instead of a `D` + untracked-new pair, and a
+ * path-limited commit stops silently dropping a freshly-named chunk (AGENTS.md).
+ * The gate reads no hardcoded name list — it walks the emitted graph — so this
+ * config change does not move its baseline.
  *
  * Two entries:
  *
@@ -62,19 +75,28 @@ export default defineConfig([
     // accident: the adapters are only needed once a provider is actually
     // published, so a Host running the panel alone never parses them.
     //
-    // The consequence to keep in mind when editing: `lib/` is a CHUNK GRAPH
-    // whose chunk names carry a content hash, so `lib/index.js` is only valid
-    // alongside the exact chunks it names. A partial `git add lib/` (committing
-    // the entry but not a renamed chunk) ships a package that throws
-    // ERR_MODULE_NOT_FOUND at plugin load. `test/build-gate.mjs` walks the graph
-    // from this entry and fails on a dangling or orphaned chunk, with no
-    // toolchain needed.
+    // The consequence to keep in mind when editing: `lib/` is a CHUNK GRAPH, so
+    // `lib/index.js` is only valid alongside the exact chunks it names. A partial
+    // `git add lib/` (committing the entry but not a chunk that is not yet
+    // tracked) ships a package that throws ERR_MODULE_NOT_FOUND at plugin load.
+    // Chunk names carry NO content hash, so a chunk becomes untracked only the
+    // FIRST time a split module is introduced — never on a plain edit.
+    // `test/build-gate.mjs` walks the graph from this entry and fails on a
+    // dangling or orphaned chunk, with no toolchain needed.
     splitting: false,
     clean: true,
     minify: false,
     sourcemap: false,
     dts: false,
     outExtensions: () => ({ js: ".js" }),
+    outputOptions: {
+      // Both pinned WITHOUT a content hash. The entry pin is belt and braces (the
+      // default already yields `index.js` for `src/host/index.ts`); the chunk pin
+      // is the whole point — a stable name makes a rebuild rewrite the same file
+      // in place instead of emitting a differently-named twin next to a dead one.
+      entryFileNames: "index.js",
+      chunkFileNames: "[name].js"
+    },
     deps: { neverBundle: [...NEVER_BUNDLE] },
   },
   {

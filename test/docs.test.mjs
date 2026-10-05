@@ -629,8 +629,9 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
 // 14) 现行文档里源码引用的扩展名必须与 src/ 一致（.js → .ts）
 // 事故教训（2026-10-05）：源码 2026-09-30 全量 .ts 化后，现行手册里仍留着
 // `llm-models.js` / `codes.js` / `throttle-store.js` 这类**按名找不到**的引用——
-// src/ 下是 .ts，lib/ 下是带内容 hash 的 chunk（`llm-models-B1R59IKU.js`），
-// 裸 `llm-models.js` 在磁盘上根本不存在，而门禁 1-13 只查链接/条目数/契约，
+// `llm-models.js` / `codes.js` / `throttle-store.js` 这类**指向产物而非源码**的
+// 引用——文档该指向 src/ 下的 .ts（`lib/` 里的 chunk 名与源码同名，指向产物会让
+// 「读源码」和「读产物」混成一团）；门禁 1-13 只查链接/条目数/契约，
 // 不查反引号裸引用，于是全绿放过了整整一类。本次共修 17 处。
 // 豁免两件事：
 //   ① 历史/研究/路线图档与版本账（IMPROVEMENTS / TOKEN-STORE-SPLIT /

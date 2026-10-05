@@ -53,13 +53,14 @@ const check = (name, pass, detail = "") => {
 // VERSIONED, so a partial `git add lib` ships a package whose host entry
 // resolves into a chunk that is not in the tarball.
 //
-// This is not hypothetical. `lib/` is a CODE-SPLIT graph whose chunk names
-// carry a content hash (`llm-adapter-17gZQlIS.js`), and the split is load-bearing
-// for LAZINESS, not an accident — `llm-adapter.ts` and `raccoon-llm-adapter.ts`
+// This is not hypothetical. `lib/` is a CODE-SPLIT graph (`llm-adapter.js`,
+// `raccoon-llm-adapter.js`, … — the names carry no content hash), and the split
+// is load-bearing for LAZINESS, not an accident — `llm-adapter.ts` and
+// `raccoon-llm-adapter.ts`
 // are reached through `import()` so the panel never pays for an adapter it does
 // not use (lib/index.js:4420, :7453). That shape has exactly one bad failure
-// mode: rename one file, rebuild, and `git add src/` without `git add lib/`
-// leaves `lib/index.js` importing a chunk name that no longer exists. Node then
+// mode: add a split module, rebuild, and `git add src/` without `git add lib/`
+// leaves `lib/index.js` importing a chunk that is not in the commit. Node then
 // throws ERR_MODULE_NOT_FOUND at PLUGIN LOAD, inside the user's Host, on the
 // first request — a bad install, not a caught error. `git diff --exit-code -- lib`
 // (CI's build-freshness job) cannot see it either: it runs a build first, so the

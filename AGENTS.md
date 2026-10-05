@@ -123,10 +123,14 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   提交后用 `git status --short` 确认留下的只剩对方的改动。
 - ⚠️ **路径限定提交只带得上「已跟踪」的文件，新建的一概漏掉**（2026-10-05 撞过）：
   `git commit -- <路径>` 不含 `--include`/`-a`，**untracked 的新文件不会被纳入**。
-  改过 `src/` 后 `npm run build` 的产物正好踩这条——tsdown 生成的 chunk 文件名带内容
-  hash，于是「旧 chunk 被删、新 chunk 是 untracked」：`-- src lib` 只带上了已跟踪的
-  `lib/index.js`，结果它引用磁盘上不存在的分块，而**GitHub 直装源不跑 prepack，装到就坏**。
-  改 `src/` 的提交里，产物目录要先 `git add <产物目录>` 再 `git commit`（不带路径），
+  那次事故的直接原因是 chunk 文件名带内容 hash：改 `src/` 一 build 就变成「旧 chunk
+  被删、新 chunk 是 untracked」，`-- src lib` 只带上了已跟踪的 `lib/index.js`，结果它
+  引用磁盘上不存在的分块，而**GitHub 直装源不跑 prepack，装到就坏**。
+  **该失效面已在 2026-10-06 收窄**（`tsdown.config.mjs` 的 `chunkFileNames: "[name].js"`，
+  不带 hash）：产物名稳定，改 `src/` 一 build 是**原地修改**（git 显示 `M`），不再产生
+  「删旧 + 新增 untracked」这一对。剩下的唯一触发条件是**新增一个切分模块**（新的
+  `import()` 目标）——那一次的新 chunk 仍是 untracked。所以纪律不变：改 `src/` 的提交里，
+  产物目录要先 `git add <产物目录>` 再 `git commit`（不带路径），
   或分两次提交（第二次专门补产物，提交信息写明是补漏）。
   复核姿势：`git status --short` 应为空；再 `git ls-files <产物目录>` 数一遍文件数，
   对得上构建输出才对。
