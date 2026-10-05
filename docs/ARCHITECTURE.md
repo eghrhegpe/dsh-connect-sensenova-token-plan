@@ -43,7 +43,7 @@
 - `routes.ts`：**路由门面**（2026-10 拆分：先冻结行为再搬，`routes.test.mjs` + `wiring.test.mjs` 拆分前后零漂移）——`registerRoutes(ctx, wiring)` 只做装配与注册顺序，返回 7 个 `off()` 回执；同源闸、body 上限、`writeJson` 等共享原语在 `routes/http.ts`，snapshot / account / api-key / provider / models / draw / raccoon 七条路由各自一个模块（`routes/<resource>.ts`，每个模块声明自己的路径常量）。小浣熊的**读模型**已抽出为 `raccoon-status.ts`（原先它是 handler 内一个 190 行闭包），`routes/raccoon.ts` 只剩扫码 walk 与四个 mutation。
 - `lifecycle.ts`：Host 生命周期——`registerRoutes` / `startSideEffects`（catalog / raccoon seed、draw 工具注册、web-search restore、vision restore）/ `teardown`（dispose + release + off×7）。
 - `host-config.ts`：配置契约——`CONFIG_DEFAULTS`、`resolveSettings` / `resolveAuthOverrides`（含嵌套 `auth:` 块拒绝）、`isAdmitted` 同源闸、`hostName` 解析。
-- `codes.ts`：全部错误码与 IAM 平台原因码的唯一声明处。`sensenova-auth.ts` 产出、`token-store.ts` 判定是否 parked、`index.ts` 判定是否属于「拿不到令牌」，三处都从这里取。
+- `codes.ts`：全部错误码与 IAM 平台原因码的唯一声明处。`sensenova-auth.ts` 产出、`token-store.ts` 判定是否 parked、`snapshot-aggregate.ts` 判定是否属于「拿不到令牌」（`isAuthFailure` 的消费方，2026-10 已从 `index.ts` 移出），三处都从这里取。
 - `token-store.ts`：凭据服务里的令牌与账号存取、按期续期、401 拒绝记忆。已按 §TOKEN-STORE-SPLIT.md 拆为薄 facade + 六块子模块（`token-store/{state,grant,throttle,account,renewal,acquire}.ts`）。
 - `throttle-store.ts`：登录节流状态，写在插件自己的状态文件（`$DSH_HOME/state/<plugin>/throttle.json`，原子写、0600），跨进程跨重启生效。
 - `sensenova-auth.ts`：OIDC 授权码流登录 + `refresh_token` 静默续期。
@@ -311,7 +311,7 @@ lifetime `AbortController` + `AbortSignal.any` 超时合并模式（line 103-115
   Key 每次调用现取（`resolveApiKey`，轮换即生效）；失败分诊沿用 429 纪律
   （`insufficient/quota` → 配额问题，别重试；其余 429 → 限频，等再试）；
   失败后 30s 冷却（借自上游 line 196）。
-- 快照契约**零改动**（14 键不动，`API.md` 不变）：工具要么在要么不在，
+- 快照契约**零改动**（15 键不动，`API.md` 不变）：工具要么在要么不在，
   agent 直接可见；面板不新增展示。
 
 ### 5.5 边界裁定：第二上游（小浣熊）属于界内（2026-10-01，沿革见 [ADR.md](./ADR.md) ADR-002）

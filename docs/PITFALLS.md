@@ -134,8 +134,7 @@
   `Cannot find package '@earendil-works/pi-ai' imported from …/plugins/dsh-connect-sensenova-token-plan/llm-adapter.js`；
   而离线套件（连 `npm test` 全量）**全绿**，因为离线套件通过 `peer-roots.mjs` 从 Host 运行时就地解析 peer，
   走的不是插件自己的解析链。
-- **根因**：`llm-adapter.ts` 要 import Host 发行的三个 peer（`@earendil-works/pi-ai`、
-  `@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-llm-pi-ai`），而 Node 的裸模块解析是从**该文件所在目录**逐级向上找
+- **根因**：三个 peer（`@earendil-works/pi-ai`、`@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-llm-pi-ai`）由 `llm-adapter-core.ts` 导入（2026-10-02 §32 的「adapter 装配共用」收敛后落在那里，并声明在 `peerDependencies`），而 Node 的裸模块解析是从**该文件所在目录**逐级向上找
   `node_modules`。npm 装进 profile 的插件（`profiles/web/node_modules/<name>` 是**真实目录**）会向上走到
   `profiles/node_modules`，那里有 Host 的 peer；开发期的 `~/.dsh/plugins/<name>` 是**符号链接/junction** 进
   profile 的，Node 默认把链接解成 realpath，于是解析链从插件目录向上只剩 `~/.dsh/plugins`、`~/.dsh`、`~`，
@@ -366,7 +365,7 @@
 - **根因**：三元只保护了**调用**，`.catch` 却挂在三元**结果**上——缺席分支给的是 `null` 而不是 promise。于是这个"防御性"表达式只在**不需要防御的那一支**上是安全的，真正需要它的那一支直接崩。更麻烦的是它**读起来是有防护的**（明明有个 `?` 和一个 `.catch`），review 的眼球滑过去不留痕；这也解释了为什么它没在写的时候被发现。
 - **修法**（2026-10-02 已做）：`optional(value)` 进 `util.ts` —— `Promise.resolve(value).catch(() => null)`，把「不是 promise」和「rejected promise」统一读成"没有答案"，守卫就落在**调用点**而不是调用结果上。全仓**四处**一并换掉：新模块的 `raccoonSwitch.enabled()` / `enabledIds()`，以及 `routes.ts` 里同形状的 `drawStore.enabled()` / `drawStore.modelId()`（画图路由的 `answer()`，每请求都跑）——抽公共原语而不是只修自己这一处，理由与 PITFALLS §32 同：**同类 bug 会漂移，收在一处才不再有第二份可漂移的副本**。
 - **验证**：`test/raccoon-status.test.mjs` F 组用 `switchStore: null` 直接驱动，断言是「off + 降级」而不是抛错；修前同一输入会把**整组**检查一起带走（异常逃出组内 try，后续断言全部不执行）。新套件 46 项，`package.test.mjs` 的三方名册钉子（磁盘 ↔ `npm test` ↔ CI）同时钉住它的注册。
-- **教训**：**判断一个表达式是否真有防护，要看哪一条分支会走到那层防护，再用一个真的走那条分支的测试证明它**。`a ? a.b() : null` 这类形状正是"看起来有防护"的重灾区。顺带一个正面收获：把闭包抽成注入式模块的额外收益，不是行数变少，而是**缺席变成了可表达、可达的状态**——在路由里它被 wire 保证为非空，这个 bug 本可以永久潜伏。抽模块（`routes.ts` 1243 → 990 行，读模型 387 行、可脱开路由单测）真正的价值在此。
+- **教训**：**判断一个表达式是否真有防护，要看哪一条分支会走到那层防护，再用一个真的走那条分支的测试证明它**。`a ? a.b() : null` 这类形状正是"看起来有防护"的重灾区。顺带一个正面收获：把闭包抽成注入式模块的额外收益，不是行数变少，而是**缺席变成了可表达、可达的状态**——在路由里它被 wire 保证为非空，这个 bug 本可以永久潜伏。抽模块（`routes.ts` 收为 65 行门面、路由体在 `routes/<resource>.ts`，读模型 387 行独立在 `raccoon-status.ts`、可脱开路由单测）真正的价值在此。
 
 ---
 
@@ -384,7 +383,7 @@
 
 - **现象**：`raccoon-tab.ts` 的整棵渲染树由内部 `useState` 决定。而 `test/client-surface.js` 的 React 替身里，`useState` 只返回初值、`useEffect` 是空操作——所以**挂载 tab 永远只看到登出帧**（旧文件头自己承认了这点，并把 `RaccoonRoster` 拆出去当作补救）。于是这些一条断言都没有：余额 + 网关拆解 + **两个**凭据时钟并进同一行的折叠、过期凭据渲染成 `alert` 而非状态行、nickname 为空时不留悬空冒号、`已启用未登录` 与 `未注册` 两种措辞的分野、注册失败在开关**关闭**时仍可见。这些不是边角——过期告警和那两种措辞，恰恰是用户在出故障时唯一能读到的东西。
 - **根因**：把「数据从哪来」和「画成什么样」绑进了同一个函数。hook 是取数与生命周期的工具，不是渲染的必需品；state 一旦关进 hook 的闭包，测试要够到那些帧就只能自己重实现一遍 hook 契约——**那是在测假货**（`client-surface.js` 的注释把这条线划得很清楚：宁可留一个写明了的缺口，也不假装）。
-- **修法**（2026-10-02 已做）：新建 `src/client/raccoon-card.ts`，**无 hook**，`state` 走 props；`RaccoonState` 接口、`qrImageOf`、以及「对整份 roster 取反」的 id 推导一并迁入。`raccoon-tab.ts` 只留生命周期：轮询与两档 cadence、四个 mutation、unmount 清理、向 header 上报新鲜度（616 → 235 行）。`tt` 在套件里是 identity，所以断言钉的是**哪个键渲染出来了**，不是译文。
+- **修法**（2026-10-02 已做）：新建 `src/client/raccoon-card.ts`，**无 hook**，`state` 走 props；`RaccoonState` 接口、`qrImageOf`、以及「对整份 roster 取反」的 id 推导一并迁入。`raccoon-tab.ts` 只留生命周期：轮询与两档 cadence、四个 mutation、unmount 清理、向 header 上报新鲜度（616 → 235 行；此后又随 tab 增改回长到约 442 行——行数是时点快照，别当契约）。`tt` 在套件里是 identity，所以断言钉的是**哪个键渲染出来了**，不是译文。
 - **验证**：`test/render.test.mjs` 新增 21 条（165 → 186）。其中 8 条第一版是红的，根因是我自己写错了：`lineHas` 去读 `props.children`，而测试替身的 `h` 把 `children` 挂在**元素**上而不是 `props` 上——改用现成的 `texts()` 做**精确节点比对**（顺带避开 `raccoon.unregistered` 是 `raccoon.unregisteredChip` 前缀这个子串陷阱，`includes` 会在错误的帧上报"有"）。
 - **教训**：**「这个组件的状态测不到」通常不是测试能力不够，是组件把状态私有了。** 判据很直接：把 state 提成 props 会让组件变差吗？不会——那它本来就不该私有。同一条规则在本仓库已经落地三次：host 侧 `raccoon-status.ts`、`snapshot-aggregate.ts`，client 侧 `RaccoonRoster`；这次只是把同一件事做完。附带一个可复用的判据：**只要某段逻辑是 `state` + `tt` 的纯函数，它就没有理由待在 hook 里。**
 
@@ -415,10 +414,10 @@
 ## 38. 同一个仓库有两种行尾：按行尾猜锚点的脚本会「静默什么都没做」
 
 - **现象**（2026-10-05 实测，做`webSearchRestore` 槽重构时连踩两次）：改`src/host/lifecycle.ts` 时，锚点字符串按 LF 写、文件是 CRLF，于是 `String.replace` 与 `Edit` **全部静默失败**。第一次以为是工具的 bug，改用 `node -e` 脚本重试；脚本里 `s.replace(old, next)` 同样不匹配，但**没有断言**，于是脚本照常退出 0，反证测试报「29/29仍绿」——我差点把「破坏没生效」当成「新断言不够狠」。
-- **根因**：`src/`+`test/` 里 **40 个文件纯 CRLF、86 个纯 LF、1 个混合**（`state-store.ts` 有一行孤立的 LF `}`）。两边都不算错（Windows 上的默认产物 vs. 工具写出的新文件），但**没有任何机制声明哪个是规范**，于是每个按字节匹配锚点的人都要重查一遍。而更坏的失效模式不是「报错」，是**「不报错地什么都没发生」**：`replace` 没匹配 → 文件没变 → 反证跑出绿 → 你把假绿当成真绿。这与 §30 根因 3（说谎的注释）是同一个家族：**信号缺失被读成信号正常**。
+- **根因**：`src/`+`test/` 里 **41 个文件纯 CRLF、97 个纯 LF、0 个混合**（2026-10-05 复测；此前记录的「1 个混合 + `state-store.ts` 一行孤立 LF `}`」已随该文件重写消失）。两边都不算错（Windows 上的默认产物 vs. 工具写出的新文件），但**没有任何机制声明哪个是规范**，于是每个按字节匹配锚点的人都要重查一遍。而更坏的失效模式不是「报错」，是**「不报错地什么都没发生」**：`replace` 没匹配 → 文件没变 → 反证跑出绿 → 你把假绿当成真绿。这与 §30 根因 3（说谎的注释）是同一个家族：**信号缺失被读成信号正常**。
 - **修法**（2026-10-05 已做）：
   1. **行尾必须先查，再写锚点**。改文件前 `node -e "const s=require('fs').readFileSync(p,'utf8');console.log((s.match(/\r\n/g)||[]).length,(s.match(/(?<!\r)\n/g)||[]).length)"`——两个数哪个是 0 决定了锚点用什么。**别猜，量。**
   2. **脚本里`replace` 之后必须断言结果变了**。`if (out === s) throw new Error('replace was a no-op')` 一行，能把「静默失败」变成「响亮失败」。同理 `findIndex` 返回 `-1` 时 `splice(-1,1)` 会删掉数组最后一行（本次真发生过：把一个文件的收尾 `}` 删掉，套件报`ERR_INVALID_TYPESCRIPT_SYNTAX`，看起来像语法错误，根因是锚点没找到）。
   3. **反证的有效性自带校验**：破坏前先打印 `replace 生效: true/false`，为 false 就不要看测试结果——测的是没改过的文件，绿得毫无意义。
-- **为什么现在不统一行尾**：40:86 的分裂是历史产物，机械归一化会撞出半个仓库的diff，淹没真正要review 的那几行；且本仓不做跨平台 checkout（Windows 开发、CI 跑同一份），**没有实际故障在等它修**。所以记录判据而不动手：**等它真的咬人时（出现第二种「静默无操作」的失效，或需要在 LF/CRLF 间做字节级断言）再归一**。§33 同一原则——先看它是否已产生真实故障。
+- **为什么现在不统一行尾**：41:97 的分裂是历史产物，机械归一化会撞出半个仓库的diff，淹没真正要review 的那几行；且本仓不做跨平台 checkout（Windows 开发、CI 跑同一份），**没有实际故障在等它修**。所以记录判据而不动手：**等它真的咬人时（出现第二种「静默无操作」的失效，或需要在 LF/CRLF 间做字节级断言）再归一**。§33 同一原则——先看它是否已产生真实故障。
 - **教训**：**当一个工具「什么都没做」而你不知道时，你会把假绿当真绿。** 修法不是更小心地写锚点，是**让无操作变成响亮的**：`replace` 后断言变化、`findIndex` 校验 `-1`、破坏前确认生效。**这与 §30 根因 3 是同一条纪律的两面**——那条讲「注释里的说谎让人以为红色已知」，这条讲「静默的无操作让人以为绿色已验证」。

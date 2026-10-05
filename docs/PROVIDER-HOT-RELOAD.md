@@ -27,7 +27,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 
 本插件选择更贴合自身架构的路径，与 qoder 的偏好存储同构：
 
-1. **开关状态存插件私有状态文件** `state/<profile>/<name>/provider.json`（新模块 `provider-store.ts`，完整性纪律与 `catalog-store.ts`/`throttle-store.ts` 一致：版本化、临时文件 + 原子改名、损坏即读作未设置；按 profile 分段，见 [PITFALLS.md](./PITFALLS.md) §23）。**这套纪律如今是五个开关 store 的同族写法**，共用 `state-store.ts` 的原语（`readStateVersion` / `isKnownStateVersion` / `writeStateFile`）：`provider-store`（本文）、`draw-store`（§7）、`catalog-store`、`raccoon-switch-store`（第二上游的开关）、`throttle-store`；写侧版本护栏的裁定见 [ADR.md](./ADR.md) ADR-006。
+1. **开关状态存插件私有状态文件** `state/<profile>/<name>/provider.json`（新模块 `provider-store.ts`，完整性纪律与 `catalog-store.ts`/`throttle-store.ts` 一致：版本化、临时文件 + 原子改名、损坏即读作未设置；按 profile 分段，见 [PITFALLS.md](./PITFALLS.md) §23）。**这套纪律如今是六个开关 store 的同族写法**，共用 `state-store.ts` 的原语（`readStateVersion` / `isKnownStateVersion` / `writeStateFile`）：`provider-store`（本文）、`draw-store`（§7）、`catalog-store`、`raccoon-switch-store`（第二上游的开关）、`raccoon-web-store`（第二上游的联网搜索开关，见 [ROADMAP.md](./ROADMAP.md) §6.1.7）、`throttle-store`；写侧版本护栏的裁定见 [ADR.md](./ADR.md) ADR-006。
 2. **优先级**：面板保存过的值 > `cordis.patch.yml` 的 `registerProvider`（后者降级为「出厂默认」）。从未动过面板开关的部署，行为与 0.3.0 完全一致。
 3. **面板开关 → `POST /api/<name>/provider`**（同源围栏 + body 上限，与账号/api-key 路由同一信任形状）→ 存状态 → **立即** `publishProvider(当前目录, 当前允许清单)` → 返回去密状态。不用等下一个轮询周期。
 4. 快照 `llm.registerProvider` 回显**生效值**（不再是 patch 直读），新增 `registerSource`（`"panel"` / `"config"`）说明当前值来自哪一侧。
@@ -69,7 +69,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 
 | 文件 | 改动 |
 |---|---|
-| `draw-store.ts`（新增） | 出图开关状态文件 `$DSH_HOME/state/<profile>/<plugin>/draw.json`；完整性纪律与 `provider-store.ts` 完全一致 |
+| `draw-store.ts`（新增） | 出图开关状态文件 `$DSH_HOME/state/<profile>/<plugin>/draw.json`；完整性纪律与 `provider-store.ts` 完全一致。同文件还存**首选出图模型偏好 `drawModelId`**——`POST /api/<name>/draw` 三个载荷分支（`enabled` / `drawModelId` / `forget`），其中 `forget` 只清开关、刻意保留模型偏好 |
 | `index.ts` | wiring 里增补 `drawStore`；传给 `registerRoutes` 与 `startSideEffects` |
 | `lifecycle.ts` | `registerDrawTool` 改为读「面板保存值 > 配置默认值」的生效值，而不是直接读 `settings.drawEnabled` |
 | `routes/draw.ts` | 新增 `POST /api/<name>/draw`（2026-10 路由拆分后按资源归入 `routes/` 家族），与 `/provider` 同一信任形状 |

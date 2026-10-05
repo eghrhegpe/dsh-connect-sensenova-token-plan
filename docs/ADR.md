@@ -30,7 +30,7 @@
 
 - **日期**：2026-10-02
 - **状态**：现行（结构正文见 ARCHITECTURE §2 routes 家族与 IMPROVEMENTS §9.4）
-- **裁定**：`src/host/routes.ts`（875 行单文件）按 token-store 术式拆为 `routes/` 8 模块 + 88 行 facade：`http.ts` 装共享原语（writeJson / 有界 body 读取 / 同源闸 / 方法拒答 / body 上限），snapshot / account / api-key / provider / models / draw / raccoon 各一模块并各自声明路径常量；facade 只留装配与注册顺序。**先冻结行为再搬家**：`routes.test.mjs` + `wiring.test.mjs` + `config.test.mjs` §6b + `raccoon.test.mjs` 单源检查在拆分前后全绿零漂移。
+- **裁定**：`src/host/routes.ts`（875 行单文件）按 token-store 术式拆为 `routes/` 8 模块 + 65 行 facade：`http.ts` 装共享原语（writeJson / 有界 body 读取 / 同源闸 / 方法拒答 / body 上限），snapshot / account / api-key / provider / models / draw / raccoon 各一模块并各自声明路径常量；facade 只留装配与注册顺序。**先冻结行为再搬家**：`routes.test.mjs` + `wiring.test.mjs` + `config.test.mjs` §6b + `raccoon.test.mjs` 单源检查在拆分前后全绿零漂移。
 - **理由**：875 行单文件是全仓最大 Host 文件，七个 handler 挤在同一函数作用域；拆出后每个路由可独立阅读/测试，路径常量随资源走（config.test §6b 的 host 侧扫描同步改为扫 `routes/` 目录）。
 
 ## ADR-004 maxTokens 从「不声明」改为「声明目录权威值」

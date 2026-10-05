@@ -13,7 +13,7 @@ npm run test:list  # 只列名册不执行
 # 按域裁剪（AGENTS.md 要求按域跑，别连着全量；子串匹配，不是 glob）
 node test/run-all.mjs --only=parsers      # 只跑 parsers
 node test/run-all.mjs --only=raccoon     # 四个 raccoon 套件
-node test/run-all.mjs --skip=gate        # 跳过三个构建型 gate
+node test/run-all.mjs --skip=gate        # 跳过含 "gate" 的 4 项：duplication/typecheck/build 三个构建型 + e2e-gate（子串匹配）
 npm run commit:lint  # 提交信息底线（零依赖）：检查 HEAD 一条提交；CI 检查 origin/main..HEAD 内的新提交（见下方 commit 红线）
 npm run test:e2e    # 只跑端到端：真 Host + 假平台，需 dsh CLI 在 PATH
 npm run test:live   # 仅 live-jwks.test.mjs，需联网，验证 JWKS 文档可达
@@ -53,6 +53,8 @@ npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（�
 | `test/doctor.test.mjs` | **CLI 诊断（peer-free）**：`doctor.ts` 对状态文件只读扫描——provider / draw / catalog 开关与生效值、profile 分段目录、零凭据读取 |
 | `test/raccoon.test.mjs` | **第二上游（peer-free）**：小浣熊协议层（扫码信封解析、refresh 轮换、余额/目录读取）、两个 store、描述符映射、publisher 状态机、QR 编码器、开关 store |
 | `test/raccoon-status.test.mjs` | **小浣熊面板读模型（peer-free）**：`raccoon-status.ts` 的 `readRaccoonStatus` 直接以假 store/假缓存驱动——终态事件在**首个 await 之前**读取（T3 修复的排序）、`?debug=1` 脚手架只在显式 opt-in 时出现且代理密码/遮蔽凭据只以指纹出网、缓存键按**凭据指纹**且余额 60 s/目录 300 s（真 `coalesced-fetch` 对桩 fetch 验一次窗口一次调用）、roster 的 live/empty/unreadable 三态、过期凭据的原地续期与过期事实、可选 switch/store 缺席时降级不崩 |
+| `test/raccoon-search.test.mjs` | **小浣熊内置联网搜索（peer-free，见 [ROADMAP.md](./ROADMAP.md) §6.1.7）**：MCP over HTTP 传输（streamable，`initialize` → `tools/call`、`Mcp-Session-Id` 回传、SSE 解析 + 三种错误信封）与 `RaccoonSearchProvider` 挂 `ctx.web` 的注册形状、`searchProviderId` 接管语义 |
+| `test/raccoon-web.test.mjs` | **小浣熊搜索的接管与恢复（peer-free）**：`webSearchEnabled` 开关接管 `searchProviderId`（防 `WEB_PROVIDER_AMBIGUOUS`）、teardown 恢复被顶掉的后端 |
 | `test/state-segmentation.test.mjs` | **PITFALLS §23 分段形状门禁（peer-free，只读源码）**：catalog / provider / draw / raccoon-switch 四个开关态必须走 `profileStateDir(name, profile)`、`profileStateDir(name, null)` 必须回退共享目录、throttle 与凭据 store（api-key / raccoon）**故意不分段**；`index.ts` 把 `profile` 只传给那四个、`createFileThrottleStore()` 不得带 profile；别名「统一它们」即红 |
 | `test/wiring.test.mjs` | **真实 Cordis 容器**里的装配：`inject` 解析、服务注册、路由挂载与卸载、配置错误；第三步的可选 `ctx.get("llm")` 注册对（`registerAdapter` + `registerConfigurableProviders`，id `sensenova-token-plan`）、opt-in 关闭不注册、fiber dispose 释放注册对与三条路由 |
 | `test/live-jwks.test.mjs` | （仅 `test:live`）真实拉取 JWKS 文档，确认封包公钥可达 |
@@ -97,7 +99,7 @@ npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（�
 
 ## 5. 行为冻结基线（`store-baseline.test.mjs`）
 
-`token-store.ts` 已拆成登录 / 续期 / 节流 / 迁移四块（锐评 #5：944 行单体 → 现薄 facade + `token-store/` 六块子模块，落地记录见 [TOKEN-STORE-SPLIT.md](./TOKEN-STORE-SPLIT.md)），但四块共享闭包状态、迁移挂在读路径上，纯搬文件极易静默改掉细语义。`store.test.mjs` 的手写 check 只断言「作者想到的语义」；`store-baseline.test.mjs` 把 store 的**完整可观察面**冻结在 `test/baselines/token-store-behavior.json`：17 个场景、48 帧，每帧记录凭据服务调用序列（read/modify/delete/resolve/set/unset）、节流存储读视图、grant/ref 落盘内容、抛出的 `{code,message}` 与完整 `state()` 对象。
+`token-store.ts` 已拆成登录 / 续期 / 节流 / 迁移四块（锐评 #5：944 行单体 → 现薄 facade + `token-store/` 七块子模块（六块功能模块 `state`/`grant`/`throttle`/`account`/`renewal`/`acquire` + `constants.ts` 常量表），落地记录见 [TOKEN-STORE-SPLIT.md](./TOKEN-STORE-SPLIT.md)），但四块共享闭包状态、迁移挂在读路径上，纯搬文件极易静默改掉细语义。`store.test.mjs` 的手写 check 只断言「作者想到的语义」；`store-baseline.test.mjs` 把 store 的**完整可观察面**冻结在 `test/baselines/token-store-behavior.json`：17 个场景、48 帧，每帧记录凭据服务调用序列（read/modify/delete/resolve/set/unset）、节流存储读视图、grant/ref 落盘内容、抛出的 `{code,message}` 与完整 `state()` 对象。
 
 - **驱动方式**：只走公开 API（`getToken`/`invalidate`/`saveAccount`/`forgetAccount`/`state`），注入脚本化 `auth`、内存凭据服务、共享内存节流存储（第二个 store 实例模拟「重启」）、虚拟时钟；无网络、无 peer、无墙钟，干净检出可跑。
 - **已钉死的阴沟语义**：`not_configured` 绝不写节流；parked 跨重启零新登录；本地退避 60s→120s 翻倍且关窗后 attempt 保留；平台声明的 2h 窗口不被 30 分钟本地帽截断；并发轮询单飞（恰好一次 refresh）；compare-and-set 慢者赢（并发旋转的 grant 不被覆盖）；`refresh_rejected` 无账号回收 vs 有账号重登的岔路；被拒令牌不复播；旧命名空间 grant/节流一次性收养（节流只收养第一条、第二条等 `clearThrottle` 扫）；密码不落盘（`autoRecoverArmed` 只报布尔）；无凭据服务降级并标记 `ephemeral`。

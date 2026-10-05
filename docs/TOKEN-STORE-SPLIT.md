@@ -2,10 +2,10 @@
 
 > 锐评 #5：944 行 `token-store.js` 单体（现 TS 化，见下文状态）。本文是拆分的设计蓝图。
 > 前置护栏：`test/store-baseline.test.mjs`（17 场景 48 帧全行为冻结基线，
-> 见 [TESTING.md §5](./TESTING.md)）。拆分的门禁 = 基线零漂移 + `store.test.mjs` 131 项全绿。
+> 见 [TESTING.md §5](./TESTING.md)）。拆分的门禁 = 基线零漂移 + `store.test.mjs` 全绿。
 >
-> **状态（2026-09-29）：6 步全部落地，token-store 从 944 行收口为薄 facade（现 `token-store.ts` 335 行 + `token-store/` 六块子模块）。**
-> 各块已抽至 `token-store/{state,grant,throttle,account,renewal,acquire}.ts`（源码已 TS 化，构建产物仍为 .js），
+> **状态（2026-09-29）：6 步全部落地，token-store 从 944 行收口为薄 facade（现 `token-store.ts` 351 行 + `token-store/` 七块子模块）。**
+> 各块已抽至 `token-store/{state,grant,throttle,account,renewal,acquire,constants}.ts`（源码已 TS 化，构建产物仍为 .js；`constants.ts` 集中收拢记录地址常量），
 > 全量离线套件 + 基线 48 帧零漂移全绿。剩余：§7 迁移块退役（下次大版本）。
 
 ---
@@ -14,7 +14,8 @@
 
 现状的 944 行不是 4 个独立类，而是 **1 个闭包 + 4 块逻辑**：所有函数共享
 `cached` / `rejected` / `inflight` / `lastError` / `throttle` / `consecutiveRefusals` /
-`passwordSwept` 七个闭包变量，`acquire()` 是四块在运行时交手的唯一缝。直接「按类」
+`passwordSwept` 七个闭包变量（拆分后又加了 `saveInflight`——facade 里 `saveAccount`
+的单一进行中登录，见 §1 表，故实际八变量），`acquire()` 是四块在运行时交手的唯一缝。直接「按类」
 拆（每个函数各建文件、互相回调）会把隐式共享变成 4×4 的交叉引用；按「块」拆
 （每块一个模块 + **一个显式 state 对象**）才能保留「谁在什么时候写哪个变量」的可读性。
 
@@ -40,9 +41,11 @@ token-store/acquire.js acquire()：节流闸门 → grant 新鲜判定 → 续�
                       （四块交手的唯一缝，留在独立模块，不塞进任何一块）
 ```
 
-`token-store.js` 本体保留为**再导出 shim**（`export { createTokenStore } from
-"./token-store/index.js"` 同形），`package.json` 的 `exports["./token-store"]` 与
-`index.js` 的 import 都不改——e2e / wiring 套件零接触。
+现状（2026-10 复核）：`token-store.js` 已 TS 化为**完整的薄 facade**
+`src/host/token-store.ts`——`createTokenStore` 组装 context + 委托六块（实测 351 行），
+`src/host/index.ts` 直接 `import { createTokenStore } from "./token-store.ts"`，而
+`package.json` **没有** `./token-store` 导出。早期规划中的「再导出 shim」没有落地；
+e2e / wiring 套件的注入面由 facade 的**公开选项名与常量 re-export 面保持不变**（§5）保证。
 
 ---
 
@@ -103,7 +106,7 @@ token-store/acquire.js acquire()：节流闸门 → grant 新鲜判定 → 续�
 | 3 | 抽 `token-store/throttle.js`（七函数 + `DEFAULT_LOGIN_BACKOFF_MS`/`MAX_LOGIN_BACKOFF_MS`/`THROTTLE_MARKER` 常量随迁） | 同上，S3/S4/S5/S11 帧重点核对 | `6c9ec96`+`00eeaef` | ✅ |
 | 4 | 抽 `token-store/account.js`（`readUsername`/`readAccount`/`loginFromAccount`/`forgetAccount` + `passwordSwept` 语义 + `USERNAME_REF`/`PASSWORD_REF` 随迁） | 同上，S9c/S10 帧重点核对 | `b44a5f8`+`fd854fa` | ✅ |
 | 5 | 抽 `token-store/renewal.js` + `token-store/acquire.js`（`renewWithRefresh` 经 `store` 回调注入；`acquire` 经 `blocks` 参数注入四块函数，调用次序 = 基线次序） | 同上，S6a/b/c、S7a/b、S8 帧重点核对 | `623b673`+`a0ee546` | ✅ |
-| 6 | `token-store.js` 收口为薄 facade（944 行 → 314 行）：删除全部死委托壳，`createTokenStore` 内 14 行 const 一行委托 + 公开 API 编排；公开导出面不变 | 全量 17 离线套件全绿 | `47c0bdf` | ✅ |
+| 6 | `token-store.js` 收口为薄 facade（944 行 → 351 行）：删除全部死委托壳，`createTokenStore` 内 14 行 const 一行委托 + 公开 API 编排；公开导出面不变 | 全量 17 离线套件全绿 | `47c0bdf` | ✅ |
 | 7（下个大版本） | 退役三处 legacy 迁移（§3 条件满足时），`UPDATE_BASELINE=1` 重生成并在提交信息写明 | 基线（新版）零漂移 | — | ⏳ |
 
 每步**只搬不写**：函数体、注释、调用次序原样移动；唯一允许的新代码是

@@ -27,7 +27,6 @@
 | `dsh-provider-quota/` | git 仓库 | [lizhouai/dsh-provider-quota](https://github.com/lizhouai/dsh-provider-quota.git) | `0.3.15` | 未标注 | 品类对照：泛化「provider 额度面板」= 本插件**不**吸收的边界样本 |
 | `dsh-musage/` | git 仓库 | [Thedeergod666/dsh-musage](https://github.com/Thedeergod666/dsh-musage.git) | `0.1.1` | 未标注 | 同上：跨 provider 通用聚合边界 |
 | `deepseek-harness-codearts-master/` | 本机快照（非 git，zip 解包） | `dsh-codearts-auth`（codearts / buddy / workbuddy / lobsterai / qoder / loomy / raccoon / trae 多 provider 聚合登录插件） | — | 未标注 | 「自有登录 + 凭据服务」形态完整先例；小浣熊微信扫码的事实源（ROADMAP §6.1.1）；其跨 provider 泛化是边界样本 |
-| `dsh-connect-workbuddy-main/` | 本机快照（非 git，zip 解包） | `dsh-connect-workbuddy` | `2.3.1` | 未标注 | 面板 + provider + 模型管理单包形态对照（IMPROVEMENTS §1.1 生态惯例表） |
 | `dsh-raccoon-work-old0.16/` | 本机快照（非 git） | 商汤小浣熊 Raccoon Work 旧版（0.16） | `0.1.2` | 未标注 | 第二上游（小浣熊）的历史形态对照；ROADMAP §6.1 的接入面盘点参考 |
 
 ## 3. 纪律
@@ -43,4 +42,4 @@
 cd upstream/<子目录> && git pull      # git 仓库：浅克隆（--depth 1），要历史先 git fetch --unshallow
 ```
 
-新增参照件时：在 `upstream/` 下并排加**同名目录**（`/upstream/` 规则已覆盖，无需改 `.gitignore`），并在本文件登记来源、版本与「承重在哪」；只做本机对照、与主线无关的，登记到机械清单即可（见根目录 [AGENTS.md](../AGENTS.md) 与 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)）。**不再往 `upstream/` 拉新项目，除非同时定义「提炼出口」**（ROADMAP §6.1 纪律：吸知识不吸代码）。
+新增参照件时：在 `upstream/` 下并排加**同名目录**（`/upstream/` 规则已覆盖，无需改 `.gitignore`），并在本文件登记来源、版本与「承重在哪」；只做本机对照、与主线无关的，登记到机械清单即可（见根目录 [AGENTS.md](../AGENTS.md) 与 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)）。**不再往 `upstream/` 拉新项目，除非同时定义「提炼出口」**（ROADMAP §6.1 纪律：吸知识不吸代码）。**本表只登记磁盘上真实存在的容器**——某个参照件被移除后必须同步删行（曾漏：`dsh-connect-workbuddy-main/` 在目录已不存在、表里还留着）。

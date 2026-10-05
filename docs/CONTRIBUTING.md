@@ -104,8 +104,8 @@ description:
 
 **截图（`screenshots.json`）必须与当前 UI 一致**——它是市场页的第一屏，比描述更先被看到，却也是最容易在 UI 迁移后烂掉的东西：
 
-- **截图已重截**（2026-10-01，0.4.3 面板归位之后；**张数以 `screenshots.json` 为准，这里不写数字**）：`assets/panel-credit.png`（「积分额度」tab：池卡 + 每模型消耗）、`assets/panel-API-provider.png`（「接入 API」tab：语言模型开关 + 花名册勾选）。旧两张 `panel-credit-pools.png` / `panel-provider-setup.png` 拍于归位之前（标题还是「积分面板」、右上角挂着已摘掉的「返回会话」按钮、无 tab bar、模型行带已删的「纯文本」徽章），已删除。
-- 重截条目与 tab 覆盖同理，**每张必须对应一个真实 tab**；仍缺第 ③ 张「小浣熊」= 扫码登录 / 余额 / 花名册。
+- **截图已重截**（2026-10-01，0.4.3 面板归位之后；**张数以 `screenshots.json` 为准，这里不写数字**）：`assets/panel-credit.png`（「积分额度」tab：池卡 + 每模型消耗）、`assets/panel-API-provider.png`（「接入 API」tab：语言模型开关 + 花名册勾选）、`assets/panel-xiaohuanxiong.png`（「小浣熊」tab：扫码登录 / 余额 / 花名册）。旧两张 `panel-credit-pools.png` / `panel-provider-setup.png` 拍于归位之前（标题还是「积分面板」、右上角挂着已摘掉的「返回会话」按钮、无 tab bar、模型行带已删的「纯文本」徽章），已删除。
+- 重截条目与 tab 覆盖同理，**每张必须对应一个真实 tab**；三张已齐备、覆盖三个 tab。
 - **清单与资产必须同一次提交**（2026-10-01 实测事故）：重截换名那次 `assets/` 与 git 都已换成新名，唯独 `screenshots.json` 还指着两个已不存在的文件——工作树干净、构建通过、其余十条检查全绿，**没有任何东西在报错**，而市场按这份清单取图，推上去就是图裂。现由 `docs.test.mjs` 检查 11 兜住：每条路径必须真实存在、是图片扩展名、1–8 张、且为仓库根相对路径。
 - **不要凭想象补图**——画一个不存在的界面比没有图更坏，本插件的市场描述是「每句都会被对照代码核对」。
 

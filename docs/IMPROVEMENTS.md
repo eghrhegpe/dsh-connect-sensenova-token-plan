@@ -64,6 +64,13 @@
    model: Qwen3.8-Flash`。原稿引用的 `provider: sensenova-token-plan` /
    `model: sensenova-6.8-flash-lite / reasoningEffort: high` 在任何现行文件
    （含 `cordis.patch.yml.bak-plugin-manager` 备份）里都不可复现。
+   **⚠️ 2026-10-05 复核：这份 profile 快照本身已被改写。** `agent-default-model` 是
+   运行时可变的选择记录（config schema 里 `provider/model` 均 `.volatile()`），本机
+   `profiles/desktop/cordis.patch.yml` 现已是 `provider: sensenova-token-plan` /
+   `model: sensenova-6.8-flash-lite` / `reasoningEffort: high`（逐字命中原稿引用），
+   `profiles/web` 则改为 `provider: qoder-cn` / `model: Qwen3.8-Flash`。本节要保留的
+   是**机制结论**（不是静态通道声明），不是这份 profile 快照；引用具体 profile 值前
+   请回本机重读。
 2. **机制读错**：`agent-default-model` 是 `@deepseek-ai/dsh-agent-default-model`
    的**"默认模型选择"读写服务**——`lib/index.js:14` 自述 *"Owns the default
    model **selection**"*，`saveSelection()`（`:53-66`）经 `configEditor.edit()`
@@ -178,7 +185,7 @@ step two；`teardown` = dispose→release→off×5）。`index.js` 从 778 行�
 
 > **现状更新（2026-10-03）——本节以上行数已全部作废，勿据此估工作量**：该轮拆分
 > 之后又走了 [ADR.md](./ADR.md) ADR-003（路由按资源拆成 `routes/` 家族，每资源一模块）
-> 与全仓 `.js`→`.ts` 归一。`index.ts` 现为 **339 行**，其中大部分是带 `WHY` 的装配注释；
+> 与全仓 `.js`→`.ts` 归一。`index.ts` 现为 **379 行**，其中大部分是带 `WHY` 的装配注释；
 > 路由门面 `routes.ts` 仅 65 行（只做「决定各 route 能碰 wiring 的哪部分」），七个
 > handler 在 `routes/*.ts`（门面顶部注释列出家族地图）。下文 §2.3 的目标结构与 §5 的
 > 「瘦到 251 行」均已达成且被超越，剩余项只有接线味的残余，不是行数问题。
@@ -399,7 +406,9 @@ no-op 兼容层，**不删**——老 peer 仍需要它）。**不删补丁**是
 
 - **最大的设计张力（核验修订）**：原稿的"名字叫面板、事实是默认推理通道"不成立——
   `agent-default-model` 是 `dsh-agent-default-model` 回写的"上次选择"记录
-  （§1.2：web=agnestokenplan、desktop=qoder-cn），且原引用内容已不可复现。真正的
+  （§1.2：web 曾为 agnestokenplan、desktop 曾为 qoder-cn；2026-10-05 复核后已互换为
+  web=qoder-cn、desktop=sensenova-token-plan，见 §1.2 的复核注记），且原引用内容
+  不可复现属常态。真正的
   张力是**文档没覆盖已注册的 provider 能力**（README/`displayName` 只写"积分
   面板"）——这是"对齐"而非"重构"的问题：改文档 + 面板一行字，不是改架构。
 - **已落地的第一优先项**是 §3.3 ① 的 peer 契约护栏（2026-09-29）：它把
@@ -621,7 +630,7 @@ noImplicitAny 449→0 → strict → exactOptionalPropertyTypes）均走
 ## 9. 姊妹插件对照：`dsh-connect-agnes-token-plan` 的设计差异与借鉴清单（2026-10-02 快照）
 
 > **档案性质**：本文是**研究档案**（同 §1–§8 定位），不是待执行清单。对照对象是
-> 兄弟插件 `~/.dsh/plugins/dsh-connect-agnes-token-plan`（**v0.8.0**，本插件 **v0.4.7**，
+> 兄弟插件 `~/.dsh/plugins/dsh-connect-agnes-token-plan`（**v0.8.0**，本插件 **v0.5.0**，
 > 同一作者 eghrhegpe，同一「大统一」架构家族）。快照日期 2026-10-02；文中 Agnes 侧的行号/
 > 版本/模块清单以该日期的本机源码为准，平台改行为时以实测为准。
 > **一句话结论**：差异不是"两套设计"，而是"同一蓝图、Agnes 多走了 2~3 个版本的重构步"——
