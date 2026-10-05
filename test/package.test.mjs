@@ -17,10 +17,10 @@
  * of failing — the same shape as `build-gate.mjs`, so a machine that has not
  * built is never a regression.
  *
- * It also pins the TEST-GATE roster three ways — the suites on disk, the
- * `npm test` chain, and the CI offline job. The trigger was real:
- * `retry.test.mjs` and `draw.test.mjs` (89 peer-free checks over the 429
- * self-heal and the draw absorption) passed standalone for a whole release
+ * It also pins the TEST-GATE roster: the suites on disk, the `test/suites.mjs`
+ * roster, and the CI offline job's invocation of that same roster. The trigger
+ * was real: `retry.test.mjs` and `draw.test.mjs` (89 peer-free checks over the
+ * 429 self-heal and the draw absorption) passed standalone for a whole release
  * while no gate ran them. A suite that exists but runs nowhere is the same
  * drift class as a module that ships but is missing from `files` — so it
  * earns the same nail.
@@ -28,6 +28,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { SUITES, CI_FLAGS } from "./suites.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -174,12 +175,20 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
 }
 
 // --- 6. the test-gate roster is one fact, not three mirrors ----------------
-// A suite that exists on disk but is not wired into `npm test` runs for
-// nobody; a suite in `npm test` but not in the CI offline job is a local-only
-// gate; a CI line naming a removed file rots silently. All three happened or
-// were one refactor away. `retry.test.mjs` and `draw.test.mjs` (89 peer-free
-// checks over the shipped 429 self-heal and draw-absorption code) sat in the
-// first bucket until this pin.
+// A suite that exists on disk but is wired into no gate runs for nobody; a
+// suite in the roster but not in the CI offline job is a local-only gate; a CI
+// line naming a removed file rots silently. All three happened or were one
+// refactor away. `retry.test.mjs` and `draw.test.mjs` (89 peer-free checks
+// over the shipped 429 self-heal and draw-absorption code) sat in the first
+// bucket until this pin.
+//
+// The roster moved INTO `test/suites.mjs` (2026-10-05) and BOTH entry points
+// now invoke it: `npm test` runs `node test/run-all.mjs`, and the CI offline
+// job runs that same runner with `--skip=e2e-gate`. This pin used to scrape
+// two hand-copied TEXT mirrors with a regex and compare them — which made the
+// duplication itself the thing under maintenance, and made the "three-way"
+// agreement a fourth place to forget. Now the agreement is structural: CI can
+// only agree by invoking the runner that reads the roster.
 //
 // The one deliberate exception is the network tier: `live-jwks.test.mjs` is
 // NOT a default-run check (a green offline run must not reach the platform),
@@ -192,37 +201,48 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
     .filter((name) => name.endsWith(".test.mjs"))
     .filter((name) => !EXEMPT.has(name));
 
-  const listed = (text) => new Set(
-    [...text.matchAll(/node test\/([\w.-]+\.test\.mjs)/g)].map((m) => m[1])
-  );
-  const npmTest = listed(manifest.scripts.test ?? "");
+  // The roster, read as DATA. Both gates execute this same array, so "is the
+  // roster complete" is one comparison instead of two scraped string lists
+  // that could each swallow a suite of their own.
+  const roster = SUITES.map((entry) => entry.name);
+  const rosterSet = new Set(roster);
   const ciText = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
-  const ci = listed(ciText);
 
-  // disk ⊆ npmTest and disk ⊆ ci: no orphaned suite.
+  // disk ⊆ roster: no orphaned suite — the direction that has actually bitten
+  // (a suite written and green, running in nobody's gate).
   for (const name of disk) {
-    check(`${name} is wired into the npm test chain`, npmTest.has(name),
-      npmTest.has(name) ? "" : "exists on disk but never run by `npm test`");
-    check(`${name} is wired into the CI offline job`, ci.has(name),
-      ci.has(name) ? "" : "run locally but absent from ci.yml's hard gate");
+    check(`${name} is in the gate roster`, rosterSet.has(name),
+      rosterSet.has(name) ? "" : "exists on disk but no gate runs it");
   }
-  // npmTest ⊆ disk and ci ⊆ disk: no ghost reference to a deleted suite.
-  const diskSet = new Set(disk);
-  for (const name of npmTest) check(`npm test's ${name} exists on disk`, diskSet.has(name),
-    diskSet.has(name) ? "" : "chain names a file not in test/");
-  for (const name of ci) check(`CI's ${name} exists on disk`, diskSet.has(name),
-    diskSet.has(name) ? "" : "ci.yml names a file not in test/");
-  // npmTest == ci: the two gates run the same set. e2e-gate is a separate
-  // best-effort tier (its own job) and is not a *.test.mjs, so neither side
-  // lists it here — the comparison stays exact.
-  const onlyNpm = [...npmTest].filter((n) => !ci.has(n));
-  const onlyCi = [...ci].filter((n) => !npmTest.has(n));
-  check("npm test and the CI offline job cover the same suites",
-    onlyNpm.length === 0 && onlyCi.length === 0,
-    onlyNpm.length || onlyCi.length ? `only-in-npm=${onlyNpm.join(",")} only-in-CI=${onlyCi.join(",")}` : "");
+  // roster ⊆ disk: no ghost entry — and unlike the old `*.test.mjs` scrape,
+  // this direction now SEES the four gate files, which that regex could not
+  // see at all (they are `.mjs`, not `.test.mjs`).
+  for (const name of roster) {
+    check(`roster entry ${name} exists on disk`, existsSync(join(TEST_DIR, name)),
+      "the roster names a file that is not in test/");
+  }
+
+  // Both entry points must invoke the RUNNER. A `node test/x.test.mjs` line
+  // surviving anywhere in ci.yml means someone pasted a suite list back into
+  // the workflow — reintroducing exactly the chain this replaced — so that is
+  // pinned as a FAILURE, not merely as drift.
+  check("npm test invokes the shared runner", /node test\/run-all\.mjs/.test(manifest.scripts.test ?? ""),
+    manifest.scripts.test ?? "");
+  check("the CI offline job invokes the same runner", /node test\/run-all\.mjs/.test(ciText),
+    ciText.includes("node test/") ? "ci.yml names suites directly; call the runner instead" : "");
+  check("ci.yml has no hand-copied suite chain left",
+    !/node test\/[\w.-]+\.test\.mjs/.test(ciText),
+    "ci.yml still names individual suites; it must call test/run-all.mjs");
+  // CI's flags are pinned against the constant, so the two cannot drift by
+  // hand: the end-to-end tier is a separate job there (it needs a Host runtime
+  // and a build of the shipped artifacts), and everything else is identical.
+  check("the CI job's skip flag matches suites.mjs's CI_FLAGS",
+    ciText.includes(`test/run-all.mjs ${CI_FLAGS}`),
+    `expected \`node test/run-all.mjs ${CI_FLAGS}\` in ci.yml`);
+
   // The exempted network suite must STAY out of the default gate — if someone
   // wires it in, the pin fails rather than letting a green run reach the platform.
-  check("live-jwks.test.mjs stays out of the default npm test gate", !npmTest.has("live-jwks.test.mjs"),
+  check("live-jwks.test.mjs stays out of the default gate", !rosterSet.has("live-jwks.test.mjs"),
     "the network tier must not be a default-run check");
 }
 

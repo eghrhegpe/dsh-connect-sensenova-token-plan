@@ -2,14 +2,19 @@ name: CI
 
 # Three tiers, on purpose.
 #
-#   offline      — the full offline suite list (see package.json's `test` script,
-#                  plus the build-gate tail: a real tsdown build of src/ into
-#                  lib/ + client.js). The *.test.mjs roster is pinned three ways
-#                  by test/package.test.mjs: disk ↔ `test` script ↔ this job, so a
-#                  suite that is written but not gated, or gated but not run here,
-#                  goes red instead of rotting silently. The gate file itself is
-#                  not a *.test.mjs (same exemption as e2e-gate) and is listed
-#                  explicitly below.
+#   offline      — the full offline suite list, executed by `node test/run-all.mjs`
+#                  (see test/suites.mjs — the single roster both this job and
+#                  `npm test` read; the build-gate tail is a real tsdown build
+#                  of src/ into lib/ + client.js). The runner reports EVERY
+#                  suite's verdict and exits non-zero if any failed, which is
+#                  the point: this job used to be a `set -e` chain, so the
+#                  second suite failing hid the other seventeen — including
+#                  build-gate — and "the gate is red" was indistinguishable
+#                  from "the gate is not verifying" (PITFALLS §30 root cause 2,
+#                  filed against this very job). `e2e-gate` is skipped here
+#                  because the end-to-end tier is its own job below; the rest of
+#                  the roster is identical, and `test/package.test.mjs` pins that
+#                  the *.test.mjs set is the same on both sides.
 #                  These are the real gate: they stub the network
 #                  (test/peer-roots.mjs installs a sentinel that fails any
 #                  request escaping a stub), so a red here is always a regression.
@@ -91,10 +96,13 @@ jobs:
         run: npm install --legacy-peer-deps --no-audit --no-fund
       # The suites resolve the Host's own packages as PEERS through
       # test/peer-roots.mjs, and `--legacy-peer-deps` deliberately SKIPS peer
-      # dependencies — so a clean runner has none, the FIRST peer-dependent suite
-      # (`store.test.mjs`, second in the list below) threw
-      # "cannot resolve the peer dependency @deepseek-ai/dsh-credentials", and
-      # `set -e` then hid the other seventeen, on every push, for a day.
+      # dependencies — so a clean runner has none, and the FIRST
+      # peer-dependent suite (`store.test.mjs`, second in the roster) threw
+      # "cannot resolve the peer dependency @deepseek-ai/dsh-credentials" on
+      # every push, for a day. Under the old `set -e` chain that ALSO hid the
+      # other seventeen suites' verdicts, so the log said one thing and the
+      # gate had verified almost nothing (PITFALLS §30 root causes 2 and 3;
+      # root cause 2's fix landed with run-all.mjs, not with this install).
       #
       # Installing two or three packages from the registry does NOT fix it: the
       # DSH package set resolves its own internals through peers as well
@@ -108,50 +116,7 @@ jobs:
       - name: Provide the Host runtime the peer suites resolve from
         run: npm install -g @deepseek-ai/dsh || echo "dsh CLI not installable here; the peer suites will fail loudly (this gate must not pass without them)"
       - name: Run the offline suites
-        run: |
-          set -e
-          node test/auth.test.mjs
-          node test/store.test.mjs
-          node test/store-baseline.test.mjs
-          node test/routes.test.mjs
-          node test/panel.test.mjs
-          node test/render.test.mjs
-          node test/parsers.test.mjs
-          node test/snapshot-aggregate.test.mjs
-          node test/provider.test.mjs
-          node test/provider-rollback-guard.test.mjs
-          node test/switch-precedence.test.mjs
-          node test/config.test.mjs
-          node test/package.test.mjs
-          node test/docs.test.mjs
-          node test/wiring.test.mjs
-          node test/contract.test.mjs
-          node test/retry.test.mjs
-          node test/error-fix.test.mjs
-          node test/peer-contract.test.mjs
-          node test/draw.test.mjs
-          node test/doctor.test.mjs
-          node test/raccoon.test.mjs
-          node test/raccoon-status.test.mjs
-          node test/raccoon-search.test.mjs
-          node test/raccoon-web.test.mjs
-          node test/state-segmentation.test.mjs
-          # The duplication gate is not a *.test.mjs (same exemption as the
-          # build gate): jscpd (devDependency) scans src/ and every clone must
-          # match a line-capped whitelist entry — the mechanical half of the
-          # Token Plan ↔ raccoon isolation invariant (PITFALLS.md §343).
-          node test/duplication-gate.mjs
-          # The typecheck gate is not a *.test.mjs (same exemption as the build
-          # gate): it runs the local tsc pinned in devDependencies against
-          # tsconfig.json, so the strict flags there cannot rot silently. It
-          # SKIPs loudly when typescript is not installed — which CI always has,
-          # because the dev-dependency step above installs it.
-          node test/typecheck-gate.mjs
-          # The build gate is not a *.test.mjs, so it stays outside the
-          # three-way roster pin; it is listed here because CI is exactly
-          # where the build must be proven — a checkout without a prior build
-          # has no artifacts until this produces them.
-          node test/build-gate.mjs
+        run: node test/run-all.mjs --skip=e2e-gate
 
   e2e:
     name: End-to-end (hard gate)

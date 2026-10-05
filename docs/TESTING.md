@@ -7,7 +7,13 @@
 ## 1. 运行
 
 ```powershell
-npm test       # 依次跑 auth / store / store-baseline / routes / panel / render / parsers / snapshot-aggregate / provider / provider-rollback-guard / switch-precedence / config / package / docs / wiring / contract / retry / error-fix / peer-contract / draw / doctor / raccoon / raccoon-status / state-segmentation，末尾 duplication-gate（jscpd 扫 src/，克隆必须命中行数封顶白名单——Token Plan ↔ 小浣熊隔离的机械半边，见 PITFALLS §343）+ typecheck-gate（用 devDeps 钉住的本地 tsc 跑 tsconfig.json 的严格开关；无 typescript 则 SKIP）+ build-gate（重建 src/ 全部源码并验证 lib/ 与 client.js 产物；无 tsdown 则 SKIP，见 ROADMAP §6.2）+ e2e-gate（无 dsh CLI 则 SKIP）
+npm test       # 跑完整门禁（30 项，见 test/suites.mjs）。runner 会跑完每一个再汇总，**任何一项失败都不会吞掉后面的**——这正是 PITFALLS §30 根因 2 的修法
+npm run test:list  # 只列名册不执行
+
+# 按域裁剪（AGENTS.md 要求按域跑，别连着全量；子串匹配，不是 glob）
+node test/run-all.mjs --only=parsers      # 只跑 parsers
+node test/run-all.mjs --only=raccoon     # 四个 raccoon 套件
+node test/run-all.mjs --skip=gate        # 跳过三个构建型 gate
 npm run commit:lint  # 提交信息底线（零依赖）：检查 HEAD 一条提交；CI 检查 origin/main..HEAD 内的新提交（见下方 commit 红线）
 npm run test:e2e    # 只跑端到端：真 Host + 假平台，需 dsh CLI 在 PATH
 npm run test:live   # 仅 live-jwks.test.mjs，需联网，验证 JWKS 文档可达
@@ -17,7 +23,7 @@ npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（�
 
 测试**无需 `npm install`**：`@deepseek-ai/dsh-credentials` 等是 Host 里的 peer 依赖，由 `test/peer-roots.mjs` 就地解析（`$DSH_HOME` → 插件 `node_modules` → 默认安装位置 `~/.dsh/dsh-asar-unpacked` → 打包安装目录 → 工作区内的 `@deepseek-ai/dsh` 元包 → **npm 全局 CLI 的运行时树**，最后两项是为「没装 Host 的机器」准备的，CI 正属此类）。找不到时会列出每个候选根**各自失败的原因**，而不是静默跳过或只报搜索路径。`config.test.mjs` 不依赖任何 peer，干净检出即可跑。
 
-> **CI 侧的前车之鉴（2026-10-01，见 [AGENTS.md](../AGENTS.md)「验证」段）**：`npm install --legacy-peer-deps` 会**跳过** peer，所以干净 runner 上这些套件既没有 peer 也没有运行时——硬门禁一度**连续一整天每次都红在第二个套件**（`store.test.mjs`），`set -e` 又把它后面的套件一起吞掉（当时记作「后面 17 个套件」，现已增至 26 个 `*.test.mjs` + 3 个 gate）。现在 `ci.yml` 的 offline job 会先装 CLI、`peer-roots.mjs` 据此解析。因此：**CI 里这类报错是回归，不是环境问题**；而「干净检出上跑不了」只对本机成立。
+> **CI 侧的前车之鉴（2026-10-01，见 [AGENTS.md](../AGENTS.md)「验证」段）**：`npm install --legacy-peer-deps` 会**跳过** peer，所以干净 runner 上这些套件既没有 peer 也没有运行时——硬门禁一度**连续一整天每次都红在第二个套件**（`store.test.mjs`），当时的 `set -e` 链还把它后面的套件一起吞掉（当时记作「后面 17 个套件」）。**根因 2 与根因 3 已于 2026-10-05 一并修掉**：套件名册收进 `test/suites.mjs`，`npm test` 与 `ci.yml` 的 offline job 调同一个 `node test/run-all.mjs`——跑完全部再汇总退出码，于是「门禁红」不再可能是「门禁没在验证」。peer 侧仍需 `ci.yml` 先装 CLI，`peer-roots.mjs` 据此解析。因此：**CI 里这类报错是回归，不是环境问题**；而「干净检出上跑不了」只对本机成立。
 
 ---
 

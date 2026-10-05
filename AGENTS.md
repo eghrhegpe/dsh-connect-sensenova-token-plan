@@ -43,7 +43,9 @@ node test/panel.test.mjs    # 面板决策、中英字典一致性
 node test/parsers.test.mjs  # 响应解析层：字符串数值/epoch、shape 漂移、trend 求和
 node test/docs.test.mjs  # 文档一致性：内部链接、跨文件表格去重、README 行数上限、教学快照、API 契约
 node test/e2e.mjs           # 端到端单独跑：拉起真 Host + 假平台，约 10 秒（需 dsh CLI）
-npm test                    # 全量离线测试门禁 + 末尾 typecheck-gate + build-gate + e2e-gate（套件清单与链以 package.json scripts.test 为准，不在本文件背书数字；各自探到 typescript / tsdown / dsh CLI 才实跑，否则 SKIP）
+npm test                    # 全量离线测试门禁 = node test/run-all.mjs（套件名册单一声源 test/suites.mjs；各自探到 typescript / tsdown / dsh CLI 才实跑，否则 SKIP）
+npm run test:list           # 只列名册不执行
+node test/run-all.mjs --only=<子串>   # 按域裁剪的正式形态（--skip=<子串> 反向；空选择直接红，绝不假装通过）
 npm run build               # 改 src/（host 或 client）后必跑：重建 lib/ 与根 client.js；两者已**版本化入库**（不再 gitignore，理由见 .gitignore 注释 + 兄弟插件 dsh-connect-qoder 的 docs/issues/19：github: 安装源不跑 prepack，lib 不入库则 GitHub 直装坏）；提交源码时务必把产物一并提交，否则 CI 的 build-freshness 门禁会红
 ```
 
@@ -63,6 +65,12 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约（实测：只给面板加一个
   渲染分支，draw/render/typecheck 全绿，全量才在 `panel.test.mjs` 的 table-driven tt 白名单上红）。
   判断标准：这个文件的消费者我数得清吗？数不清就全量。
+- **全量现在是安全的，且能给出完整信号**（2026-10-05 起）。此前 `npm test` 是一条 `&&` 链：
+  第二个套件（peer 依赖的 `store.test.mjs`）一红，后面 26 项**一次都没跑过**，而输出看起来
+  只是一次普通的用例失败——这正是 PITFALLS §30 根因 2，那条 lesson 写了一年没修。现已换成
+  `test/run-all.mjs`：跑完 30 项再汇总，失败项逐个点名，并附「N 项跑过并通过」。
+  **所以「跑全量」不再是件有代价的事**（本机 peer 可解析时约一分多钟），别再因为怕卡机器
+  而只跑自己那一个域——那正是让 §30 那次事故藏了一整天的姿势。
 - **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁多是闭合清单
   （panel 的 tt 白名单、PITFALLS 条目数、degrade marker grep、聚合器纯度断言）。被它拦住
   = 你动了未登记成员，正确动作是把新成员补进清单（连代码带测试），不是放宽或删掉这条检查。
