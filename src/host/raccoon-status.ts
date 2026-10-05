@@ -194,13 +194,14 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
       nickname = state?.nickname ?? "";
       credentialSource = state?.source ?? null;
       if (loggedIn) {
-        // The same pre-request eager refresh the seed path uses: a lapsed
+        // The same pre-request ritual the seed path uses: a lapsed
         // 3-hour access token with a live 30-day refresh must not 401 the
-        // panel. Rotate in place (single-flight, whole-pair re-store), then
-        // re-read state so the surfaced expiry facts describe the pair that
+        // panel. Rotate in place (single-flight, whole-pair re-store, owned
+        // by the store so no call site can drift), then re-read state so
+        // the surfaced expiry facts describe the pair that
         // will actually serve the calls below.
         if (await store.isExpired().catch(() => false)) {
-          await store.refresh().catch(() => {});
+          await store.prepareForRequest();
           state = await store.state().catch(() => state);
           loggedIn = state?.hasCredential === true;
           nickname = state?.nickname ?? "";

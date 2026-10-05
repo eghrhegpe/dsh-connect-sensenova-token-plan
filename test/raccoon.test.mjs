@@ -765,8 +765,10 @@ function section(title) {
     // data placed over the format/version reservations). The real contract is
     // "a decoder reads it back", so decode every version through jsQR, a
     // pure-JS decoder the tab's users effectively run in reverse. It is a
-    // devDependency-free dynamic import: the check skips with a note when the
-    // package is absent (an air-gapped checkout still runs the rest).
+    // dynamic import of the `jsqr` devDependency (declared in package.json,
+    // used only by this verification): the check skips with a note only in
+    // an air-gapped checkout where node_modules was never installed — the
+    // rest of the section still runs.
     let jsQR = null;
     try {
       ({ default: jsQR } = await import("jsqr"));

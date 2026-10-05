@@ -669,6 +669,58 @@ async function bootPlugin({ withCredentials = true, withLlm = false, config = {}
   globalThis.fetch = guardFetch;
 }
 
+// === F6. the mount-time effect registry (ADR-008) =======================
+// Unmount is `drain(cap)` → `teardown`: a still-settling effect gets up to
+// the cap to finish on its own; a straggler past the cap is named (the label
+// in the warn is the guard's clue) and left to the disposed gates that
+// already exist. The registry must also keep a REJECTING effect from
+// becoming an unhandledRejection on the Host process.
+{
+  const { createEffectRegistry } = await import("../src/host/effects.ts");
+  {
+    const warns = [];
+    const registry = createEffectRegistry({ warn: (message) => warns.push(message) });
+    const pending = {};
+    let released = false;
+    pending.p = new Promise((resolve) => { released = resolve; });
+    registry.add("fast", async () => "done");
+    registry.add("hung", () => pending.p);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const stragglers = await registry.drain(500);
+    check("a still-settling effect is reported by label when the cap hits",
+      JSON.stringify(stragglers) === JSON.stringify(["hung"]), JSON.stringify(stragglers));
+    check("a settled effect does not count as a straggler",
+      JSON.stringify(registry.inFlight()) === JSON.stringify(["hung"]), JSON.stringify(registry.inFlight()));
+    released("done");
+    const after = await registry.drain(2000);
+    check("after the straggler settles, a later drain finds nothing",
+      after.length === 0 && JSON.stringify(registry.inFlight()) === "[]", JSON.stringify(after));
+  }
+  {
+    const warns = [];
+    const registry = createEffectRegistry({ warn: (message) => warns.push(message) });
+    registry.add("rejecting", async () => { throw new Error("boom"); });
+    registry.add("fast", async () => {});
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    check("a rejecting effect is swallowed with a labeled warn, not an unhandledRejection",
+      warns.length === 1 && warns[0].includes("rejecting") && warns[0].includes("boom"), JSON.stringify(warns));
+    const stragglers = await registry.drain(500);
+    check("a settled (rejected-or-resolved) effect is gone from the registry",
+      stragglers.length === 0, JSON.stringify(stragglers));
+  }
+  {
+    // The real Host context's `logger` may exist without a `warn` method:
+    // the reject path must degrade to silence, and the effect must still be
+    // swallowed and cleared (an unhandledRejection would kill this script).
+    const registry = createEffectRegistry({});
+    registry.add("silent-reject", async () => { throw new Error("x"); });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const stragglers = await registry.drain(200);
+    check("a logger without `warn` degrades the reject path to silence, not a throw",
+      stragglers.length === 0 && registry.inFlight().length === 0, JSON.stringify(stragglers));
+  }
+}
+
 // === G. the wiring test itself stayed offline ===========================
 const unstubbed = releaseNetworkGuard();
 restoreHostEnv();

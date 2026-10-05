@@ -6,7 +6,7 @@
  * {@link registerRoutes} (routes.ts), then {@link startSideEffects} for:
  *
  *   - the mount seed (`seedPublisherFromCatalog`): offer models before the
- *     first poll, fire-and-forget;
+ *     first poll, tracked in the effect registry (ADR-008);
  *   - the draw tool registration (opt-in `drawEnabled`, doubly degraded);
  *   - vision step two: the settings-row writer filled for the snapshot route.
  *
@@ -28,7 +28,7 @@ import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
 import { resolveSwitchEnabled } from "./switch-precedence.ts";
-import { RaccoonSearchProvider, RACCOON_SEARCH_PROVIDER_ID } from "./raccoon-search.ts";
+import { type EffectRegistry } from "./effects.ts";
 import type { Wiring } from "./types.ts";
 
 /** How many times a mount-time optional-service read is retried. */
@@ -258,33 +258,34 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
 
 
 /**
- * The Raccoon mount seed (ROADMAP §6.1 second upstream) — the fire-and-forget
- * boot of the Raccoon half, exported on its own so the
- * orchestrator in `index.ts` stays a thin assembly: the seed is a side effect
- * (it touches the credential store, the switch, the gateway, and the
- * publisher), not part of "what a route may touch", so it belongs with the
- * other mount side effects here.
- *
- * Fire-and-forget: the caller `void`s the returned promise. If the switch is
- * already on and a credential was stored before this restart, this offers the
- * Raccoon models before the first poll (and with no console login at all).
- * The roster is rebuilt from the store, NOT from `raccoonPublisher.state.rows`
- * — that field is in-memory only and empty on a fresh process, so gating on
- * it meant a restarted Host never re-registered the provider (the panel said
- * "logged in" and the tab listed models, but the picker saw none). With NO
- * credential there is nothing to offer, so the publisher stays pristine and
- * the tab keeps its "switch on — scan to log in" state.
+ The Raccoon mount seed (ROADMAP §6.1 second upstream) — the boot
+ of the Raccoon half, exported on its own so the orchestrator in
+ `index.ts` stays a thin assembly: the seed is a side effect (it touches
+ the credential store, the switch, the gateway, and the publisher), not
+ part of "what a route may touch", so it belongs with the other mount
+ side effects here.
+ 
+ Tracked in the effect registry (ADR-008): starts without blocking the
+ mount, and the unmount drains it before `teardown`. If the switch is
+ already on and a credential was stored before this restart, this offers
+ the Raccoon models before the first poll (and with no console login at
+ all). The roster is rebuilt from the store, NOT from
+ `raccoonPublisher.state.rows` — that field is in-memory only and empty
+ on a fresh process, so gating on it meant a restarted Host never
+ re-registered the provider (the panel said "logged in" and the tab
+ listed models, but the picker saw none). With NO credential there is
+ nothing to offer, so the publisher stays pristine and the tab keeps its
+ "switch on — scan to log in" state.
  * @param {object} wiring - the Raccoon half of the mount wiring.
  * @param {object} wiring.raccoonStore - the Raccoon credential store.
  * @param {object} wiring.raccoonSwitch - the Raccoon switch store.
  * @param {object} wiring.raccoonPublisher - the Raccoon publisher.
- * @returns {Promise<void>} the fire-and-forget seed.
+ * @returns {Promise<void>} the seed, tracked under `"raccoon-seed"` by the effect registry (ADR-008).
  */
 export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublisher }: {
   raccoonStore: {
     resolve(): Promise<{ credential: { accessToken?: unknown; officeIdentity?: unknown } | null }>;
-    isExpired(): Promise<boolean>;
-    refresh(): Promise<unknown>;
+    prepareForRequest(): Promise<unknown>;
   };
   raccoonSwitch: { enabled(): Promise<boolean | null>; enabledIds(): Promise<string[] | null> };
   raccoonPublisher: {
@@ -325,10 +326,8 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
           // window rather than giving up on the first read.
           if (!credential?.accessToken) return false;
           // Keep the credential inside its expiry window before the catalogue
-          // call — the same eager refresh the request path uses.
-          if (await raccoonStore.isExpired().catch(() => false)) {
-            await raccoonStore.refresh().catch(() => {});
-          }
+          // call — the same pre-request ritual the request path uses.
+          await raccoonStore.prepareForRequest();
           const { credential: live } = await raccoonStore.resolve().catch(() => ({ credential: null }));
           // A mutable COPY rather than an `as any[]` cast over the frozen
           // table. The seed only ever REBINDS `rows` (it never pushes), so a
@@ -375,19 +374,27 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
  *   sit here are what the {@link Wiring} declaration now says instead.
  * @param {object} side - test seams from `apply`'s `deps`
  *   (`loadToolsModule`, `drawFetch`).
- * @returns {void} — seed and draw are fire-and-forget.
+ * @param {EffectRegistry} effects - the mount-time effect registry (ADR-008):
+ *   each side effect starts now and is tracked under a short label instead of
+ *   an anonymous fire-and-forget IIFE, so the unmount can let them settle
+ *   before teardown (the registry never blocks the mount itself).
+ * @returns {void} — every effect starts on call and is tracked in the registry.
  */
-export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Wiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
-  const { publisher, catalogStore, settings, visionPublish } = wiring;
+export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Wiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }, effects: EffectRegistry) {
+  const { publisher, catalogStore } = wiring;
 
   // Seed the registration from the persisted catalog so a restarted Host
   // offers models before its first poll (and with no console login at all).
-  // Fire-and-forget: a state dir that cannot be read just waits for the poll.
-  void seedPublisherFromCatalog(
-    publisher,
-    () => catalogStore.list(),
-    () => catalogStore.listEnabledIds(),
-    catalogSignature
+  // Tracked, not fire-and-forget: a state dir that cannot be read just waits
+  // for the poll, and the unmount's drain lets a still-settling seed finish
+  // before the publisher is disposed.
+  effects.add("catalog-seed", () =>
+    seedPublisherFromCatalog(
+      publisher,
+      () => catalogStore.list(),
+      () => catalogStore.listEnabledIds(),
+      catalogSignature
+    )
   );
 
   // Draw absorption: opt-in, doubly degraded (no tools service / no peer).
@@ -398,7 +405,7 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // unregister call, so an off→on flip needs the next Host start; an on→off
   // flip just means this mount did not register it (the already-registered
   // tool lives until the Host restarts).
-  void registerDrawTool(ctx, wiring, side);
+  effects.add("draw-tool", () => registerDrawTool(ctx, wiring, side));
 
   // Web-search absorption (ROADMAP §6.1.7): opt-in, doubly degraded, and the
   // selection is taken over only when the switch is on. Fire-and-forget, like
@@ -406,7 +413,7 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // hands the selection back to whichever backend it displaced. `reconcile`
   // rather than the bare register, so the panel's in-session flip can drop
   // and re-apply the same way this mount does.
-  void reconcileWebSearch(ctx, wiring);
+  effects.add("web-search", () => reconcileWebSearch(ctx, wiring));
 
   // ------------------------------------------------------------------
   // Vision step two (ARCHITECTURE.md §5.1): publish which of this key's
@@ -419,69 +426,97 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // (`writeImageModelIds`), off by default, and idempotent: a no-change
   // pass costs one revision read and no write.
   //
-  // `visionPublish.current` is filled in here from `ctx.get("settings")`
-  // (the resolver-not-snapshot pattern: the service may register after this
-  // plugin mounts, so the read retries a bounded number of times before the
-  // plugin gives up); a Host without one leaves it null and the publish
-  // simply never runs. Wrapped in a fire-and-forget IIFE so a settings
-  // service that arrives a moment later is still picked up before the next
-  // poll — the write itself is idempotent per poll, so a late fill costs
-  // nothing.
+  // `visionPublish.current` is filled in by `publishVisionStepTwo` from
+  // `ctx.get("settings")` (the resolver-not-snapshot pattern: the service
+  // may register after this plugin mounts, so the read retries a bounded
+  // number of times before the plugin gives up); a Host without one leaves
+  // it null and the publish simply never runs. It runs as a tracked effect
+  // (ADR-008), so a settings service that arrives a moment later is still
+  // picked up before the next poll — and the unmount's drain lets it
+  // settle, so the write itself is idempotent per poll and a late fill
+  // costs nothing.
   // ------------------------------------------------------------------
-  void (async () => {
-    try {
-      const settingsService = await resolveServiceWithRetry<{
-        update: (ns: string, value: unknown, revision?: unknown) => Promise<unknown>;
-        describe?: (options: { redactSecrets: boolean }) => unknown;
-      }>(ctx, "settings", {
-        isDisposed: () => publisher.isDisposed()
-      });
-      if (settingsService === null || typeof settingsService.update !== "function") return;
-      // Named return type, because `describe` is typed `unknown`: the row this
-      // finds carries a `revision` that `update` must hand back, and an
-      // inferred `unknown | null` would push a cast onto every read below.
-      const descriptorOf = (): { ns?: unknown; revision?: unknown } | null => {
-        try {
-          const view = settingsService.describe?.({ redactSecrets: true }) as
-            | unknown[]
-            | { entries?: unknown[] }
-            | undefined;
-          const rows = Array.isArray(view) ? view : view?.entries ?? [];
-          const hit = rows.find((candidate) =>
-            (candidate as { ns?: unknown } | null | undefined)?.ns === name);
-          return (hit as { ns?: unknown; revision?: unknown } | undefined) ?? null;
-        } catch {
-          return null;
-        }
-      };
-      let publishing = false;
-      let lastPublishedIds = settings.imageModelIds.slice();
-      visionPublish.current = async (visionEntries: unknown, ids: string[]) => {
-        if (settings.writeImageModelIds !== true) return;
-        if (publishing) return;
-        if (JSON.stringify(lastPublishedIds) === JSON.stringify(ids)) return;
-        const descriptor = descriptorOf();
-        if (descriptor === null) return;
-        publishing = true;
-        try {
-          await settingsService.update(name, {
-            imageModelIds: ids,
-            visionModels: visionEntries
-          }, descriptor.revision);
-          lastPublishedIds = ids.slice();
-        } catch (error) {
-          wiring.logger?.warn?.(`${name}: vision publish refused: ${errMsg(error)}`);
-        } finally {
-          publishing = false;
-        }
-      };
-    } catch {
-      // A settings service that never appears, or a resolver that throws on
-      // every attempt: `visionPublish.current` stays null and the poll never
-      // writes, exactly as a Host without the service.
-    }
-  })();
+  effects.add("vision", () => publishVisionStepTwo(ctx, wiring));
 }
+
+/**
+ * Vision step two's mount-time effect (ARCHITECTURE.md §5.1), now a named
+ * function instead of the anonymous IIFE `startSideEffects` used to wrap:
+ * the effect registry (ADR-008) tracks it under `"vision"` like every
+ * other mount-time effect, so the label shows up in a unmount-drain
+ * straggler report instead of being unnameable.
+ * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
+ * @param {Wiring} wiring - assembled by `apply()`; the fields read here are
+ *   `settings` / `visionPublish` / `publisher` / `logger`.
+ * @returns {Promise<void>}
+ */
+async function publishVisionStepTwo(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Wiring) {
+  const { publisher, settings, visionPublish } = wiring;
+  try {
+    const settingsService = await resolveServiceWithRetry<{
+      update: (ns: string, value: unknown, revision?: unknown) => Promise<unknown>;
+      describe?: (options: { redactSecrets: boolean }) => unknown;
+    }>(ctx, "settings", {
+      isDisposed: () => publisher.isDisposed()
+    });
+    if (settingsService === null || typeof settingsService.update !== "function") return;
+    // Named return type, because `describe` is typed `unknown`: the row this
+    // finds carries a `revision` that `update` must hand back, and an
+    // inferred `unknown | null` would push a cast onto every read below.
+    const descriptorOf = (): { ns?: unknown; revision?: unknown } | null => {
+      try {
+        const view = settingsService.describe?.({ redactSecrets: true }) as
+          | unknown[]
+          | { entries?: unknown[] }
+          | undefined;
+        const rows = Array.isArray(view) ? view : view?.entries ?? [];
+        const hit = rows.find((candidate) =>
+          (candidate as { ns?: unknown } | null | undefined)?.ns === name);
+        return (hit as { ns?: unknown; revision?: unknown } | undefined) ?? null;
+      } catch {
+        return null;
+      }
+    };
+    let publishing = false;
+    let lastPublishedIds = settings.imageModelIds.slice();
+    visionPublish.current = async (visionEntries: unknown, ids: string[]) => {
+      if (settings.writeImageModelIds !== true) return;
+      if (publishing) return;
+      if (JSON.stringify(lastPublishedIds) === JSON.stringify(ids)) return;
+      const descriptor = descriptorOf();
+      if (descriptor === null) return;
+      publishing = true;
+      try {
+        await settingsService.update(name, {
+          imageModelIds: ids,
+          visionModels: visionEntries
+        }, descriptor.revision);
+        lastPublishedIds = ids.slice();
+      } catch (error) {
+        wiring.logger?.warn?.(`${name}: vision publish refused: ${errMsg(error)}`);
+      } finally {
+        publishing = false;
+      }
+    };
+  } catch {
+    // A settings service that never appears, or a resolver that throws on
+    // every attempt: `visionPublish.current` stays null and the poll never
+    // writes, exactly as a Host without the service.
+  }
+}
+
+// ------------------------------------------------------------------
+// The `ctx.web` web-search mount moved to `web-search.ts` on 2026-10-05:
+// this file already owned the Token Plan mount seed, the draw tool, the
+// vision writer and the raccoon seed, and a third upstream's selection
+// mechanics was the wrong neighbour for them. Re-exported below as the
+// facade — every name still imports from this module, exactly as the
+// raccoon publisher/store split did.
+// ------------------------------------------------------------------
+export type { WebSearchRuntime, WebSearchSelection, WebSearchToolWiring } from "./web-search.ts";
+export { webSearchSelection, applyWebSearchSelection, registerWebSearchProvider } from "./web-search.ts";
+import { reconcileWebSearch } from "./web-search.ts";
+export { reconcileWebSearch };
 
 /**
  * Unmount, in the order PITFALLS §18 pins:
@@ -493,176 +528,19 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
  *   3. the route `off()` callbacks, each guarded (the web server may already
  *      be gone during shutdown).
  *
- * This order is a concurrency fix and must NOT be simplified.
- * @param {Wiring} wiring - assembled by `apply()`; only the publisher pair
- *   and the release are read, so the type says exactly three fields.
+ * This order is a concurrency fix and must NOT be simplified. The caller
+ * (the unmount cleanup in `apply`) drains the effect registry BEFORE this
+ * runs, so by the time these lines execute every mount-time effect has
+ * either settled or been reported as a straggler by its label.
+ * @param {Wiring} wiring - assembled by `apply()`; only four fields are read
+   (`publisher`, `releaseProvider`, `raccoonPublisher`, `webSearchRestore`),
+   so the type says exactly that shape.
  * @param {Array<() => void>} offs - the unregister callbacks from
  *   {@link registerRoutes}. `Function[]` was the old spelling and it is
  *   `any[]` in disguise — a `Function` may be called with any arguments and
  *   return anything, so it pinned neither the shape nor the arity.
  * @returns {void}
  */
-/**
- * The `ctx.web` web-search mount (ROADMAP §6.1.7) — the commandcode-provider
- * precedent (`dsh-commandcode-provider`'s web-search module). DSH ships its own
- * `web_search` tool and a `WebSearchProvider` registry (`ctx.web`), so a plugin
- * registers a provider and lets DSH's model-facing tool call it — a
- * hand-registered agent tool would be a parallel, second search path.
- *
- * Opt-in (`webSearchEnabled`, default off) and doubly degraded (no `web`
- * service / no `registerSearchProvider` on it), exactly like the draw tool. The
- * provider interfaces are STRUCTURAL here (no `@deepseek-ai/dsh-web` import), so
- * the offline suite drives this with a fake `ctx` and a fake runtime.
- *
- * Selection: DSH reads a private `searchProviderId` field per search call. When
- * a second provider is registered without being selected, every search throws
- * `WEB_PROVIDER_AMBIGUOUS` — the commandcode issue #26 lesson. So enabling this
- * plugin takes the selection over (remembering whatever it displaced) and
- * `teardown` hands it back. The write is a bounded dependency on the runtime
- * shape, mirrored from commandcode; a hardened runtime degrades to
- * registered-but-unselected.
- */
-
-/** Structural view of the `ctx.web` runtime's search surface. */
-export interface WebSearchRuntime {
-  registerSearchProvider?: (provider: unknown) => void;
-  searchProviderId: string | undefined;
-}
-
-/** Tracked search-selection state for one mounted `WebSearchRuntime`. */
-export interface WebSearchSelection {
-  /** Whether this plugin currently owns the selection. */
-  owner: boolean;
-  /** The backend it displaced; `undefined` means "nothing was configured". */
-  displaced: string | undefined;
-  /** Whether the field already read our id when we took it over. */
-  preexisting: boolean;
-}
-
-/** Fresh selection state: the plugin starts out not owning the selection. */
-export function webSearchSelection(): WebSearchSelection {
-  return { owner: false, displaced: undefined, preexisting: false };
-}
-
-/**
- * Reach one end of the web-search selection without trampling siblings.
- * Never throws: a hardened runtime shape degrades to registered-but-unselected.
- * @param {WebSearchRuntime} web - the `ctx.web` runtime.
- * @param {WebSearchSelection} state - the tracked selection.
- * @param {boolean} enable - take the selection over, or hand it back.
- */
-export function applyWebSearchSelection(web: WebSearchRuntime, state: WebSearchSelection, enable: boolean): void {
-  try {
-    if (enable) {
-      if (state.owner) {
-        // Still on across a re-apply: re-assert without forgetting whom we displaced.
-        web.searchProviderId = RACCOON_SEARCH_PROVIDER_ID;
-        return;
-      }
-      const prior = web.searchProviderId;
-      state.preexisting = prior === RACCOON_SEARCH_PROVIDER_ID;
-      state.displaced = state.preexisting ? undefined : prior;
-      web.searchProviderId = RACCOON_SEARCH_PROVIDER_ID;
-      state.owner = true;
-      return;
-    }
-    if (state.owner) {
-      state.owner = false;
-      if (!state.preexisting) web.searchProviderId = state.displaced;
-      state.preexisting = false;
-    }
-  } catch {
-    // Hardened/frozen runtime: stay registered-but-unselected.
-  }
-}
-
-/** The wiring subset {@link registerWebSearchProvider} reads and writes — its
- *  own `Pick`. `webSearchRestore` is in the `Pick` because this function
- *  ARMS it (`current = …`), not only because it reads it: a `Pick` that
- *  listed only what it consumed would be a lie about the mutation. */
-export type WebSearchToolWiring = Pick<Wiring,
-  | "settings"
-  | "configError"
-  | "publisher"
-  | "resolveRaccoonToken"
-  | "webSearchStore"
-  | "webSearchRestore"
-  | "logger"
->;
-
-/**
- * Register the Raccoon `web_search` provider in `ctx.web` and take the
- * selection over when the switch is on. Off → the provider is never registered
- * and the selection is never touched; a late `web` service that finally
- * registers is picked up by {@link resolveServiceWithRetry}, never by a
- * duplicate registration.
- * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context (reads `ctx.get("web")`).
- * @param {WebSearchToolWiring} wiring - the fields listed in that type.
- * @returns {Promise<void>}
- */
-export async function registerWebSearchProvider(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: WebSearchToolWiring) {
-  const { settings, configError, publisher, resolveRaccoonToken, webSearchStore } = wiring;
-  if (configError !== null) return;
-  const effective = resolveSwitchEnabled(
-    webSearchStore ? await webSearchStore.enabled().catch(() => null) : null,
-    settings.webSearchEnabled
-  );
-  if (effective !== true) return;
-  const web = await resolveServiceWithRetry<WebSearchRuntime>(ctx, "web", {
-    isDisposed: () => publisher.isDisposed()
-  });
-  if (web === null || typeof web.registerSearchProvider !== "function") return;
-  const selection = webSearchSelection();
-  web.registerSearchProvider(new RaccoonSearchProvider({ resolveToken: resolveRaccoonToken }));
-  applyWebSearchSelection(web, selection, true);
-  // `startSideEffects` fires this without awaiting (index.ts:351), so the
-  // `await` above can be pending when the host disposes the plugin — and
-  // `teardown` reads `webSearchRestore.current` BEFORE the line below arms it,
-  // so it hands back nothing. If we are already gone here, hand the selection
-  // straight back instead of arming an unreachable teardown closure, or the
-  // global `searchProviderId` stays hijacked by Raccoon after the plugin exits
-  // (ARCHITECTURE §5's "raccoon's effect on the main registration is zero"
-  // violated). `applyWebSearchSelection(…, false)` is idempotent, so the
-  // normal teardown path below is untouched.
-  if (publisher.isDisposed()) {
-    applyWebSearchSelection(web, selection, false);
-    return;
-  }
-  // Hand the selection back on teardown (idempotent: the second call sees
-  // `owner === false` and does nothing). A fresh boot re-applies it.
-  wiring.webSearchRestore.current = () => applyWebSearchSelection(web, selection, false);
-}
-
-/**
- * Reconcile the web-search registration to the CURRENT effective value.
- *
- * The registration is read-once at mount (`registerWebSearchProvider` above);
- * the draw tool has the same shape and lives with it, because the tools
- * registry has no unregister. Here the selection DOES have a restore, so an
- * in-session flip is safe: drop whatever this plugin had taken over, then
- * re-register against the new value. Called both at mount (in place of the
- * bare `registerWebSearchProvider`) and from the panel's `webSearch` route.
- * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
- * @param {WebSearchToolWiring} wiring - see {@link registerWebSearchProvider}.
- * @returns {Promise<void>}
- */
-export async function reconcileWebSearch(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: WebSearchToolWiring) {
-  // Empty the slot BEFORE re-arming, keeping the old closure in a local. Not
-  // a bug fix — the `delete` this replaces was correct: pass 1 deleted the
-  // field and `registerWebSearchProvider` re-armed it, so pass 2 read the new
-  // closure, not `undefined`. The reason to change it is that the state is now
-  // a slot (see `Wiring`), and "is a takeover held?" reads off the slot rather
-  // than off whether a property happens to be present on the object. The
-  // hand-back stays unconditional-when-armed either way: a flip to OFF leaves
-  // the slot `null` because `register` bails before re-arming.
-  const held = wiring.webSearchRestore.current;
-  wiring.webSearchRestore.current = null;
-  if (held !== null) {
-    try { held(); } catch { /* a frozen runtime must not sink the reconcile */ }
-  }
-  await registerWebSearchProvider(ctx, wiring);
-}
-
 export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher" | "webSearchRestore">, offs: Array<() => void>) {
   try {
     wiring.webSearchRestore.current?.();
@@ -677,7 +555,7 @@ export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | 
   // §6.1): dispose it in the same order it registered, so a late raccoon
   // publish cannot register into the withdrawing Host either.
   raccoonPublisher?.dispose();
-  raccoonPublisher?.release?.();
+  raccoonPublisher?.release();
   // Stop offering the provider first, so a request cannot be routed to an
   // adapter whose Host services are already half gone.
   releaseProvider();

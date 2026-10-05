@@ -92,7 +92,7 @@ export function serializeRaccoonCredential(credential: { accessToken?: unknown; 
  *   `api-key-store`: the service may register after this plugin mounts).
  * @param {typeof fetch} [options.fetcher] - injected fetch for the refresh
  *   call (tests stub it; defaults to global `fetch`).
- * @returns {{save, forget, resolve, refresh, state}}
+ * @returns {{save, forget, resolve, refresh, prepareForRequest, state}}
  */
 export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStoreDeps = {}) {
   /** Fallback vault for a Host that has no credentials service. */
@@ -102,9 +102,9 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
   /**
    * Latched when the gateway declares the session dead (401 / `200003`).
    *
-   * The problem this answers: all three eager-refresh call sites are shaped
-   * `if (isExpired()) refresh()`, so a dead session meant one guaranteed-401
-   * request per poll cycle, forever — the access token's own window keeps the
+   * The problem this answers: the three eager-refresh call sites all
+   * funnel through `prepareForRequest`, so a dead session meant one
+   * guaranteed-401 request per poll cycle, forever — the access token's own window keeps the
    * condition true and the gateway's answer never changes. Token Plan has
    * `throttle-store.ts` for exactly this shape of upstream refusal; the second
    * upstream had nothing, which is why the two halves answered the same problem
@@ -195,7 +195,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
      * is not clobbered on a dead refresh), while the refresh token is already
      * worthless. Reporting `false` here would let a poll believe there is
      * nothing to renew, so the answer has to stay `true` to keep the existing
-     * `if (isExpired()) refresh()` call sites working — the gate is inside
+     * `prepareForRequest` call sites working — the gate is inside
      * {@link refresh}, which short-circuits without a network call.
      * @param {number} [leadMs] - renew this long before expiry; defaults to 5 min.
      */
@@ -248,6 +248,25 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
         })();
       }
       return refreshInFlight;
+    },
+
+    /**
+     * The one-call pre-request ritual the three call sites used to
+     * hand-copy — `if (isExpired()) refresh()` — now owned here so none of
+     * them can drift: check the expiry window and refresh in place when it
+     * is crossed.
+     *
+     * Never throws: a failed refresh (no credential, a dead session the
+     * latch already owns, a network blip) leaves the stored pair in place,
+     * and the caller's gateway 401 remains the honest signal — the same
+     * "swallow it, the real reason was already logged where it happened"
+     * policy as `state()`.
+     * @returns {Promise<void>}
+     */
+    async prepareForRequest() {
+      if (await this.isExpired().catch(() => false)) {
+        await this.refresh().catch(() => {});
+      }
     },
 
     /**

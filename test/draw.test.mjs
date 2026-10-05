@@ -369,6 +369,7 @@ async function rejects(fn) {
   const { resolveServiceWithRetry, registerDrawTool, startSideEffects } = await import(
     "../src/host/lifecycle.ts"
   );
+  const { createEffectRegistry } = await import("../src/host/effects.ts");
   try {
     {
       let reads = 0;
@@ -513,7 +514,7 @@ async function rejects(fn) {
       startSideEffects(ctx, wiring, {
         loadToolsModule: async () => ({ defineTool: () => ({ name: "x" }) }),
         drawFetch: async () => ({})
-      });
+      }, createEffectRegistry(wiring.logger));
       // The retry window is real time (300ms × attempt index).
       await new Promise((resolve) => setTimeout(resolve, 700));
       check("the vision writer is filled once the settings service appears",

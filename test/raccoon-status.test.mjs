@@ -67,6 +67,14 @@ function fakeStore(overrides = {}) {
     async refresh() {
       calls.refresh += 1;
     },
+    async prepareForRequest() {
+      // The faithful stand-in for the store's one-call ritual: refresh when
+      // the pair is lapsed. `this` dispatch so a test's `refresh` override
+      // (and its call counter) is what runs.
+      if (await this.isExpired()) {
+        await this.refresh();
+      }
+    },
     async resolve() {
       calls.resolve += 1;
       return { credential: { accessToken: TOKEN, officeIdentity: "office-1" } };

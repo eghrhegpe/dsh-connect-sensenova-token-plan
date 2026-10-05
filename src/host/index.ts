@@ -43,6 +43,7 @@ import { createProviderPublisher } from "./provider-publish.ts";
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { registerRoutes } from "./routes.ts";
 import { startSideEffects, seedRaccoonOnMount, teardown, reconcileWebSearch } from "./lifecycle.ts";
+import { createEffectRegistry, MOUNT_EFFECT_DRAIN_TIMEOUT_MS } from "./effects.ts";
 import { CODE } from "./codes.ts";
 import { writeLoginTrace } from "./trace.ts";
 import {
@@ -236,9 +237,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     if (credential === null) return "";
     // Keep the credential inside its expiry window before every request: the
     // refresh token is single-use, so refresh eagerly and re-store.
-    if (await raccoonStore.isExpired().catch(() => false)) {
-      await raccoonStore.refresh().catch(() => {});
-    }
+    await raccoonStore.prepareForRequest();
     const { credential: live } = await raccoonStore.resolve();
     return live?.accessToken ?? "";
   };
@@ -251,13 +250,19 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     emit: ctx.emit,
     logger: ctx.logger
   });
+  // ADR-008: the mount-time effects start concurrently and are tracked by
+  // one registry, so the unmount can let them settle (bounded) instead of
+  // racing their post-hoc disposed guards.
+  const effects = createEffectRegistry(ctx.logger);
   // The Raccoon mount seed (ROADMAP §6.1): if the switch is already on and a
   // credential was stored before this restart, offer the Raccoon models before
   // the first poll. It is now the named side effect `seedRaccoonOnMount` in
-  // `lifecycle.ts` (shared backoff, bounded retry, curation-aware publish)
-  // rather than an inline IIFE — fire-and-forget, so a service that arrives a
-  // moment late is picked up without blocking the mount.
-  void seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublisher });
+  // `lifecycle.ts` (shared backoff, bounded retry, curation-aware publish) —
+  // tracked by the effect registry, so it starts without blocking the mount
+  // and a service that arrives a moment late is still picked up.
+  effects.add("raccoon-seed", () =>
+    seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublisher })
+  );
 
 
   // The credentials service is how the console token and account are held and
@@ -338,17 +343,33 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // trace writes, publish-after-save) — see routes.ts.
   const offs = registerRoutes(ctx, wiring);
   // Mount-time side effects (persisted-catalog seed, draw tool, vision
-  // step two) — see lifecycle.ts. Fire-and-forget inside; never awaited.
-  startSideEffects(ctx, wiring, {
-    loadToolsModule: deps.loadToolsModule ?? (() => import("@deepseek-ai/dsh-tools")),
-    drawFetch: deps.drawFetch ?? ((url: string, options: object) => fetch(url, options))
-  });
+  // step two) — see lifecycle.ts. Each one is tracked by the effect
+  // registry; the unmount cleanup below lets them settle before teardown.
+  startSideEffects(
+    ctx,
+    wiring,
+    {
+      loadToolsModule: deps.loadToolsModule ?? (() => import("@deepseek-ai/dsh-tools")),
+      drawFetch: deps.drawFetch ?? ((url: string, options: object) => fetch(url, options))
+    },
+    effects
+  );
 
   ctx.effect(() => {
     // The effect callback returns the unmount cleanup: Cordis runs it when
     // this fiber disposes, NOT at registration — a teardown that ran early
     // would unregister every route the moment they were created.
-    return () => {
+    return async () => {
+      // ADR-008: let the still-settling mount effects finish first —
+      // bounded, so a hung effect can never hold the unmount hostage; a
+      // straggler is reported and left to the disposed guards that already
+      // protect every write path (PITFALLS §18 / §31, P0-1 `65ab2dc`).
+      const stragglers = await effects.drain(MOUNT_EFFECT_DRAIN_TIMEOUT_MS);
+      if (stragglers.length > 0) {
+        ctx.logger?.warn?.(
+          `${name}: unmount drain (${MOUNT_EFFECT_DRAIN_TIMEOUT_MS}ms) left still-settling effects: ${stragglers.join(", ")} — their disposed guards remain the backstop`
+        );
+      }
       teardown(wiring, offs);
     };
   }, `${name}: routes`);
