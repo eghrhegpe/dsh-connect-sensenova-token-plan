@@ -78,7 +78,7 @@
     "visibleIdsPolicy": "list-not-subset",
     "note": "这 6 个是 2026-09~10 实测的 visible chat 模型，也是 src/host/raccoon.ts RACCOON_FALLBACK_MODELS 的内容。网关随时可能增删，故采用「至少还认得冻结里的 N 个」而非「必须完全相等」—— 新增模型不是漂移，全部消失才是。",
     "invisibleCount": 3,
-    "invisibleNote": "实测另有 3 个 raccoon-* 隐形模型：id 字段为空而 model_name 有值。归一化按 id===\"\" 显式跳过是有意设计（不是静默丢弃），此处的数字仅供人工核对网关是否还在下发隐形条目。"
+    "invisibleNote": "实测另有 3 个隐形模型（`raccoon-8c4485` / `raccoon-19b265` / `raccoon-405a1c`，v2 目录里 `visible:false`）。归一化按 `visible === false` 显式跳过是有意设计（不是静默丢弃），此处的数字仅供人工核对网关是否还在下发隐形条目。（v2 之前这批行的判据是「id 为空而 model_name 有值」；目录字段漂移后每一行都没有 id，旧判据会把 9 行全数成隐形——判据本身已在 L2a 同步为 `visible === false`。）"
   },
   "balance": {
     "totalField": "available_points",
@@ -99,6 +99,17 @@
     "probeQuery": "商汤科技",
     "protocolVersion": "2024-11-05",
     "note": "L2d 段按此探：只做一次 tools/call、Count=1（免费额度内，不轮询、不批量）。参数契约：Query 1~100 字符、Count web≤50/image≤5、SearchType web|image、TimeRange 可选。"
+  },
+  "visionProbe": {
+    "capturedAt": "2026-10-06",
+    "question": "这张图从左到右有四条竖条，请依次说出每一条的颜色。只回答颜色，逗号分隔，不要解释。",
+    "image": "运行期生成的 240×120 PNG（src 里那段 20 行的编码器）：四条等宽竖条，左→右 = 绿 #2E8B57 / 品红 #FF00FF / 橙 #FFA500 / 深蓝 #1E3A8A。刻意不用「红绿蓝」这种有默认顺序的三色——盲模型猜中的概率不该进判据。",
+    "expected": {
+      "sn-glm-5-3": false,
+      "sn-glm-5-3-flash": true,
+      "sn-deepseek-v4-1-flash": true
+    },
+    "note": "expected = 「这个模型能不能真的读图」的实测结论，成员就是 src 两个实测集合（RACCOON_VISION_DENYLIST / WHITELIST）的并集，由 test/raccoon.test.mjs 离线对齐。L2e 段每个成员发一次计费 chat 请求（L2 里唯一花钱的部分），不重试、不轮询。结论是测量不是设计：哪天网关把 sn-glm-5-3 接到会看的后端，这条会红，届时把否决集里的条目取出来并同步本文件。declaration（目录 tags）不在这里冻结——它随网关漂，且 2026-10-06 实测两个方向都错过。"
   },
   "envelope": {
     "successCode": 0,

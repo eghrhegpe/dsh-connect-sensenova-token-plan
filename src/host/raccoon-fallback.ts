@@ -22,14 +22,23 @@
  * to undeclared (harness fills 32768) when the field is truly absent. They are
  * only reached when the live catalogue is unreachable, which is exactly the
  * scenario where a slightly stale but real window beats an invented one.
+ *
+ * The `vision` column is the ONE column that is not the snapshot's own: it
+ * carries the measured verdict (2026-10-06 probe, see
+ * `raccoon-catalog.ts`'s probe sets and docs/ADR.md ADR-009), because the
+ * catalogue's declaration was measured wrong in BOTH directions —
+ * `sn-glm-5-3` is tagged `vision` and cannot see, `sn-glm-5-3-flash` is
+ * untagged and can. These rows never pass through `raccoonRowVision`
+ * (they are already normalized), so the two bits below are kept honest by a
+ * consistency check in `test/raccoon.test.mjs` rather than by construction.
  */
 export const RACCOON_FALLBACK_MODELS = Object.freeze([
   { id: "sn-sensenova-6-8-flash", name: "SenseNova 6.8 Flash", multiplier: 0, vision: true, contextWindow: 256_000, maxOutputLength: 63_999 },
   { id: "sn-sensenova-6-8-flash-lite", name: "SenseNova 6.8 Flash Lite", multiplier: 0, vision: true, contextWindow: 256_000, maxOutputLength: 63_999 },
-  { id: "sn-glm-5-3", name: "GLM-5.3", multiplier: 0.75, vision: true, contextWindow: 1_000_000, maxOutputLength: 65_536 },
+  { id: "sn-glm-5-3", name: "GLM-5.3", multiplier: 0.75, vision: false, contextWindow: 1_000_000, maxOutputLength: 65_536 },
   { id: "sn-kimi-k3", name: "Kimi K3", multiplier: 1, vision: true, contextWindow: 1_000_000, maxOutputLength: 65_536 },
-  { id: "sn-glm-5-3-flash", name: "GLM-5.3 Flash", multiplier: 0.2, vision: false, contextWindow: 1_000_000, maxOutputLength: 65_536 },
-  { id: "sn-deepseek-v4-1-flash", name: "DeepSeek V4.1 Flash", multiplier: 0.25, vision: false, contextWindow: 1_000_000, maxOutputLength: 65_536 }
+  { id: "sn-glm-5-3-flash", name: "GLM-5.3 Flash", multiplier: 0.2, vision: true, contextWindow: 1_000_000, maxOutputLength: 65_536 },
+  { id: "sn-deepseek-v4-1-flash", name: "DeepSeek V4.1 Flash", multiplier: 0.25, vision: true, contextWindow: 1_000_000, maxOutputLength: 65_536 }
 ]);
 
 /**

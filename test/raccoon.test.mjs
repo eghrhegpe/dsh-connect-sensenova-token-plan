@@ -35,6 +35,8 @@ import {
   pollRaccoonQrLogin,
   fetchRaccoonBalance,
   fetchRaccoonCatalog,
+  RACCOON_VISION_WHITELIST,
+  RACCOON_VISION_DENYLIST,
   RACCOON_QR_STATUS,
   RACCOON_CODE,
   isDeadRaccoonSession,
@@ -150,6 +152,27 @@ function section(title) {
     check("the two SenseNova flash models are free (multiplier 0)",
       RACCOON_FALLBACK_MODELS[0].multiplier === 0 && RACCOON_FALLBACK_MODELS[1].multiplier === 0);
     check("the roster is frozen (never mutated)", Object.isFrozen(RACCOON_FALLBACK_MODELS));
+
+    // The vision column of that snapshot is NOT the snapshot: it carries the
+    // MEASURED verdict (2026-10-06 probe, ADR-009), because the catalogue's own
+    // declaration was measured wrong in both directions. These rows never pass
+    // through `raccoonRowVision` (they are already normalized), so nothing but
+    // this check keeps the table and the probe sets from drifting apart.
+    const fallbackById = Object.fromEntries(RACCOON_FALLBACK_MODELS.map((row) => [row.id, row]));
+    check("the two glm rows carry the measured vision verdict, not the tag",
+      fallbackById["sn-glm-5-3"]?.vision === false && fallbackById["sn-glm-5-3-flash"]?.vision === true,
+      JSON.stringify({ glm53: fallbackById["sn-glm-5-3"]?.vision, glm53flash: fallbackById["sn-glm-5-3-flash"]?.vision }));
+    {
+      // Non-vacuity first: a set member absent from the roster is tolerated (a
+      // probed model can precede its fallback row), but at least the members we
+      // actually ship must have been compared for this check to mean anything.
+      const compared = [...RACCOON_VISION_WHITELIST, ...RACCOON_VISION_DENYLIST].filter((id) => fallbackById[id] !== undefined);
+      check("every probe-set member agrees with its fallback row's vision bit",
+        compared.length >= 3 &&
+        [...RACCOON_VISION_WHITELIST].every((id) => fallbackById[id] === undefined || fallbackById[id].vision === true) &&
+        [...RACCOON_VISION_DENYLIST].every((id) => fallbackById[id] === undefined || fallbackById[id].vision === false),
+        `compared=${compared.join(",")}`);
+    }
 
     // The two-state thinking mapping: off → disabled, anything else → enabled,
     // and `undefined` omits the field entirely (the server default = on).
@@ -333,6 +356,52 @@ function section(title) {
     ] }] } }));
     check("the legacy catalogue shape still normalizes",
       legacy?.[0]?.id === "legacy-1" && legacy?.[0]?.multiplier === 1 && legacy?.[0]?.vision === true && legacy?.[0]?.contextWindow === 1000 && legacy?.[0]?.maxOutputLength === 500);
+    // The probe sets decide BEFORE the declaration does — in both directions
+    // (ADR-009). `sn-glm-5-3` is tagged `vision` by the gateway and was
+    // measured blind (2026-10-06); `sn-glm-5-3-flash` carries no such tag and
+    // was measured seeing. The rows below arrive with the very tags the live
+    // catalogue ships, so this is the production shape, not a convenient one.
+    const probeRows = await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
+      { model_name: "sn-glm-5-3", name: "GLM-5.3", visible: true, billing_multiplier: 0.75, tags: ["general", "office", "code", "vision", "debug", "analysis", "html", "reasoning"], params: { context_window: 1_000_000, max_tokens: 100_000 } },
+      { model_name: "sn-glm-5-3-flash", name: "GLM-5.3 Flash", visible: true, billing_multiplier: 0.2, tags: ["general", "chat", "rewrite", "summary", "fast"], params: { context_window: 1_000_000, max_tokens: 100_000 } }
+    ] }] } }));
+    check("the probe denylist beats the row's own vision tag",
+      probeRows?.[0]?.id === "sn-glm-5-3" && probeRows?.[0]?.vision === false,
+      JSON.stringify(probeRows?.[0]));
+    check("a denied row keeps every other field the catalogue declared",
+      probeRows?.[0]?.multiplier === 0.75 && probeRows?.[0]?.contextWindow === 1_000_000 && probeRows?.[0]?.maxOutputLength === 100_000,
+      JSON.stringify(probeRows?.[0]));
+    check("the probe whitelist grants vision to a row the gateway did not tag",
+      probeRows?.[1]?.id === "sn-glm-5-3-flash" && probeRows?.[1]?.vision === true,
+      JSON.stringify(probeRows?.[1]));
+    // A member in both sets would make the verdict depend on rung order — a
+    // data error, so the sets are asserted disjoint rather than merely ordered.
+    check("the two probe sets are disjoint",
+      [...RACCOON_VISION_WHITELIST].every((id) => !RACCOON_VISION_DENYLIST.has(id)) &&
+      [...RACCOON_VISION_DENYLIST].every((id) => !RACCOON_VISION_WHITELIST.has(id)),
+      `white=${[...RACCOON_VISION_WHITELIST].join(",")} deny=${[...RACCOON_VISION_DENYLIST].join(",")}`);
+    check("a row with no probe entry and no vision tag stays text-only",
+      (await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
+        { model_name: "sn-plain-row", visible: true, billing_multiplier: 0.3, tags: ["general", "fast"] }
+      ] }] } })))?.[0]?.vision === false);
+    // The live harness (L2e) re-probes exactly the members the baseline records,
+    // so a set edited without the baseline would make the next live run assert
+    // the OLD expectation and report a phantom platform change. Pin the two
+    // together offline — the baseline's `visionProbe.expected` IS the sets'
+    // union, with the same verdicts.
+    {
+      const { readFileSync } = await import("node:fs");
+      const baseline = JSON.parse(readFileSync(new URL("./baselines/raccoon-contract.json", import.meta.url), "utf8"));
+      const recorded = Object.keys(baseline.visionProbe?.expected ?? {}).sort();
+      const declared = [...new Set([...RACCOON_VISION_WHITELIST, ...RACCOON_VISION_DENYLIST])].sort();
+      check("the live vision baseline lists exactly the probe-set members",
+        recorded.length > 0 && JSON.stringify(recorded) === JSON.stringify(declared),
+        `baseline=${recorded.join(",")} sets=${declared.join(",")}`);
+      check("the baseline's recorded verdicts match the sets they mirror",
+        [...RACCOON_VISION_WHITELIST].every((id) => baseline.visionProbe?.expected?.[id] === true) &&
+        [...RACCOON_VISION_DENYLIST].every((id) => baseline.visionProbe?.expected?.[id] === false),
+        JSON.stringify(baseline.visionProbe?.expected));
+    }
     check("a failed catalog read is null (the fallback roster takes over)",
       (await fetchRaccoonCatalog({ access_token: "t" }, async () => {
         throw new Error("down");

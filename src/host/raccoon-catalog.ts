@@ -23,33 +23,71 @@ import { raccoonHeaders, parseRaccoonEnvelope } from "./raccoon-http.ts";
  * The gateway's `tags` array is the current authority for vision ability, but
  * it is not exhaustive: `sn-deepseek-v4-1-flash` carries no vision tag and yet
  * answered a `chat/completions` request carrying an `image_url` part with
- * HTTP 200 on 2026-10-04 (it described the picture correctly). This set holds
- * the models whose image support was PROBED rather than declared, so the
- * picker keeps offering them pictures instead of silently dropping the
- * attachment. Adding a model here requires a real probe, not a belief.
+ * HTTP 200 on 2026-10-04 (it described the picture correctly), and
+ * `sn-glm-5-3-flash` did the same on 2026-10-06 (it named all four stripes of
+ * the probe image). This set holds the models whose image support was PROBED
+ * rather than declared, so the picker keeps offering them pictures instead of
+ * silently dropping the attachment. Adding a model here requires a real probe,
+ * not a belief.
  * @type {ReadonlySet<string>}
  */
 export const RACCOON_VISION_WHITELIST: ReadonlySet<string> = Object.freeze(new Set([
-  "sn-deepseek-v4-1-flash"
+  "sn-deepseek-v4-1-flash",
+  "sn-glm-5-3-flash"
+]));
+
+/**
+ * Raccoon models the catalogue TAGS as image-capable that a probe found blind
+ * — the mirror of the whitelist, and the reason a missing tag is not the only
+ * way `tags` can lie.
+ *
+ * The two directions cost differently: a missing tag merely hides a capability
+ * from the picker, while a WRONG tag sends the user's image to a model that
+ * cannot look at it. That case answers **HTTP 200** and then says it cannot see
+ * the picture, so no layer reports an error and the user reads it as their own
+ * mistake (2026-10-06 report: "glm-5.3 不能看图却显示可以看图").
+ *
+ * `sn-glm-5-3` is the measured case: its row carries `vision` among its tags,
+ * yet a `chat/completions` request with an `image_url` part answered
+ * 「无法查看图片（当前环境不支持图像识别）」in all three shapes tried — sync,
+ * image-part-first, and `stream: true`. The SAME payload was read correctly in
+ * the same run by `sn-glm-5-3-flash`, `sn-kimi-k3` and
+ * `sn-deepseek-v4-1-flash`, which is what rules out the payload as the cause.
+ *
+ * Membership is a MEASUREMENT with a date, not a verdict about the model: a
+ * denial is as load-bearing as an addition, so it needs a real probe too, and
+ * the day the gateway routes this id to a seeing backend the live harness
+ * (`test/live-raccoon.mjs`, L2e) turns red and the entry comes out.
+ * @type {ReadonlySet<string>}
+ */
+export const RACCOON_VISION_DENYLIST: ReadonlySet<string> = Object.freeze(new Set([
+  "sn-glm-5-3"
 ]));
 
 /**
  * Whether a raw catalogue row reads as image-capable.
  *
- * Field precedence is measured, not guessed: the gateway's current
- * `/api/web/llm/v2/model_catalog` carries NO `vision` boolean and NO
+ * Precedence is measured, not guessed, and it is a ladder of three rungs: the
+ * probe DENYLIST, the probe WHITELIST, then the row's own declaration. Both
+ * probe rungs outrank the declaration because a probe IS the measurement and
+ * the declaration is only a claim — and the denylist outranks the whitelist
+ * because a model in both is a data error whose safe reading is "do not send
+ * it pictures" (the two sets are asserted disjoint in `test/raccoon.test.mjs`).
+ *
+ * The declaration rung's own field order is measured too: the gateway's
+ * current `/api/web/llm/v2/model_catalog` carries NO `vision` boolean and NO
  * `input_modalities` array at all — the ability lives in `tags` (the client
  * normalises `image` / `image-understanding` into `vision` the same way, see
- * the desktop App bundle). The whitelist is checked FIRST because a probe
- * beats a declaration; the legacy branches stay as a defensive ladder in case
- * the catalogue drifts back to the older shape. `tags` is read case-sensitively
- * — the gateway spells it lowercase, and a case-insensitive read would paper
- * over a shape drift instead of flagging it.
+ * the desktop App bundle). The legacy branches stay as a defensive ladder in
+ * case the catalogue drifts back to the older shape. `tags` is read
+ * case-sensitively — the gateway spells it lowercase, and a case-insensitive
+ * read would paper over a shape drift instead of flagging it.
  * @param {object} model - a raw `categories[].models[]` entry.
  * @returns {boolean} true when the model may be offered image input.
  */
 export function raccoonRowVision(model: any): boolean {
   const id = str(model.model_name, "") || str(model.id, "") || str(model.name, "");
+  if (RACCOON_VISION_DENYLIST.has(id)) return false;
   if (RACCOON_VISION_WHITELIST.has(id)) return true;
   const tags = Array.isArray(model.tags) ? model.tags : [];
   if (tags.some((tag: unknown) => tag === "vision" || tag === "image" || tag === "image-understanding")) return true;

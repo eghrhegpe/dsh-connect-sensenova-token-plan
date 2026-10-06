@@ -31,6 +31,7 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deflateSync } from "node:zlib";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = JSON.parse(
@@ -63,6 +64,12 @@ function check(name, condition, detail = "") {
 
 const PROBE_BACKOFF_MS = 500;
 const TIMEOUT_MS = 30_000;
+/** The image probe's own deadline: a chat completion is not a metadata read.
+ *  Measured 2026-10-06, the same three models answered in 3.5–9 s, but one run
+ *  of `sn-glm-5-3-flash` went past the 30 s read timeout — and a timeout is
+ *  reported as a red here on purpose: a model the picker offers images to but
+ *  that cannot answer inside 90 s is broken from the user's seat. */
+const VISION_TIMEOUT_MS = 90_000;
 
 /** Header pair for the given tier. Mirrors `raccoonHeaders()` in
  *  src/host/raccoon.ts — duplicated on purpose so this script stays
@@ -82,13 +89,13 @@ function headers(withAuth) {
 }
 
 /** One request, unwrapped into {status, body, text, transportError}. */
-async function probe(method, path, { auth = false, body = null } = {}) {
+async function probe(method, path, { auth = false, body = null, timeoutMs = TIMEOUT_MS } = {}) {
   try {
     const response = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: headers(auth),
       ...(body !== null ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
+      signal: AbortSignal.timeout(timeoutMs)
     });
     const text = await response.text().catch(() => "");
     return { status: response.status, body: tryJson(text), text, transportError: null };
@@ -123,6 +130,67 @@ function parseSseEnvelopes(text) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** The answer text of one `chat/completions` reply, in either dialect: a JSON
+ *  body (`choices[0].message.content`) or an SSE stream (the concatenated
+ *  `choices[].delta.content`). The gateway answers both depending on the
+ *  `stream` flag it was asked for, and a probe that reads only one dialect
+ *  would report a seeing model as blind. */
+function chatAnswer(text, body) {
+  const fromJson = body?.choices?.[0]?.message?.content;
+  if (typeof fromJson === "string" && fromJson !== "") return fromJson;
+  if (typeof body?.data?.choices?.[0]?.message?.content === "string") return body.data.choices[0].message.content;
+  return parseSseEnvelopes(text)
+    .map((envelope) => envelope?.choices?.[0]?.delta?.content ?? envelope?.data?.choices?.[0]?.delta?.content ?? "")
+    .join("");
+}
+
+/**
+ * A PNG of `width`×`height` made of equal vertical stripes — built here rather
+ * than pasted as a base64 blob so the image the probe sends is readable in the
+ * source that sends it. `stripes` are `[r, g, b]`, left to right.
+ * @param {number[][]} stripes
+ * @param {number} [width]
+ * @param {number} [height]
+ * @returns {Buffer} the PNG bytes.
+ */
+function stripePng(stripes, width = 240, height = 120) {
+  const crc32 = (buffer) => {
+    let crc = 0xffffffff;
+    for (const byte of buffer) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const rowBytes = width * 3 + 1;
+  const raw = Buffer.alloc(rowBytes * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const stripe = stripes[Math.min(stripes.length - 1, Math.floor((x / width) * stripes.length))];
+      raw.writeUIntBE((stripe[0] << 16) | (stripe[1] << 8) | stripe[2], y * rowBytes + 1 + x * 3, 3);
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;  // bit depth
+  ihdr[9] = 2;  // colour type: truecolour
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0))
+  ]);
 }
 
 // The route-existence dialect this gateway speaks: a path that EXISTS but is
@@ -242,7 +310,12 @@ if (accessToken === "") {
       chat !== undefined,
       `types: ${categories.map((c) => String(c?.type)).join(", ") || "none"}`);
     const models = Array.isArray(chat?.models) ? chat.models : [];
-    const visibleIds = new Set(models.filter((m) => m?.visible !== false && String(m?.id ?? "") !== "").map((m) => String(m.id)));
+    // The v2 catalogue's id field is `model_name` (ROADMAP §6.1.6: `id` is gone,
+    // and every row still carries an empty `id` key). Reading `id` alone here
+    // made this line report the whole roster as vanished — a red that means
+    // nothing, which is the failure mode this file's header warns about.
+    const rowId = (m) => String(m?.model_name ?? m?.id ?? "");
+    const visibleIds = new Set(models.filter((m) => m?.visible !== false && rowId(m) !== "").map(rowId));
     const survivors = contract.catalog.visibleIds.filter((id) => visibleIds.has(id));
     // `list-not-subset`: new models are not drift, MASS DISAPPEARANCE is. A
     // strict equality here would make every gateway catalogue expansion a red,
@@ -250,8 +323,13 @@ if (accessToken === "") {
     check(`catalogue still lists ≥${survivors.length >= 4 ? 4 : survivors.length} of the frozen visible ids (${survivors.length}/${contract.catalog.visibleIds.length})`,
       survivors.length >= 4,
       `visible on gateway: ${[...visibleIds].join(", ") || "none"}`);
-    const invisible = models.filter((m) => String(m?.id ?? "") === "" && String(m?.model_name ?? "") !== "");
-    check("catalogue invisible entries (empty id, model_name present) are still the known count",
+    // Invisible entries: the rows the gateway hides from the picker. The v2
+    // catalogue marks them with `visible: false` (that is what
+    // `fetchRaccoonCatalog` filters on) — reading "empty id" here counted ALL
+    // nine rows as invisible, because v2 dropped `id` entirely and every row
+    // now has an empty one. Same pre-v2 leftover as the id read above.
+    const invisible = models.filter((m) => m?.visible === false);
+    check("catalogue invisible entries are still the known count",
       invisible.length === contract.catalog.invisibleCount,
       `found ${invisible.length}, frozen ${contract.catalog.invisibleCount}`);
   }
@@ -383,6 +461,65 @@ if (accessToken === "") {
   // is frozen in `contract.imageGen` until someone runs one by hand.
   check("images/gen real generation is not auto-probed (spends points, response format unconfirmed)",
     true, "route existence in L1; see contract.imageGen.note");
+}
+
+// --- L2e. the vision probe sets, RE-PROBED (ADR-009) ----------------------
+// `RACCOON_VISION_WHITELIST` / `RACCOON_VISION_DENYLIST` are measurements, and
+// a measurement with no re-probe rots into a belief. Every member of either set
+// gets one real image question here — that is the whole point of this tier. If
+// the gateway re-routes `sn-glm-5-3` to a seeing backend, this section goes red
+// and says the denylist entry can come out.
+//
+// Cost discipline (same as L2d): ONE request per member, no retry, no loop.
+// This is the only part of L2 that spends inference credits — three short chat
+// turns today, against the alternative of users sending pictures to a model
+// that answers HTTP 200 and then says it cannot see them.
+{
+  const vision = contract.visionProbe ?? null;
+  if (vision === null) {
+    console.log("\nSKIP vision re-probe — test/baselines/raccoon-contract.json has no visionProbe block.");
+  } else {
+    const png = stripePng([[0x2e, 0x8b, 0x57], [0xff, 0x00, 0xff], [0xff, 0xa5, 0x00], [0x1e, 0x3a, 0x8a]]);
+    const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
+    const members = Object.keys(vision.expected ?? {});
+    check("the vision probe names at least one model", members.length >= 1, `members=${members.join(",")}`);
+    for (const id of members) {
+      const res = await probe("POST", "/api/web/llm/v2/chat/completions", {
+        auth: true,
+        timeoutMs: VISION_TIMEOUT_MS,
+        body: {
+          model: id,
+          stream: false,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: vision.question },
+              { type: "image_url", image_url: { url: dataUrl } }
+            ]
+          }]
+        }
+      });
+      if (res.transportError !== null) {
+        check(`${id}: vision probe reachable`, false, `transport: ${res.transportError}`);
+      } else {
+        const answer = chatAnswer(res.text, res.body);
+        const denies = /无法(看到|查看|识别)|看不到|不能(看到|查看|识别)|不支持(图片|图像)|未(能)?收到(图片|图像)/.test(answer);
+        // A seeing model names the stripes; a blind one either denies outright or
+        // (worse) guesses. Guessing is why the verdict is "denies → blind" AND
+        // "names ≥3 colours → sees", with the middle read as blind.
+        const colours = ["绿", "品红", "洋红", "橙", "深蓝"].filter((c) => answer.includes(c)).length;
+        const sees = denies ? false : colours >= 3;
+        const want = vision.expected[id] === true;
+        check(`${id}: live vision verdict still matches the recorded probe (${want ? "sees" : "blind"})`,
+          sees === want,
+          `HTTP ${res.status} sees=${sees} denies=${denies} colours=${colours} answer="${answer.replace(/\s+/g, " ").slice(0, 120)}"`);
+      }
+      await sleep(PROBE_BACKOFF_MS);
+    }
+    if (members.length > 0) {
+      console.log(`\nL2e spent ${members.length} billed chat request(s) — one per probe-set member.`);
+    }
+  }
 }
 
 // --- L2c. refresh: opt-in only, because it BURNS the token ----------------
