@@ -14,10 +14,35 @@
  * @module dsh-connect-sensenova-token-plan/console-client
  */
 
+import { createHash } from "node:crypto";
 import { CODE } from "./codes.ts";
 import { str, obj } from "./util.ts";
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import type { ResolvedSettings } from "./host-config.ts";
+
+/**
+ * A short identity fingerprint for a cache key.
+ *
+ * The shared console/catalog cache is keyed per IDENTITY, not per URL: the
+ * raccoon upstream proved the pattern (`catalog:${tokenFingerprint(...)}`),
+ * and the Token Plan side had the hole the other half never did — an
+ * external change to the credential (the `.credentials.yaml` reference or
+ * the environment) that bypasses the panel's save/forget routes does not
+ * clear the console cache, so the OLD account's pool data (or the OLD
+ * key's one-hour catalog) would otherwise keep being served. Keying under
+ * a hash of the live credential means a switched account or key walks
+ * into a FRESH key and re-fetches, with the panel's own save/forget
+ * (which still clears everything via the generation bump) unchanged.
+ *
+ * Hashed, not raw: the key string lives in a long-lived in-memory Map,
+ * and 12 hex chars (48 bits) is ample for two or three identities — the
+ * raw token or `sk-` key must not ride along in the key.
+ * @param {string} value - the credential to fingerprint.
+ * @returns {string} the 12-hex-char digest prefix.
+ */
+export function credentialFingerprint(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
 
 /**
  * One cached console response: the body plus the epoch millis it was fetched.
