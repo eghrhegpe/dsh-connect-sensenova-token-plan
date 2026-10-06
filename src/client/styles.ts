@@ -173,7 +173,6 @@ export const S = {
     background: "var(--dsw-alias-button-primary-fill)",
     color: "var(--dsw-alias-label-primary-foreground)", cursor: "pointer"
   },
-  primaryHover: { background: "var(--dsw-alias-button-primary-hover)" },
   primaryBusy: { opacity: 0.6, cursor: "default" },
   formError: { color: "var(--dsw-alias-state-error-primary)", fontSize: 12, margin: "10px 0 0" },
   formNote: { color: "var(--dsw-alias-label-secondary)", fontSize: 12, margin: "10px 0 0" },

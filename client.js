@@ -1098,7 +1098,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				color: "var(--dsw-alias-label-primary-foreground)",
 				cursor: "pointer"
 			},
-			primaryHover: { background: "var(--dsw-alias-button-primary-hover)" },
 			primaryBusy: {
 				opacity: .6,
 				cursor: "default"

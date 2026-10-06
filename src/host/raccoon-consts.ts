@@ -43,3 +43,5 @@ export const RACCOON_DESKTOP_PREFIX = "/api/web/desktop/v1";
 export const RACCOON_QR_POLL_INTERVAL_MS = 2_000;
 /** The QR login's overall deadline: a scan that takes longer is voided. */
 export const RACCOON_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+/** The per-request deadline for a gateway read (catalogue / balance). */
+export const RACCOON_REQUEST_TIMEOUT_MS = 30_000;

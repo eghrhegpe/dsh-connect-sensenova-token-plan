@@ -21,6 +21,7 @@
 
 import { CODE, isAuthFailure } from "./codes.ts";
 import { fetchConsole, fetchModelCatalog } from "./console-client.ts";
+import { MAX_CACHE_AGE_MS } from "./coalesced-fetch.ts";
 import { parsePools, parseTrend, checkShape, identifyVisionModel } from "./parsers.ts";
 import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
 import { catalogSignature, syncSignaturesAfterPublish, quotaSignatureOf } from "./provider-publish.ts";
@@ -207,9 +208,12 @@ export async function buildSnapshotBody({
       tokenStore
     )),
     // Optional: a missing API key degrades the model lists, not the quota.
+    // The catalog read rides the shared coalesced cache with the cache's own
+    // maximum age (`MAX_CACHE_AGE_MS`) as its request TTL — a catalog poll can
+    // never be served stale beyond the window the cache itself allows.
     (async () => {
       const apiKey = await resolveApiKey();
-      return apiKey === "" ? null : fetchModelCatalog(settings, 3600_000, cache, inflight, apiKey).catch(() => null);
+      return apiKey === "" ? null : fetchModelCatalog(settings, MAX_CACHE_AGE_MS, cache, inflight, apiKey).catch(() => null);
     })()
   ]);
   const pools = parsePools(poolResult.value);

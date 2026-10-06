@@ -13,7 +13,7 @@
  */
 
 import { obj, num, str } from "./util.ts";
-import { RACCOON_API_BASE, RACCOON_LLM_PREFIX, RACCOON_POINTS_PREFIX } from "./raccoon-consts.ts";
+import { RACCOON_API_BASE, RACCOON_LLM_PREFIX, RACCOON_POINTS_PREFIX, RACCOON_REQUEST_TIMEOUT_MS } from "./raccoon-consts.ts";
 import { raccoonHeaders, parseRaccoonEnvelope } from "./raccoon-http.ts";
 
 /**
@@ -114,7 +114,7 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
   try {
     const response = await effective(
       `${RACCOON_API_BASE}${RACCOON_LLM_PREFIX}/model_catalog`,
-      { headers: raccoonHeaders(credential), signal: AbortSignal.timeout(30_000) }
+      { headers: raccoonHeaders(credential), signal: AbortSignal.timeout(RACCOON_REQUEST_TIMEOUT_MS) }
     );
     if (!response.ok) {
       onFail?.(`HTTP ${response.status}`);
@@ -186,7 +186,7 @@ export async function fetchRaccoonBalance(credential: any, fetcher?: typeof fetc
   try {
     const response = await effective(
       `${RACCOON_API_BASE}${RACCOON_POINTS_PREFIX}/balance`,
-      { headers: raccoonHeaders(credential), signal: AbortSignal.timeout(30_000) }
+      { headers: raccoonHeaders(credential), signal: AbortSignal.timeout(RACCOON_REQUEST_TIMEOUT_MS) }
     );
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
