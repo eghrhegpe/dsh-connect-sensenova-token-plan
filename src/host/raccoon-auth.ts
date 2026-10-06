@@ -142,9 +142,18 @@ export async function refreshRaccoonCredential(
     return { ok: false, code: RACCOON_CODE.REFRESH_FAILED, message: errMsg(error) };
   }
   if (envelope.code !== 0 || envelope.data === null) {
+    // A 401 is the gateway's dead-session signal whether or not the BODY
+    // parsed: `RACCOON_DEAD_SESSION_CODES` names it as such, but that set was
+    // only ever consulted against the JSON envelope — a plain-text (or
+    // unparseable) 401 body reads as `code: -1`, which is NOT in the set,
+    // and would be classified transient. The store's latch then keeps
+    // knocking on a session only a fresh scan recovers, one guaranteed-401
+    // per poll, indefinitely. So the HTTP status joins the dead decision,
+    // not just the body.
+    const dead = isDeadRaccoonEnvelope(envelope.code) || isDeadRaccoonEnvelope(envelope.status);
     return {
       ok: false,
-      code: isDeadRaccoonEnvelope(envelope.code) ? RACCOON_CODE.SESSION_DEAD : RACCOON_CODE.REFRESH_REJECTED,
+      code: dead ? RACCOON_CODE.SESSION_DEAD : RACCOON_CODE.REFRESH_REJECTED,
       message: envelope.message || `refresh refused (code ${envelope.code})`
     };
   }

@@ -561,6 +561,54 @@ async function build() {
 
 const actual = await build();
 
+// ── closed-set pins: the scenario roster is spec, not a suggestion ───────
+// The drift check below compares the frozen JSON field for field, but a
+// REMOVED scenario simply stops appearing in both sides and diffs clean —
+// regenerating the baseline after deleting a scenario would go all green, and
+// no gate would notice the spec shrank. So the suite pins the roster itself
+// (names, in order) and the total frame count, on BOTH the compare path and
+// the UPDATE_BASELINE path: shrinking the spec now shows up here, before any
+// JSON is written. A legitimate retirement of a scenario must retire its name
+// here too — that is the closed-set fix, and it appears in the diff.
+const FROZEN_SCENARIOS = [
+  "S1 unconfigured: no attempt and no throttle",
+  "S2 env login persists the grant then serves from cache",
+  "S3 parked refusal survives a restart with no new login",
+  "S4 local backoff doubles, then success clears it",
+  "S5 platform-stated window is honoured untruncated",
+  "S6a near-expiry grant is renewed and the rotation persisted",
+  "S6b three concurrent polls share exactly one refresh",
+  "S6c refresh write defers to a concurrently rotated grant",
+  "S7a dead refresh with no account reaps the grant",
+  "S7b dead refresh with an account re-logs-in",
+  "S8 invalidated token is renewed once, never replayed",
+  "S9a legacy grant is adopted and the old record deleted",
+  "S9b legacy parked throttle is adopted then swept on resubmit",
+  "S9c legacy stored password is swept on first contact",
+  "S10 saveAccount then forgetAccount leaves the grant serving",
+  "S11 wrong-password park is cleared by a corrected resubmit",
+  "S12 no credentials service still works, marked ephemeral"
+];
+const FROZEN_FRAME_COUNT = 48;
+const scenarioNames = defs.map((def) => def.name);
+const frameCount = actual.reduce((n, s) => n + s.frames.length, 0);
+if (JSON.stringify(scenarioNames) !== JSON.stringify(FROZEN_SCENARIOS)) {
+  const dropped = FROZEN_SCENARIOS.filter((n) => !scenarioNames.includes(n));
+  const added = scenarioNames.filter((n) => !FROZEN_SCENARIOS.includes(n));
+  console.error(
+    `the scenario roster moved (${defs.length} defined vs ${FROZEN_SCENARIOS.length} pinned):\n` +
+    (dropped.length ? `  dropped: ${dropped.join(", ")}\n` : "") +
+    (added.length ? `  added: ${added.join(", ")}\n` : "") +
+    "Retiring a scenario means retiring its name from FROZEN_SCENARIOS in the same change; adding one means registering it there."
+  );
+  process.exit(1);
+}
+if (frameCount !== FROZEN_FRAME_COUNT) {
+  console.error(
+    `the frame count moved (${frameCount} vs ${FROZEN_FRAME_COUNT} pinned): a scenario grew or shrank its scripted frames — update FROZEN_FRAME_COUNT in the same change as the scenario`
+  );
+  process.exit(1);
+}
 if (process.env.UPDATE_BASELINE === "1") {
   mkdirSync(BASELINE_DIR, { recursive: true });
   writeFileSync(BASELINE, `${JSON.stringify(actual, null, 2)}\n`);

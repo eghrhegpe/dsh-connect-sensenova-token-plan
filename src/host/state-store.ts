@@ -27,7 +27,7 @@
  *
  * @module dsh-connect-sensenova-token-plan/state-store
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, dirname, basename } from "node:path";
@@ -215,15 +215,24 @@ export function temporaryOf(dir: string, base: string, now = Date.now) {
  *
  * The payload string is written with a trailing newline, exactly as every
  * store wrote before this module existed. Failures PROPAGATE — the callers
- * decide whether a read-only Home breaks their flow.
+ * decide whether a read-only Home breaks their flow. A failed write also
+ * removes its own temporary file (best effort): a Home that rejects the write
+ * must not grow a `.tmp` litter on every attempt, and only THIS process's
+ * temp (the random-suffixed path it was handed) is ever touched — a sibling
+ * process's half-written temp is nobody's to unlink.
  * @param {string} file - the final file path.
  * @param {string} payload - the serialized body (JSON text).
  * @param {{temporary: string}} options - the temp path to write first.
  * @returns {Promise<void>}
  */
 export async function writeStateFile(file: string, payload: string, { temporary }: { temporary: string }) {
-  await writeFile(temporary, `${payload}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, file);
+  try {
+    await writeFile(temporary, `${payload}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(temporary, file);
+  } catch (error) {
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
 }
 
 /**

@@ -28,7 +28,7 @@
  * exclude to an include line here). A green gate means BOTH are clean.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -91,10 +91,23 @@ for (const config of CONFIGS) {
 // Deliberately runs even when a config above already failed: it reports its own
 // verdict independently, so one run tells you whether the type AND the gate are
 // both still doing their jobs.
+//
+// The probe lives in a FRESH temp dir at the repo root (`.typecheck-probe-*`),
+// not in `src/host/`: a SIGKILL between the writeFileSync and the finally (the
+// single-file tsc has its own 120s timeout, and an editor can crash mid-run)
+// left an UNTRACKED probe inside src/, and the next `npm test`'s tsc over
+// tsconfig.json (include: src/) failed on it — the gate poisoned the build
+// that followed it. A root-level dot-dir leftover is inert to every gate:
+// tsconfig includes only src/, tsdown builds from src/ entries, jscpd scans
+// src/ — a `git status` after such a crash shows one untracked dir to delete.
+// The probe reaches the real `util.ts` by relative import, so nothing about
+// the resolution changes. (A `file:` URL does not work here: tsc's nodenext
+// resolution does not map URL specifiers back onto disk, verified.)
 {
-  const probe = join(root, "src", "host", "__codevalue-negative-control.ts");
+  const probeDir = mkdtempSync(join(root, ".typecheck-probe-"));
+  const probe = join(probeDir, "__codevalue-negative-control.ts");
   const probeSource =
-    `import { pluginError } from "./util.ts";\n` +
+    `import { pluginError } from "../src/host/util.ts";\n` +
     `// The typo MUST be rejected; see the negative control in test/typecheck-gate.mjs.\n` +
     `export const typo = pluginError("not_a_real_code_typo", "must not compile");\n`;
   try {
@@ -123,7 +136,7 @@ for (const config of CONFIGS) {
       failed = true;
     }
   } finally {
-    rmSync(probe, { force: true });
+    rmSync(probeDir, { recursive: true, force: true });
   }
 }
 

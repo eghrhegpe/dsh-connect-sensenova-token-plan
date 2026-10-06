@@ -235,6 +235,14 @@ function section(title) {
     check("a dead refresh token (401) is a session_dead refusal",
       (await refreshRaccoonCredential({ refresh_token: "rt-1" },
         fakeFetcher({ code: 401, message: "authorization_verify_error", data: null }, 401))).code === RACCOON_CODE.SESSION_DEAD);
+    // The same verdict with a body that CARRIES NONE: a gateway 401 is the
+    // dead-session signal on its own (see RACCOON_DEAD_SESSION_CODES), and the
+    // classification must not fall through to "transient" just because the
+    // body is plain text or unparseable — that shape reads `code: -1`, and a
+    // latch that never sees `session_dead` retries the 401 every poll.
+    check("an HTTP 401 with a plain-text body is still the dead-session refusal",
+      (await refreshRaccoonCredential({ refresh_token: "rt-1" },
+        fakeFetcher("unauthorized", 401))).code === RACCOON_CODE.SESSION_DEAD);
     // The gateway also says "dead" with an envelope code under an HTTP 200, so
     // both numbers must map to the same classification — the ternary this
     // replaced had them as two bare literals.

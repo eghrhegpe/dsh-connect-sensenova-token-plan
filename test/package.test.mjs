@@ -247,6 +247,17 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
   // wires it in, the pin fails rather than letting a green run reach the platform.
   check("live-jwks.test.mjs stays out of the default gate", !rosterSet.has("live-jwks.test.mjs"),
     "the network tier must not be a default-run check");
+
+  // The commit-floor gate is wired the same way it should stay: a plain script
+  // (not a suite, not in the roster above) that BOTH `npm run commit:lint` and
+  // ci.yml's step call. Remove either call site and the message conventions
+  // stop being checked while every suite stays green — pin all three.
+  check("the commit-floor linter exists on disk", existsSync(join(root, "test", "commit-lint.mjs")),
+    "test/commit-lint.mjs is gone; the script and the CI step would call a ghost");
+  check("npm run commit:lint points at the linter", /node test\/commit-lint\.mjs/.test(manifest.scripts?.["commit:lint"] ?? ""),
+    JSON.stringify(manifest.scripts?.["commit:lint"] ?? null));
+  check("the CI commit-floor step still calls the linter", /node test\/commit-lint\.mjs/.test(ciText),
+    "ci.yml no longer runs the commit floor");
 }
 
 // --- 7. the runner's selection flags behave as documented ------------------
