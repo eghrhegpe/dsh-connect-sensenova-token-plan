@@ -78,19 +78,41 @@ export function createApiKeyStore({ credentials = null, env = process.env }: { c
     /**
      * Forget the stored key. The environment fallback is NOT touched: clearing
      * a panel-saved reference must not delete an operator's `.env` setting.
-     * Both the service reference and the in-memory copy are cleared, so a key
-     * saved on a Host without the service disappears too.
+     *
+     * The durable copy is only UNSET when the service is confirmed to hold a
+     * value: `resolve()` reads the service FIRST, so an unset that failed while
+     * a value was still there would come back on the next read as `source:
+     * "credentials"` — a key the panel was told is gone. That case PROPAGATES
+     * (the route answers ok:false). A service that cannot even be READ yields
+     * no proof a durable copy exists, so the in-memory delete degrades quietly,
+     * as it did before this guard.
      * @returns {Promise<void>}
      */
     async forget() {
       memory.delete(API_KEY_REF);
+      const service = resolveService();
+      if (service === null || typeof service.unset !== "function") return;
+      // Proof, not trust: only a value the service hands back RIGHT NOW is one
+      // a failed unset would leave behind. A service whose reads throw gives no
+      // proof, and stays on the quiet path.
+      let held: { value?: string } | undefined;
       try {
-        const service = resolveService();
-        if (service !== null && typeof service.unset === "function") {
-          await service.unset(API_KEY_REF);
-        }
+        held = typeof service.resolve === "function"
+          ? await service.resolve(API_KEY_REF).catch(() => undefined)
+          : undefined;
       } catch {
-        // The in-memory copy above is already gone; nothing else to do.
+        held = undefined;
+      }
+      if (typeof held?.value !== "string" || held.value.trim() === "") return;
+      try {
+        await service.unset(API_KEY_REF);
+      } catch (error) {
+        // The durable copy is STILL in the credentials service: answer the
+        // route with the failure rather than a clean ok, or the next resolve()
+        // would resurrect the "forgotten" key under `source: "credentials"`.
+        // The in-memory delete above still stands — this process no longer
+        // claims it from memory, only the service copy survives.
+        throw error;
       }
     },
 

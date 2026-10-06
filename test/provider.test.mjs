@@ -1215,11 +1215,53 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     try { await store.save("sk-x"); } catch { threw = true; }
     check("a save the service refuses propagates (route reports it, no silent loss)", threw);
 
-    // forget must swallow the service error; the key was never stored anyway.
+    // A service whose READS throw offers no proof a durable copy exists, so
+    // forget degrades to the quiet in-memory delete (the §13 shape: "the key
+    // was never stored anyway"). The case that must NOT stay quiet — an unset
+    // refused while the service still HOLDS a value — is pinned in §13b below.
     await store.forget();
     check("forget survives a throwing service", (await store.resolve()).source === "env");
   } catch (error) {
     fail("service failure fall-through", error);
+  } finally {
+    restoreEnv();
+  }
+}
+
+// --- 13b. api key store: a refused unset must not read as a clean forget ----
+// `resolve()` reads the credentials service FIRST, so a `forget()` that swallows
+// a failed unset would be followed by the very key it "removed" coming back as
+// `source: "credentials"`. The failure now propagates to the route (ok:false);
+// only the no-proof cases (no service / unreadable / nothing held) stay quiet.
+{
+  const restoreEnv = isolateHostEnv();
+  try {
+    const refs = new Map();
+    refs.set(API_KEY_REF, "sk-durable");
+    const service = {
+      async resolve(ref) { const value = refs.get(ref); return value === undefined ? undefined : { value }; },
+      async set(ref, value) { refs.set(ref, value); },
+      async unset() { throw new Error("credentials service refused the unset"); }
+    };
+    const store = createApiKeyStore({ credentials: () => service, env: {} });
+
+    check("before the forget, the durable copy is what resolve serves",
+      (await store.resolve()).source === "credentials");
+
+    let threw = null;
+    try { await store.forget(); } catch (error) { threw = error; }
+    check("a refused unset with a held value propagates (the route answers ok:false)",
+      threw !== null && /refused the unset/.test(String(threw.message)), String(threw));
+    check("the durable copy survives, still visible to the panel",
+      (await store.resolve()).source === "credentials" && refs.get(API_KEY_REF) === "sk-durable");
+
+    // The quiet path must be unperturbed: nothing held means nothing to unset.
+    refs.delete(API_KEY_REF);
+    await store.forget();
+    check("an unset with no durable value stays a clean forget",
+      (await store.state()).hasApiKey === false, JSON.stringify(await store.state()));
+  } catch (error) {
+    fail("api-key forget failure propagation", error);
   } finally {
     restoreEnv();
   }

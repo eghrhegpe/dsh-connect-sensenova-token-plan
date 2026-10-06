@@ -15,7 +15,7 @@
  * @module dsh-connect-sensenova-token-plan/token-store/throttle
  */
 
-import { isCredentialRefusal, CODE } from "../codes.ts";
+import { isCredentialRefusal } from "../codes.ts";
 import { str, obj, num, numOrNull } from "../util.ts";
 import { LEGACY_SCOPE, THROTTLE_ID } from "./constants.ts";
 import type { StoreContextWiring, TokenStoreState, HeldThrottle } from "./state.ts";
@@ -160,14 +160,31 @@ export async function adoptLegacyThrottle(wiring: StoreContextWiring, _state: To
  *
  * Persisted because a second Host process polling the same account would
  * otherwise walk straight into a lock this one is politely waiting out.
+ *
+ * Only a refusal that CARRIES A CODE is parked: every named failure (the
+ * platform's own rejections and their folded codes) is something "wait" or
+ * "user must act" can honestly govern. A codeless throw is an infrastructure
+ * surprise — a persist that failed AFTER a sign-in that worked, a TypeError
+ * inside the auth walk — and parking it under a guessed `login_failed` would
+ * serve a fake countdown and a platform-flavoured line over a token that may
+ * be perfectly usable, which is how a dead grant once read as a login wait.
+ * Such errors are left to the caller's re-throw: the real message reaches the
+ * panel, and nothing is recorded.
  * @param {object} error - the refusal thrown by `login`.
  * @param {number} [previousAttempt] - the attempt count being superseded.
- * @returns {Promise<{code: string, parked: boolean, until: number|null, attempt: number}>}
- *   the throttle now in force.
+ * @returns {Promise<{code: string, parked: boolean, until: number|null, attempt: number}|null>}
+ *   the throttle now in force, or `null` when nothing was written because the
+ *   error carried no code to park.
  */
-export async function writeThrottle(wiring: StoreContextWiring, state: TokenStoreState, error: unknown, previousAttempt?: number): Promise<HeldThrottle> {
+export async function writeThrottle(wiring: StoreContextWiring, state: TokenStoreState, error: unknown, previousAttempt?: number): Promise<HeldThrottle | null> {
   const { throttleStore, now } = wiring;
-  const code = str(obj(error).code, CODE.LOGIN_FAILED);
+  const code = obj(error).code;
+  if (typeof code !== "string") {
+    // No code, no parking: see the module note above. The attempt counter is
+    // left alone too — a surprise is not a refusal, and it must not reset the
+    // backoff ladder a real refusal had been climbing.
+    return state.throttle;
+  }
   const parked = isCredentialRefusal(code);
   // A window the platform stated is taken at its word; only a window we
   // invented is capped.

@@ -220,14 +220,14 @@ export function RaccoonTab({
       // so the status itself is the honest report.
       if (!isCurrent()) return;
       if (!response.ok) {
-        fail(`HTTP ${response.status}`);
+        fail(format(tt("raccoon.httpFailed"), { status: response.status }));
         return;
       }
       const body = (await response.json().catch(() => null)) as RaccoonState | null;
       if (!isCurrent()) return;
       if (body === null || body.ok === false) {
         // A failed read does not reset the timestamp we already reported.
-        fail(typeof body?.error === "string" && body.error !== "" ? body.error : "no answer");
+        fail(typeof body?.error === "string" && body.error !== "" ? body.error : tt("raccoon.noAnswer"));
         return;
       }
       setState(body);
@@ -253,7 +253,7 @@ export function RaccoonTab({
       lastGoodAt.current = at;
       report(null);
     } catch {
-      fail("unable to reach the Host");
+      fail(tt("auth.network"));
     } finally {
       // The attempt is over either way. Only the CURRENT load may clear the
       // slot: a superseded read that settles late must not wipe the pointer

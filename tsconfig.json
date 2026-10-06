@@ -29,5 +29,5 @@
     "resolveJsonModule": true
   },
   "include": ["src/host", "src/client", "src/shared", "types/*.d.ts"],
-  "exclude": ["node_modules", "upstream", "lib", "test", "assets", "docs", ".github", ".box-agent", ".box-agent-scratch", "src/host/doctor.ts"]
+  "exclude": ["node_modules", "upstream", "lib", "test", "assets", "docs", ".github", ".box-agent", ".box-agent-scratch"]
 }

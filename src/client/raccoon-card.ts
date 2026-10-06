@@ -56,14 +56,15 @@ export type { RaccoonState };
  * local encoder supports; `buildQrMatrix` throwing is the out-of-range
  * signal, and the tab then falls back to the plain URL text.
  * @param {string|null|undefined} scanUrl - the URL the route is waiting on.
+ * @param {Tt} tt - the dictionary (the `<img>` alt is localized through it).
  * @returns {unknown} an `<img>`, the URL as text, or null when there is none.
  */
-function qrImageOf(scanUrl: string | null | undefined): unknown {
+function qrImageOf(scanUrl: string | null | undefined, tt: Tt): unknown {
   if (typeof scanUrl !== "string" || scanUrl === "") return null;
   try {
     return h("img", {
       src: qrDataUrl(scanUrl, { size: QR_SIZE }),
-      alt: "WeChat QR",
+      alt: tt("raccoon.qrAlt"),
       width: QR_SIZE,
       height: QR_SIZE,
       style: { display: "block", margin: "8px 0", borderRadius: 4 }
@@ -258,7 +259,7 @@ export function RaccoonCard({
       // The QR encodes the scan URL the route is CURRENTLY waiting on (it
       // re-issues one per login; the tab's poll picks it up in `state.scanUrl`).
       !loggedIn && state?.scanUrl !== undefined && state?.scanUrl !== ""
-        ? qrImageOf(state.scanUrl)
+        ? qrImageOf(state.scanUrl, tt)
         : null,
       // The credential clocks sit under the status they time-stamp: both are
       // properties of this account's login, not of the credit figure it funds.

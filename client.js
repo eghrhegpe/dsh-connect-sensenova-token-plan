@@ -228,6 +228,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.loginTimeout": "扫码超时（未在时限内确认）——请重新点击登录。",
 			"raccoon.loginCanceled": "扫码已取消——请重新点击登录。",
 			"raccoon.loginFailed": "登录未能保存：{error}",
+			"raccoon.httpFailed": "本机 Host 应答 HTTP {status}（小浣熊读取失败）",
+			"raccoon.noAnswer": "本机 Host 没有应答",
+			"raccoon.qrAlt": "微信扫码登录二维码",
 			"raccoon.error": "小浣熊操作失败：{error}"
 		};
 		en = {
@@ -426,6 +429,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.loginTimeout": "The scan timed out (no confirmation within the deadline) — start it again.",
 			"raccoon.loginCanceled": "The scan was canceled — start it again.",
 			"raccoon.loginFailed": "Sign-in could not be saved: {error}",
+			"raccoon.httpFailed": "The local Host answered HTTP {status} (the Raccoon read failed)",
+			"raccoon.noAnswer": "The local Host gave no answer",
+			"raccoon.qrAlt": "WeChat sign-in QR code",
 			"raccoon.error": "Raccoon operation failed: {error}"
 		};
 	}));
@@ -3192,14 +3198,15 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	* local encoder supports; `buildQrMatrix` throwing is the out-of-range
 	* signal, and the tab then falls back to the plain URL text.
 	* @param {string|null|undefined} scanUrl - the URL the route is waiting on.
+	* @param {Tt} tt - the dictionary (the `<img>` alt is localized through it).
 	* @returns {unknown} an `<img>`, the URL as text, or null when there is none.
 	*/
-	function qrImageOf(scanUrl) {
+	function qrImageOf(scanUrl, tt) {
 		if (typeof scanUrl !== "string" || scanUrl === "") return null;
 		try {
 			return h("img", {
 				src: qrDataUrl(scanUrl, { size: QR_SIZE }),
-				alt: "WeChat QR",
+				alt: tt("raccoon.qrAlt"),
 				width: QR_SIZE,
 				height: QR_SIZE,
 				style: {
@@ -3317,7 +3324,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			style: S.button,
 			onClick: onLogin,
 			disabled: waiting
-		}, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login"))), !loggedIn && state?.scanUrl !== void 0 && state?.scanUrl !== "" ? qrImageOf(state.scanUrl) : null, clockParts.length > 0 ? h("div", {
+		}, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login"))), !loggedIn && state?.scanUrl !== void 0 && state?.scanUrl !== "" ? qrImageOf(state.scanUrl, tt) : null, clockParts.length > 0 ? h("div", {
 			style: {
 				...S.statCaption,
 				marginTop: 8
@@ -3538,13 +3545,13 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				});
 				if (!isCurrent()) return;
 				if (!response.ok) {
-					fail(`HTTP ${response.status}`);
+					fail(format(tt("raccoon.httpFailed"), { status: response.status }));
 					return;
 				}
 				const body = await response.json().catch(() => null);
 				if (!isCurrent()) return;
 				if (body === null || body.ok === false) {
-					fail(typeof body?.error === "string" && body.error !== "" ? body.error : "no answer");
+					fail(typeof body?.error === "string" && body.error !== "" ? body.error : tt("raccoon.noAnswer"));
 					return;
 				}
 				setState(body);
@@ -3557,7 +3564,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				lastGoodAt.current = at;
 				report(null);
 			} catch {
-				fail("unable to reach the Host");
+				fail(tt("auth.network"));
 			} finally {
 				if (inFlight.current === controller) inFlight.current = null;
 			}

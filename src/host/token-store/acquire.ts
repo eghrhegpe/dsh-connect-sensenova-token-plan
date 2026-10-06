@@ -30,7 +30,12 @@ export interface AcquireBlocks {
   renewWithRefresh: (stored: StoredGrant | undefined) => Promise<StoredGrant>;
   readAccount: () => Promise<{ username: string; password: string; source: string } | undefined>;
   loginFromAccount: () => Promise<StoredGrant>;
-  writeThrottle: (error: unknown, previousAttempt?: number) => Promise<HeldThrottle>;
+  /**
+   * Remember a refusal. `null` back means "nothing was written" — the error
+   * carried no code, so it was not a refusal (see `writeThrottle`'s note);
+   * the caller's re-throw carries the real message and no wait is recorded.
+   */
+  writeThrottle: (error: unknown, previousAttempt?: number) => Promise<HeldThrottle | null>;
   throttleError: (held: HeldThrottle, cause?: Error) => Error;
   purgeGrant: (accessToken?: string) => Promise<void>;
 }

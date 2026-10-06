@@ -30,7 +30,11 @@ import type { ResolvedSettings } from "./host-config.ts";
  * A 401/403 means the token the console saw is no longer good, so the store is
  * invalidated and the call retried exactly once with a fresh token. Without
  * the retry a token that expires mid-poll would leave the panel stuck on an
- * error until the next manual re-login; with it, the panel heals itself.
+ * error until the next manual re-login; with it, the panel heals itself. A
+ * PERSISTENT second refusal folds into `jwt_expired` regardless of status:
+ * that is the pinned contract (the panel's "wait for the renewal or re-sign
+ * in" remedy fits both), and the message alone carries the 401-vs-403
+ * distinction for the debugging reader.
  *
  * @param {ResolvedSettings} settings - resolved plugin settings.
  * @param {string} path - the console path, e.g. `/lite/console/v1/tokenplan/pool-usage`.
@@ -77,7 +81,17 @@ export async function fetchConsole(
       response = await send(token);
     }
     if (response.status === 401 || response.status === 403) {
-      const error = new Error(`console rejected the token (HTTP ${response.status})`) as import("./types.ts").PluginError;
+      // A persistent refusal (after the renewal above) means the console kept
+      // rejecting: `jwt_expired` is the code both 401 and 403 fold into —
+      // the panel's wording for it ("wait for the silent renewal, or sign in
+      // again") is the remedy either way. The status is named in the message
+      // so a debugging reader can tell a token rejection from a permission
+      // refusal without a second request.
+      const error = new Error(
+        response.status === 403
+          ? "console kept refusing even with a fresh token (HTTP 403); the account may not be allowed on this pool"
+          : "console rejected the token (HTTP 401)"
+      ) as import("./types.ts").PluginError;
       error.code = CODE.JWT_EXPIRED;
       throw error;
     }

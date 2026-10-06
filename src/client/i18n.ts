@@ -236,6 +236,9 @@ export const zh = {
   "raccoon.loginTimeout": "扫码超时（未在时限内确认）——请重新点击登录。",
   "raccoon.loginCanceled": "扫码已取消——请重新点击登录。",
   "raccoon.loginFailed": "登录未能保存：{error}",
+  "raccoon.httpFailed": "本机 Host 应答 HTTP {status}（小浣熊读取失败）",
+  "raccoon.noAnswer": "本机 Host 没有应答",
+  "raccoon.qrAlt": "微信扫码登录二维码",
   "raccoon.error": "小浣熊操作失败：{error}"
 } satisfies Record<string, string>;
 
@@ -436,6 +439,9 @@ export const en: typeof zh = {
   "raccoon.loginTimeout": "The scan timed out (no confirmation within the deadline) — start it again.",
   "raccoon.loginCanceled": "The scan was canceled — start it again.",
   "raccoon.loginFailed": "Sign-in could not be saved: {error}",
+  "raccoon.httpFailed": "The local Host answered HTTP {status} (the Raccoon read failed)",
+  "raccoon.noAnswer": "The local Host gave no answer",
+  "raccoon.qrAlt": "WeChat sign-in QR code",
   "raccoon.error": "Raccoon operation failed: {error}"
 };
 

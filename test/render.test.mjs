@@ -1010,7 +1010,10 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       ok: true, loggedIn: false, loginStatus: "scanning",
       scanUrl: "https://xiaohuanxiong.com/login/mp?code=" + "a".repeat(32)
     });
-    const qr = findElement(tree, (props) => props.alt === "WeChat QR");
+    // The alt went through the dictionary (`raccoon.qrAlt`): `tt` is identity
+    // in this suite, so the on-screen alt IS the key name — which is also what
+    // proves the hardcoded-English alt was the closed set's gap, not the img.
+    const qr = findElement(tree, (props) => props.alt === "raccoon.qrAlt");
     check("a waiting scan puts the QR on screen",
       qr !== null && typeof qr.props.src === "string" && qr.props.src.startsWith("data:image/"),
       String(qr?.props?.src).slice(0, 24));
