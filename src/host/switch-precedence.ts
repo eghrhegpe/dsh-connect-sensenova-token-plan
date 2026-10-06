@@ -9,16 +9,19 @@
  *     `panel === null ? "config" : "panel"`;
  *   - the model preference: `panel ?? config` plus the same source probe.
  *
- * A fourth dialect existed where no config default exists at all (the Raccoon
- * switch — a profile without a saved value falls to `off` with no fallback),
- * which is exactly the shape this module does NOT serve: that one has no
- * config default to adjudicate against, so it is the caller's plain read.
- *
  * This module is peer-free and deliberately tiny: the whole point is that a
  * switch can never again invent its own precedence dialect, and the source
  * label (`panel` / `config`) always rides with the answer so the panel can
  * say which side is in charge. `test/switch-precedence.test.mjs` pins the
  * dialect so a new caller copying the shape is the odd one out.
+ *
+ * One switch has NO config default: the Raccoon provider switch, where a
+ * profile without a saved value falls to `off` with nothing to fall back on.
+ * That case has no precedence to adjudicate, so it is served by
+ * {@link resolveSwitchOff} (a bare `panel === true`) rather than the default
+ * dialect above — keeping the no-default read as its own named call is what
+ * stops the next author from re-introducing a hand-rolled comparison. Its
+ * detail lives in that function's JSDoc; this is only the pointer.
  *
  * @module dsh-connect-sensenova-token-plan/switch-precedence
  */
@@ -32,6 +35,21 @@
  */
 export function resolveSwitchEnabled(panel: boolean | null, config: boolean): boolean {
   return (panel ?? config) === true;
+}
+
+/**
+ * Resolve a boolean switch that has NO config default (the Raccoon provider
+ * switch): a saved `true` turns it on, and any other value — including a
+ * never-saved `null` — leaves it off. There is no config fallback to consult,
+ * so the caller must not pass one; use {@link resolveSwitchEnabled} when a
+ * config default exists. Keeping this as its own named call (instead of a bare
+ * `panelValue === true`) is what makes "this switch has no default" a fact in
+ * the API surface rather than a comment the next author has to remember.
+ * @param {boolean|null} panel - the panel-saved value (`null` = never saved).
+ * @returns {boolean} the effective switch.
+ */
+export function resolveSwitchOff(panel: boolean | null): boolean {
+  return panel === true;
 }
 
 /**

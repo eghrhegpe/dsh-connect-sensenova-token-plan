@@ -36,6 +36,7 @@ import {
 } from "../raccoon-status.ts";
 import { filterRaccoonRows } from "../raccoon-models.ts";
 import { createRaccoonWalk, LOGIN_STATUS } from "../raccoon-walk.ts";
+import { resolveSwitchOff } from "../switch-precedence.ts";
 
 /** The Raccoon provider route (ROADMAP §6.1 "second upstream provider"). */
 export const RACCOON_PATH = `/api/${name}/raccoon`;
@@ -115,7 +116,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
     onLoggedIn: () => {
       if (raccoonPublisher === null || raccoonPublisher === undefined || raccoonPublisher.isDisposed()) return;
       optional(raccoonSwitch?.enabled()).then((sw: boolean | null) => {
-        if (sw === true) {
+        if (resolveSwitchOff(sw)) {
           collectRaccoonRows(null).then(({ rows, officeIdentity }) => {
             void raccoonPublisher.publish(rows, officeIdentity);
           }).catch(() => {});

@@ -29,6 +29,7 @@
 
 import { RACCOON_PROVIDER_ID, RACCOON_DISPLAY_NAME } from "./raccoon-models.ts";
 import { str } from "./util.ts";
+import { resolveSwitchOff } from "./switch-precedence.ts";
 import {
   createPublishQueue,
   createPairReleaser,
@@ -163,7 +164,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
     state.signature = raccoonSignature(state.rows);
 
     const panelValue = await effectivePanelSwitch().catch(() => null);
-    const registerWanted = panelValue === true;
+    const registerWanted = resolveSwitchOff(panelValue);
     if (!registerWanted) return unregister({ state, release });
 
     // The gateway reads the office identity from the request headers; resolve

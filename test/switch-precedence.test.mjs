@@ -6,12 +6,12 @@
  * two look-alike dialects (boolean switch vs string preference) plus the
  * source label; a new caller copying the shape was the fourth copy and
  * nothing could see them drift. This suite pins the dialect so a caller
- * inventing its own `?? settings.x` precedence is the odd one out — and
- * records the deliberate NON-serving of the no-default dialect (the Raccoon
- * switch falls to `off` with no config fallback; that read belongs to its
- * own store).
+ * inventing its own `?? settings.x` precedence is the odd one out — and now
+ * pins the no-config-default dialect too: {@link resolveSwitchOff} serves the
+ * Raccoon switch (a never-saved `null` falls to `off` with no fallback), so
+ * that read is a named call rather than a caller's bare comparison.
  */
-import { resolveSwitchEnabled, resolveSwitchValue, switchSource } from "../src/host/switch-precedence.ts";
+import { resolveSwitchEnabled, resolveSwitchValue, switchSource, resolveSwitchOff } from "../src/host/switch-precedence.ts";
 
 const results = [];
 function check(name, condition, detail = "") {
@@ -34,6 +34,14 @@ try {
   check("the answer is a strict boolean, never the raw input",
     typeof resolveSwitchEnabled(null, true) === "boolean" &&
       typeof resolveSwitchEnabled(true, false) === "boolean", "");
+
+  // The no-config-default dialect (Raccoon switch): bare panel read, no fallback.
+  check("no-default switch: null panel stays off",
+    resolveSwitchOff(null) === false, "null panel, no config default");
+  check("no-default switch: false panel stays off",
+    resolveSwitchOff(false) === false, "false panel, no config default");
+  check("no-default switch: true panel turns on",
+    resolveSwitchOff(true) === true, "true panel, no config default");
 
   // The string preference dialect: same precedence, config may be absent.
   check("string preference falls back to the config default",

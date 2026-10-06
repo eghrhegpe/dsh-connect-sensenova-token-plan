@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto";
 import { fetchRaccoonBalance, fetchRaccoonCatalog, RACCOON_FALLBACK_MODELS, RACCOON_QR_POLL_INTERVAL_MS } from "./raccoon.ts";
 import { str, redactSecrets, optional, errMsg, pickDefined } from "./util.ts";
-import { resolveSwitchEnabled } from "./switch-precedence.ts";
+import { resolveSwitchEnabled, resolveSwitchOff } from "./switch-precedence.ts";
 import type { RaccoonState, RaccoonModel } from "../shared/wire.ts";
 
 /**
@@ -156,7 +156,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
   const switchStore = deps.switchStore ?? null;
   const read = deps.read;
   const switchState = await optional(switchStore ? switchStore.enabled() : null);
-  const effectiveEnabled = switchState === true;
+  const effectiveEnabled = resolveSwitchOff(switchState);
   let loggedIn = false;
   let nickname = "";
   let balance = null;
