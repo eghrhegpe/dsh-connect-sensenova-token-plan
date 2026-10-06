@@ -912,6 +912,44 @@ async function withNetwork(stub, body) {
     check("N4 a cross-origin API-key POST is refused", foreign.statusCode === 403,
       String(foreign.statusCode));
   } catch (error) { fail("N4: API-key trust fence", error); }
+
+  // N5. catalog identity isolation: a key swap that happens OUT OF BAND (the
+  // credentials reference is written directly, so no save/forget route ran
+  // and its cache clear did not either) must not be served the previous
+  // key's cached catalog. The catalog's one-hour TTL is exactly the window
+  // where that would go unnoticed; the per-key cache key is what closes it.
+  try {
+    const credentials = makeCredentials(storedGrant(jwtExpiring(120), "r", 7200));
+    credentials.refs.set("SENSENOVA_API_KEY", "sk-key-A");
+    let modelsCalls = 0;
+    const net = await loginNetwork();
+    await withNetwork(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/v1/models") || target.includes("/models")) {
+        modelsCalls += 1;
+        // The answer echoes which key the request carried, so isolation is
+        // visible in the data, not only in the fetch count.
+        const bearer = String(init?.headers?.authorization ?? "");
+        const which = bearer === "Bearer sk-key-A" ? "model-a" : "model-b";
+        return new Response(JSON.stringify({ data: [{ id: which, input_modalities: ["text"] }] }),
+          { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return net(url, init);
+    }, async () => {
+      const call = await mount(credentials);
+      const first = await call(SNAPSHOT_PATH, makeRequest());
+      check("N5 the first poll fetched under the first key",
+        first.payload.catalogAvailable === true && first.payload.llm?.models?.[0]?.id === "model-a",
+        JSON.stringify(first.payload.llm?.models));
+      // The out-of-band swap: the reference is rewritten directly, so neither
+      // the save nor the forget route ran, and no cache clear happened.
+      credentials.refs.set("SENSENOVA_API_KEY", "sk-key-B");
+      const second = await call(SNAPSHOT_PATH, makeRequest());
+      check("N5 an out-of-band key swap serves the new key's catalog",
+        second.payload.llm?.models?.[0]?.id === "model-b" && modelsCalls === 2,
+        JSON.stringify({ models: second.payload.llm?.models, modelsCalls }));
+    });
+  } catch (error) { fail("N5: catalog identity isolation", error); }
 }
 
 // === O. step three registration: the opt-in drives the llm service =========

@@ -341,6 +341,9 @@ export function unregister({ state, release, error = null }: { state: PublisherS
  *   no-op stand-in before it gets there.
  * @param {() => void} [job.onRollback] - restore the domain snapshot fields
  *   (`entries`/`enabledIds`, or the roster) to what is really serving.
+ * @param {() => boolean} [job.isDisposed] - the caller's disposal gate,
+ *   re-checked at the top of the swap (the awaits between the caller's own
+ *   top-of-function check and this one are the residual window).
  * @returns {{ok: boolean, error?: unknown}} the publish outcome.
  */
 export function swapRegistration({
@@ -351,7 +354,8 @@ export function swapRegistration({
   release,
   registerPair,
   emit,
-  onRollback
+  onRollback,
+  isDisposed
 }: {
   llm: any;
   built: any;
@@ -367,8 +371,28 @@ export function swapRegistration({
   // undefined" two different things at the call site.
   emit?: ((event: string) => void) | undefined;
   onRollback?: () => void;
+  // The caller's own disposal gate, re-checked HERE rather than only at the
+  // top of the caller: the awaits between that check and this one (the panel
+  // switch read, the factory, the build) are the residual window where
+  // `dispose()` can run while a publish is in flight.
+  isDisposed?: () => boolean;
 }) {
   // Build first (it can throw); only then take down the old pair.
+  //
+  // Re-check the disposal gate right before touching the registration: the
+  // caller checked it once, at the top of its own function, but everything
+  // since was an await — the exact window in which the unmount's `dispose()`
+  // lands. Registering into a Host that has just withdrawn the plugin leaks
+  // a pair nobody owns (the teardown already ran its release), so the answer
+  // is the `unregister` shape: take the old pair down, keep nothing new, and
+  // say the publish was skipped. From this check to `registerPair` below is
+  // synchronous, so no dispose can slip in again.
+  if (isDisposed?.() === true) {
+    release();
+    state.registered = false;
+    state.built = null;
+    return { ok: false, skipped: true };
+  }
   release();
   try {
     registerPair(llm, built, state);

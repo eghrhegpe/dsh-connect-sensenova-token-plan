@@ -213,6 +213,7 @@ export function createRaccoonPublisher(deps: RaccoonPublisherDeps = {}) {
       release,
       registerPair,
       emit,
+      isDisposed: () => queue.isDisposed(),
       onRollback: () => {
         state.rows = previousRows;
       }

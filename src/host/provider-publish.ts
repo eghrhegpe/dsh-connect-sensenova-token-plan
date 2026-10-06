@@ -293,6 +293,7 @@ export function createProviderPublisher(deps: HostDeps = {}) {
       release,
       registerPair,
       emit,
+      isDisposed: () => queue.isDisposed(),
       onRollback: () => {
         state.entries = previousEntries;
         state.enabledIds = previousEnabledIds;

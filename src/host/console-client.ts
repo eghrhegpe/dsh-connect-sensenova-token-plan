@@ -11,6 +11,15 @@
  * shared `coalesced-fetch.ts` primitive with the caller's maps, so this module
  * owns the REQUEST shape only and the "one call per key" discipline has exactly
  * one implementation to get right.
+ *
+ * The cache keys carry an IDENTITY dimension (`credentialFingerprint`): the
+ * console keys are `<url>@<token digest>` and the catalog key is
+ * `<url>@<key digest>`, so an account or key that changes — through the
+ * panel's routes (which also clear the whole cache via the generation bump)
+ * or OUT OF BAND (an edit to the credentials service or the environment the
+ * panel never saw) — walks into a fresh key instead of being served the
+ * previous identity's entry for the rest of its TTL. This is the console
+ * side of the isolation the raccoon upstream already had (`catalog:<fp>`).
  * @module dsh-connect-sensenova-token-plan/console-client
  */
 
@@ -85,25 +94,40 @@ export async function fetchConsole(
   const url = `${settings.consoleBase}${path}${query}`;
   // One cache + one in-flight map, shared with every other console caller: many
   // open panels (or tabs) polling at once must not each hammer the console, and
-  // the request is shared until it resolves.
+  // the request is shared until it resolves. The key carries the live token's
+  // fingerprint, so two identities that share this map (an account switch that
+  // outlived the process, a renewal that rotated the token) can never serve each
+  // other's numbers — a fresh credential is a fresh key, not a stale entry.
   const coalesced = createCoalescedFetch({ cache, inflight });
+  // The key-phase token is read WITH a fallback, on purpose: a store that cannot
+  // produce a token keys under the empty-string digest — a space that is never
+  // populated, because the fetch below needs a token — and the in-run
+  // `getToken` stays the one that throws the real refusal. That preserves the
+  // pre-keying call order exactly (a cached answer is served before the token
+  // is asked for again), while a switched or renewed token still walks into a
+  // fresh key: two identities that share this map never serve each other's
+  // numbers.
+  const keyToken = await tokenStore.getToken().catch(() => "");
+  const key = `${url}@${credentialFingerprint(keyToken)}`;
 
   const run = async () => {
-    const send = async (token: string) => fetch(url, {
-      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+    const send = async (held: string) => fetch(url, {
+      headers: { authorization: `Bearer ${held}`, accept: "application/json" },
       signal: AbortSignal.timeout(settings.consoleTimeoutMs)
     });
 
-    let token = await tokenStore.getToken();
-    let response = await send(token);
+    let held = await tokenStore.getToken();
+    let response = await send(held);
     if (response.status === 401 || response.status === 403) {
       // The console rejected this exact token: mark it refused so the store
       // renews, then try once more. Naming the token matters because a poll
       // issues several requests at once, each of which may be holding a
-      // different one.
-      tokenStore.invalidate(token);
-      token = await tokenStore.getToken();
-      response = await send(token);
+      // different one. A successful retry caches under THIS key, so the next
+      // poll under the new token re-fetches once — the price of never serving
+      // a stale account's numbers.
+      tokenStore.invalidate(held);
+      held = await tokenStore.getToken();
+      response = await send(held);
     }
     if (response.status === 401 || response.status === 403) {
       // A persistent refusal (after the renewal above) means the console kept
@@ -126,7 +150,7 @@ export async function fetchConsole(
     return await response.json();
   };
 
-  return coalesced.read(url, run, cacheMs);
+  return coalesced.read(key, run, cacheMs);
 }
 
 /**
@@ -142,7 +166,10 @@ export async function fetchConsole(
  * @param {number} cacheMs - how long to keep the response (long: the catalog is stable).
  * @param {Map<string, { body: unknown; at: number; gen: number }>} cache - the cache map to use.
  * @param {Map<string, Promise<unknown>>} inflight - the in-flight map to share requests through.
- * @param {string} apiKey - the SenseNova API key.
+ * @param {string} apiKey - the SenseNova API key. The catalog is keyed per
+ *   this key's fingerprint, so a key that is swapped (in the panel or out of
+ *   band) walks into a fresh cache entry instead of serving the old key's
+ *   one-hour-old model list.
  */
 export async function fetchModelCatalog(
   settings: ResolvedSettings,
@@ -153,8 +180,11 @@ export async function fetchModelCatalog(
 ): Promise<object[]> {
   const url = `${settings.apiBase}/models`;
   // Same single-flight treatment as fetchConsole: an open panel and a Models
-  // page both poll `/v1/models`, and they should share one call.
+  // page both poll `/v1/models`, and they should share one call. The key
+  // carries the key's fingerprint: the catalog is per-key, and a stale key's
+  // one-hour cache must not bleed into a fresh key's poll.
   const coalesced = createCoalescedFetch({ cache, inflight });
+  const key = `${url}@${credentialFingerprint(apiKey)}`;
 
   const run = async () => {
     const response = await fetch(url, {
@@ -180,5 +210,5 @@ export async function fetchModelCatalog(
     return models;
   };
 
-  return coalesced.read(url, run, cacheMs);
+  return coalesced.read(key, run, cacheMs);
 }

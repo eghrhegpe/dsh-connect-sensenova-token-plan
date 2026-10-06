@@ -455,6 +455,46 @@ async function bootPlugin({ withCredentials = true, withLlm = false, config = {}
     llm.calls.released === 4, JSON.stringify({ released: llm.calls.released }));
 }
 
+// === F3b. a publish in flight at dispose time registers nothing ===========
+// F3's second publish runs while the FIRST is still inside its build — and
+// the unmount drain (ADR-008) bounds the EFFECT-REGISTRY side effects, not a
+// publish a route triggered at the very moment of unmount. That is the
+// residual window: the top-of-function disposed check already passed, the
+// build's awaits are still open, and without a re-check right before the swap
+// the finished build would register a new pair into a Host that withdrew the
+// plugin — a leak nobody's release will ever reach. The gate re-checks at
+// the top of the shared swap; parking the first build here makes the
+// interleaving deterministic, exactly as F3 does.
+{
+  const de = gatedAdapterDeps();
+  const { llm, stop } = await bootPlugin({
+    withLlm: true,
+    config: { registerProvider: true },
+    de
+  });
+  // Let the mount seed walk into its build and park there.
+  await settle();
+  check("the mount seed parked inside its first build", de.builds.length === 1,
+    JSON.stringify({ builds: de.builds.length }));
+  // Nothing has registered yet — the seed is still inside its gated build.
+  check("the parked seed has registered no pair yet",
+    llm.calls.adapter === 0 && llm.calls.directory === 0, JSON.stringify(llm.calls));
+
+  // The unmount, with the seed still parked: dispose the queue and release
+  // whatever is registered (nothing, yet).
+  await stop();
+  // Now let the parked build finish: it returns and the in-flight publish
+  // reaches the shared swap.
+  de.release();
+  await settle();
+
+  check("a publish that finishes after dispose registers nothing",
+    llm.calls.adapter === 0 && llm.calls.directory === 0,
+    JSON.stringify(llm.calls));
+  check("…and it leaves no release owed (nothing was registered to release)",
+    llm.calls.released === 0, String(llm.calls.released));
+}
+
 // === F4. the roster route answers through the real container seam =========
 // Group B proves the route is REGISTERED and F3 proves publishing serialises;
 // neither proves that the thing the panel reaches is the handler it expects.
