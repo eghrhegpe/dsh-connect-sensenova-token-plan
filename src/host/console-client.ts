@@ -100,13 +100,17 @@ export async function fetchConsole(
   // other's numbers — a fresh credential is a fresh key, not a stale entry.
   const coalesced = createCoalescedFetch({ cache, inflight });
   // The key-phase token is read WITH a fallback, on purpose: a store that cannot
-  // produce a token keys under the empty-string digest — a space that is never
-  // populated, because the fetch below needs a token — and the in-run
-  // `getToken` stays the one that throws the real refusal. That preserves the
-  // pre-keying call order exactly (a cached answer is served before the token
-  // is asked for again), while a switched or renewed token still walks into a
-  // fresh key: two identities that share this map never serve each other's
-  // numbers.
+  // produce a token keys under the empty-string digest — normally a space that
+  // is never populated, because the fetch below needs a token — and the in-run
+  // `getToken` stays the one that throws the real refusal. (Corner: a TRANSIENT
+  // key-phase failure followed by a healthy in-run fetch lands the answer in
+  // the empty-digest key — harmless: one process holds one token store, the
+  // panel's account switch clears the whole map via the generation bump, and
+  // the next poll keys under the real token. No identity can serve another's
+  // data.) That preserves the pre-keying call order exactly (a cached answer is
+  // served before the token is asked for again), while a switched or renewed
+  // token still walks into a fresh key: two identities that share this map
+  // never serve each other's numbers.
   const keyToken = await tokenStore.getToken().catch(() => "");
   const key = `${url}@${credentialFingerprint(keyToken)}`;
 

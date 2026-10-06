@@ -3,7 +3,8 @@
  *
  * Extracted from `panel-page.ts` so the polling machinery (the
  * generation-guarded `load`, the cadence the Host states, the unmount teardown)
- * lives in one testable seam instead of inside the 438-line component. The loop
+ * lives in one testable seam instead of inside the `PanelPage` component. The
+ * loop
  * itself — the interval, the hidden-tab pause, the error back-off — is the
  * shared one in `use-polling-interval.ts`, which the Raccoon tab drives too.
  * The hook returns exactly the five values the rest of the panel renders from;

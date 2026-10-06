@@ -19,8 +19,8 @@
  */
 export const HIDE_ALL_MODELS = "__hide_all__";
 
-/** The model ids a roster advertises, junk entries dropped. */
-export function rosterIds(roster: unknown): string[] {
+/** The model ids a roster advertises, junk entries dropped. Internal. */
+function rosterIds(roster: unknown): string[] {
   return (Array.isArray(roster) ? roster : []).filter(
     (model): model is string => typeof model === "string" && model !== ""
   );

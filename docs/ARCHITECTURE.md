@@ -34,7 +34,7 @@
 | 半边 | 文件 | 加载时机 | 改动后如何生效 |
 |---|---|---|---|
 | **Host（服务端）** | `src/host/*.ts`（清单以该目录为准，经 `npm run build` 构建为 `lib/`） | 启动时加载一次 | **重新构建 + 完全退出 DSH（含托盘）再启动**，`dsh web` 不会热重载 |
-| **Client（前端）** | `src/client/*.ts`（构建为根 `client.js`） | 浏览器侧，随页面加载 | `npm run build:client` 重建后浏览器刷新即可 |
+| **Client（前端）** | `src/client/*.ts`（构建为根 `client.js`） | 浏览器侧，随页面加载 | `npm run build:client`（与 `build` 同串，host + client 一次全建）重建后浏览器刷新即可 |
 | **共享契约（类型）** | `src/shared/wire.ts` | 仅类型，不产出运行时 | 两端 `import type`，改动随下一次 typecheck / build 生效 |
 
 > `src/shared/wire.ts` 是两端共读的**线契约声明**（快照体 + 小浣熊 state），**纯 `interface`/`type`、零运行时值**：tsdown 在两端构建时都把它擦除，所以 client 产物照旧只依赖 `react`，host 产物不因此多带任何浏览器代码。它是 host 源图闭包（`test/package.test.mjs` §2）唯一声明例外——**只许放类型**：一旦放进运行时真值，就是第一批 host 逻辑进入浏览器产物，§5 的隔离就开始松动。客户端原先在 `src/client/wire.ts` 手写的镜像已退为它的再导出面；host 侧 `buildSnapshotBody` / `readRaccoonStatus` / `identifyVisionModel` 均以这里的类型为返回标注，`tsc`（本就同编两端）是第一道守门员，`docs.test.mjs` §5b 那套正则对账降为兜底。

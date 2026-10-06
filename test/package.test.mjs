@@ -138,7 +138,8 @@ if (!existsSync(join(root, "lib", "index.js"))) {
 // Root must hold only config/docs/asset files; all .js/.ts source lives under
 // src/. A stray root .js would be dead weight (or a forgotten artifact).
 const rootJs = readdirSync(root).filter((name) => name.endsWith(".js"));
-// client.js is the only legitimate root .js and it is a BUILD OUTPUT (git-ignored).
+// client.js is the only legitimate root .js; it is a VERSIONED BUILD OUTPUT
+// (committed alongside src/, ADR-005), not a gitignored artifact.
 const stray = rootJs.filter((name) => name !== "client.js");
 check("no hand-written .js source sits at the package root", stray.length === 0,
   stray.length === 0 ? "" : `stray root .js: ${stray.join(", ")}`);
@@ -258,6 +259,25 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
     JSON.stringify(manifest.scripts?.["commit:lint"] ?? null));
   check("the CI commit-floor step still calls the linter", /node test\/commit-lint\.mjs/.test(ciText),
     "ci.yml no longer runs the commit floor");
+
+  // The duplication gate's scan threshold lives in THREE places that used to
+  // hold each other up by comment alone: .jscpd.json (minTokens), the gate's
+  // own MIN_TOKENS constant, and the interactive `duplicate-check` npm script.
+  // The gate is invoked with an explicit --min-tokens, so it does NOT read
+  // .jscpd.json — a drift in either direction is invisible to the gate itself.
+  // Pin the three against each other so the lockstep stops being prose.
+  try {
+    const jscpdConfig = JSON.parse(readFileSync(join(root, ".jscpd.json"), "utf8"));
+    const gateSrc = readFileSync(join(root, "test", "duplication-gate.mjs"), "utf8");
+    const gateTokens = Number(gateSrc.match(/MIN_TOKENS\s*=\s*(\d+)/)?.[1] ?? "");
+    const scriptTokens = Number((manifest.scripts?.["duplicate-check"] ?? "").match(/--min-tokens[= ](\d+)/)?.[1] ?? "");
+    const configTokens = Number(jscpdConfig.minTokens ?? "");
+    check("the duplication threshold is one number in all three homes",
+      Number.isFinite(configTokens) && configTokens === gateTokens && gateTokens === scriptTokens && gateTokens > 0,
+      `jscpd.json=${configTokens} gate=${gateTokens} script=${scriptTokens}`);
+  } catch (error) {
+    check("the duplication threshold is one number in all three homes", false, String(error?.message ?? error));
+  }
 }
 
 // --- 7. the runner's selection flags behave as documented ------------------

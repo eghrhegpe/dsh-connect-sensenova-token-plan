@@ -50,7 +50,7 @@ import {
   toggleModelIn,
   toggleRaccoonModelIn
 } from "./models.ts";
-import { clock, clockLong, count, format, statedCadenceMs, tokenSize, when } from "./format.ts";
+import { clockLong, count, format, statedCadenceMs, tokenSize, when } from "./format.ts";
 import { provideClientReact } from "./runtime.ts";
 import { en, zh } from "./i18n.ts";
 import { S } from "./styles.ts";
@@ -99,7 +99,6 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
     tables: Object.freeze({ GUIDANCE_BY_CODE, FORM_EXCLUDED_CODES, REFUSAL_TEXT }),
     styles: S,
     helpers: Object.freeze({
-      clock,
       clockLong,
       when,
       count,

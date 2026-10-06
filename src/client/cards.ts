@@ -28,7 +28,7 @@ import type { PoolData, PoolsData, QuotaWindowData, TrendData } from "./wire.ts"
 type QuotaWindow = QuotaWindowData;
 
 /** The bar fill and figure tone for a usage percentage: 70 warn / 90 danger. */
-export function usageTone(pct: number): { fill: Record<string, unknown>; color: string } {
+function usageTone(pct: number): { fill: Record<string, unknown>; color: string } {
   if (pct >= 90) return { fill: S.barFillError, color: "var(--dsw-alias-state-error-primary)" };
   if (pct >= 70) return { fill: S.barFillWarn, color: "var(--dsw-alias-state-warn-primary)" };
   return { fill: S.barFill, color: "var(--dsw-alias-label-secondary)" };

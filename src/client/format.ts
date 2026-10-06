@@ -18,8 +18,8 @@ export function statedCadenceMs(seconds: unknown, fallbackMs: number): number {
   return Math.max(1, Math.floor(seconds)) * 1000;
 }
 
-/** `HH:MM` for one epoch second. */
-export function clock(epoch: unknown): string {
+/** `HH:MM` for one epoch second. Internal: a building block for {@link when}. */
+function clock(epoch: unknown): string {
   if (typeof epoch !== "number" || !Number.isFinite(epoch) || epoch <= 0) return "—";
   const date = new Date(epoch * 1000);
   const pad = (value: number) => String(value).padStart(2, "0");

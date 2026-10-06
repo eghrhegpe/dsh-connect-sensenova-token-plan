@@ -21,7 +21,10 @@
  *   node test/commit-lint.mjs --range origin/main..HEAD
  * never hard-fails on a ref the runner could not fetch.
  *
- * Exit codes: 0 clean, 1 violation, 2 range unresolvable (already fell back).
+ * Exit codes: 0 clean, 1 violation. An unresolvable range is NOT a distinct
+ * exit code — it falls back to HEAD (noted on stdout) and the exit code
+ * reflects the HEAD lint result, by design: a fetch quirk must never mask a
+ * real violation, nor fake a clean one.
  */
 import { spawnSync } from "node:child_process";
 

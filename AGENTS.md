@@ -54,8 +54,12 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   `continue-on-error`——缺 dsh CLI 时它 SKIP 退出 0，有则真跑且红即拦）。手工排查用 `node test/e2e.mjs` 单跑即可。
 - **e2e 只跑一次**。它要启动真实 Host 进程；需要看两段输出就跑一次落盘再读文件，
   不要把同一条命令串两遍。
-- **peer 套件红 ≠ 回归（只对本机成立）**。`store.test.mjs` / `routes.test.mjs` /
-  `raccoon.test.mjs` 依赖 `@deepseek-ai/dsh-credentials`（随 DSH runtime 发行，不在插件目录）。
+- **peer 套件红 ≠ 回归（只对本机成立）**。依赖 Host runtime 里 peer 的套件是
+  `store.test.mjs`（`@deepseek-ai/dsh-credentials` + `dsh-credentials-local`）与
+  `routes.test.mjs`（`dsh-credentials`）、`wiring.test.mjs`（`@deepseek-ai/cordis`）
+  ——都随 DSH runtime 发行，不在插件目录。小浣熊域反而**不在此列**：`raccoon.test.mjs`
+  自证 peer-free（头注写明，决策面在 clean checkout 可跑）；`peer-contract` /
+  `retry` 是半依赖形态——peer 可达时追加真跑、缺席时自 SKIP，红才算回归。
   本机报 `cannot resolve the peer dependency` 是环境问题：查 `test/peer-roots.mjs`
   候选根（`$DSH_HOME` → 插件 `node_modules` → 桌面运行时 → npm 全局 CLI 运行时树）。
   **CI 不适用这条**：offline job 已装 CLI 供应运行时（`.github/workflows/ci.yml`），
@@ -151,7 +155,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 加配置字段 / 改路由 | `docs/API.md`、`docs/SETUP.md`；提供方开关见 `docs/PROVIDER-HOT-RELOAD.md` |
 | 改测试前 | `docs/TESTING.md` |
 | 改任何代码前扫一眼 | `docs/PITFALLS.md`（38 条现象→根因→修法） |
-| **改文件时工具「什么都没做」**（`replace` 不匹配、`Edit` 反复失败、多半是行尾）| `docs/PITFALLS.md` §38（41 CRLF / 97 LF / 0 混合；**先量行尾再写锚点**，`replace` 后必须断言变化） |
+| **改文件时工具「什么都没做」**（`replace` 不匹配、`Edit` 反复失败、多半是行尾）| `docs/PITFALLS.md` §38（工作树 CRLF/LF 分布用 `git ls-files --eol` 自明，**别写死数字**——`i/lf` 与 `w/crlf` 各计一遍再下锚点；`replace` 后必须断言变化） |
 | 排查「这条配置到底生效没」 / 改了源码却没变 | `docs/PITFALLS.md` §22（bundles 装载 → patch overlay → `$DSH_HOME/state/<profile>/<name>/` 三层，desktop 是安装副本、web 是 symlink） |
 | 加/改 **state 文件**、读 `profileContext`、判断某状态该不该按 profile 分段 | `docs/PITFALLS.md` §23（catalog/provider/draw 分段；throttle 与凭据 grant **故意共享**，别统一） |
 | 提交约定、`upstream/` 红线 | `docs/CONTRIBUTING.md` |

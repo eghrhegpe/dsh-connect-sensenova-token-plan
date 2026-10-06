@@ -20,7 +20,7 @@
 
 ## 2. 改动 Host 半边必须重启
 
-Host 半边源码位于 `src/host/`（**清单以该目录为准**，不在本文件逐一枚举——本仓已有「套件数/模块清单只指事实源、不复制数字」的纪律，见 [CHANGELOG](../CHANGELOG.md) 0.4.3「文档与仓库纪律」），经 `npm run build` 构建为 `lib/index.js` 后在 Host 启动时加载一次，**改完须完全退出 DSH（含托盘）再启动**（重新构建产物）。只改 `src/client/*.ts` 时跑 `npm run build:client` 重建根 `client.js`、浏览器刷新即可。提交前用 [SETUP.md](./SETUP.md) §4 的自查确认跑的是新代码。
+Host 半边源码位于 `src/host/`（**清单以该目录为准**，不在本文件逐一枚举——本仓已有「套件数/模块清单只指事实源、不复制数字」的纪律，见 [CHANGELOG](../CHANGELOG.md) 0.4.3「文档与仓库纪律」），经 `npm run build` 构建为 `lib/index.js` 后在 Host 启动时加载一次，**改完须完全退出 DSH（含托盘）再启动**（重新构建产物）。只改 `src/client/*.ts` 时跑 `npm run build:client`（与 `build` 同一命令串：tsdown 一次全建 host + client，产物原地重写）重建根 `client.js`、浏览器刷新即可。提交前用 [SETUP.md](./SETUP.md) §4 的自查确认跑的是新代码。
 
 ---
 

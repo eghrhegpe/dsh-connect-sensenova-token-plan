@@ -123,7 +123,7 @@
 `{ "drawModelId": "sensenova-u1.5-lite" }`（或 `null` = 自动选择）—— 把出图模型偏好写入同一个 `draw.json`。生效时机与开关相同：`startSideEffects` 在下一次挂载时用它覆盖 `cordis.patch.yml` 的 `drawModelId`（优先级：面板 > 配置；面板清除后回落配置，配置也为空则自动取目录第一个出图模型）。非空字符串之外的非 null 值返回 400；跨域返回 403。`{ "forget": true }` **仅清除出图开关**的面板保存值，并**刻意保留**模型偏好——`src/host/draw-store.ts` 的 `forget()` 用现有 `modelId` 重写该行，重置模型偏好的入口是显式传 `drawModelId`（`src/host/routes/draw.ts` 未暴露 `forgetModel`）；别把 `forget` 读成「重置全部」。
 
 ### `GET /api/dsh-connect-sensenova-token-plan/raccoon`
-小浣熊（第二上游，`sensenova-raccoon`，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §5.5）面板轮询的去密状态：登录态（`loggedIn` / `loginStatus` / `scanUrl` / `scanCode`）、余额与凭证时钟、生效的开关与推送模型数、以及 `webSearchEnabled` 的生效值与来源。`?debug=1`（**仅 GET 可用**）额外附 401 分诊六字段（`balanceDetail` 等），POST 分支从不携带——诊断脚手架只经显式 GET 出盘。
+小浣熊（第二上游，`sensenova-raccoon`，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §5.5）面板轮询的去密状态：登录态（`loggedIn` / `loginStatus` / `scanUrl` / `scanCode`）、余额与凭证时钟、生效的开关与推送模型数、以及 `webSearchEnabled` 的生效值与来源。`?debug=1`（**仅 GET 可用**）额外附 401 分诊脚手架六字段（`accessTokenPrefix` / `credentialSource` / `raccoonEnvShadow` / `envCredentialFingerprint` / `accessTokenFingerprint` / `hostProxyEnv`，其中 `hostProxyEnv` 做掩码），POST 分支从不携带——脚手架只经显式 GET 出盘；`balanceDetail` 是常规失败详情字段，GET/POST 都会随状态带出，不在脚手架内。
 
 ### `POST /api/dsh-connect-sensenova-token-plan/raccoon`
 一个端点、按 body 的 `action` 分发（与上面六条 Token Plan 路由的「一资源一路由」不同；请求体上限 **2 KB**，跨域 403，未知 action 400）：

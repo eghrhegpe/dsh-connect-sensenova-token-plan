@@ -86,13 +86,17 @@ jobs:
           git fetch --depth=200 origin main || true
           node test/commit-lint.mjs --range origin/main..HEAD
       # The offline suites run on bare node (they import the src/*.ts sources
-      # directly via native type stripping). This install exists for ONE suite:
-      # build-gate, which runs the real tsdown build. --legacy-peer-deps is
+      # directly via native type stripping). This install exists for the THREE
+      # build-shaped gates, not one: build-gate (tsdown, the real build),
+      # typecheck-gate (typescript, the local pinned compiler), and
+      # duplication-gate (jscpd, the clone scan). Without it, typecheck and
+      # duplication would silently SKIP and only the build gate would be real.
+      # --legacy-peer-deps is
       # mandatory — the plugin's peerDependencies are Host-runtime packages, and
       # a range install of them cannot succeed anyway (their published `latest`
       # tags are prereleases, which `>=0.1.5 <0.3` does not match under npm's
       # default semver rules).
-      - name: Install dev dependencies (tsdown, for the build gate)
+      - name: Install dev dependencies (tsdown/typescript/jscpd, for the build-shaped gates)
         run: npm install --legacy-peer-deps --no-audit --no-fund
       # The suites resolve the Host's own packages as PEERS through
       # test/peer-roots.mjs, and `--legacy-peer-deps` deliberately SKIPS peer
@@ -194,7 +198,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # No dependencies to install (peerDependencies only — same as offline).
+      # No dependencies to install: the live suite runs on bare node against the
+      # platform, unlike the offline job (which installs dev deps for its three
+      # build-shaped gates). peerDependencies only, by design.
       # The key comes from the repo secret the owner injects; without it the
       # suite SKIPs loudly and exits 0 (`test/live-contract.mjs` header), the
       # same shape as the e2e gate's missing-dsh-CLI skip. Note this is NOT a

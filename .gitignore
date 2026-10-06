@@ -33,7 +33,7 @@ build/
 # prepare——若 lib/ 不入库，用户打 GitHub 仓库地址装出来的插件就没有宿主入口
 # （lib/index.js），卡片直接失效。策略：改 src/ 后跑 `npm run build` 并把 lib/
 # 与 client.js 与源码一起提交（CI 的 build-freshness job 有新鲜度门禁：重建后
-# `git diff --exit-code -- lib` 必须为空，否则即「源码动了却没重生成产物」）；
+# `git diff --exit-code -- lib client.js` 必须为空，否则即「源码动了却没重生成产物」）；
 # 发到 registry 的那一份仍由 prepack 现场重建，两条路径都不靠手工。
 # 注意：不要把 lib/、client.js 加回忽略（下面两行已删除）。
 

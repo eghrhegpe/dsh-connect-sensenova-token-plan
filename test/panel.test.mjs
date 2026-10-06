@@ -2,8 +2,9 @@
  * The panel's own decisions, run against the code the browser actually loads.
  *
  * There is no mirror here AND no source-scraping: `panel-decision.js` loads
- * client.js as a module (via `client-surface.js`) and calls the functions the
- * browser calls, so these checks fail when the PANEL's behaviour changes —
+ * the client SOURCE (`src/client/index.ts`, via `client-surface.js`) as a module
+ * and calls the functions the browser calls, so these checks fail when the
+ * PANEL's behaviour changes —
  * not when a hand-written copy changes, and not when the client's formatting
  * changes. The cases that matter most are the throttle fields, which the old
  * mirror did not model at all: the greying-out added to stop a bad password
@@ -327,11 +328,13 @@ const healthy = {
   //     only — the alternative (pretending to resolve them) would be a check
   //     that can be wrong, which is worse than one with a written boundary.
   const DYNAMIC = new Set([
-    // tt(key) over a prop / local, chosen per draw or per state
-    "llm.id", "llm.keyEditor", "draw.on", "draw.onList", "draw.candidates",
-    "draw.badgeAuto", "draw.badgePinned", "draw.modelFallback", "draw.noTools",
-    "draw.noToolsPeer", "draw.noToolsRefused",
-    "pool.models", "pool.remaining", "raccoon.switchBusy"
+    // Keys reached through a VARIABLE: `tt(absentKey)` in `provider-controls.ts`
+    // over the `drawAbsentKey` table — the only literals the scans cannot
+    // resolve. This set used to shelter ten more keys behind the "dynamic"
+    // label that no component ever read; those are gone with their dictionary
+    // rows, and the check below re-proves the remaining three are the
+    // genuinely unreachable ones.
+    "draw.noTools", "draw.noToolsPeer", "draw.noToolsRefused"
   ]);
   const clientFiles = (await readdir(new URL("../src/client", import.meta.url), { recursive: true }))
     .filter((name) => name.endsWith(".ts") && !name.endsWith("i18n.ts"));

@@ -16,8 +16,9 @@
  * variable or a moved brace broke the checks for reasons unrelated to
  * behaviour, and the module was quietly a mini-compiler over text.
  *
- * This version loads `client.js` as a module (`client-surface.js`) and calls
- * the functions the browser itself calls. There is no anchor to maintain: if
+ * This version loads the client SOURCE (`src/client/index.ts`, via
+ * `client-surface.js`) as a module and calls the functions the browser itself
+ * calls. There is no anchor to maintain: if
  * the panel changes, these checks follow automatically — which is the entire
  * point. The exported names are unchanged, so the suites that consume them
  * did not have to change with the mechanism.
@@ -60,7 +61,7 @@ export const dictionaries = Object.freeze(surface.dictionaries);
 
 /**
  * The failure-code tables the client branches on, as the browser defines
- * them. `test/panel.test.mjs` pins them against `codes.js`: every key must be
+ * them. `test/panel.test.mjs` pins them against `src/host/codes.ts`: every key must be
  * a declared wire code, the form-excluded set must equal `NO_LOGIN_CODES`,
  * and every credential refusal must carry a line of text.
  */

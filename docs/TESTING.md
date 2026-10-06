@@ -19,6 +19,8 @@ npm run test:e2e    # 只跑端到端：真 Host + 假平台，需 dsh CLI 在 P
 npm run test:live   # 仅 live-jwks.test.mjs，需联网，验证 JWKS 文档可达
 npm run test:live:contract # 仅 live-contract.mjs，需联网 + SENSENOVA_API_KEY，重放商汤推理契约
 npm run test:live:raccoon # 仅 live-raccoon.mjs，需联网，第二上游（小浣熊）网关契约；无凭据跑 L1 路由存在性，带 RACCOON_ACCESS_TOKEN 跑 L2 读取契约
+npm run test:errorfix    # 仅 error-fix.test.mjs（429 自愈的 404/429 分诊面；名册内，npm test 已覆盖，直跑是便利入口）
+npm run test:peer-contract # 仅 peer-contract.test.mjs（peer 可达时追加真跑、缺席自 SKIP；名册内，同上）
 ```
 
 测试**无需 `npm install`**：`@deepseek-ai/dsh-credentials` 等是 Host 里的 peer 依赖，由 `test/peer-roots.mjs` 就地解析（`$DSH_HOME` → 插件 `node_modules` → 默认安装位置 `~/.dsh/dsh-asar-unpacked` → 打包安装目录 → 工作区内的 `@deepseek-ai/dsh` 元包 → **npm 全局 CLI 的运行时树**，最后两项是为「没装 Host 的机器」准备的，CI 正属此类）。找不到时会列出每个候选根**各自失败的原因**，而不是静默跳过或只报搜索路径。`config.test.mjs` 不依赖任何 peer，干净检出即可跑。

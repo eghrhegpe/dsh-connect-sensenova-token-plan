@@ -13,7 +13,7 @@
  * (from `provider-publish.ts`) and the `catalogStore`, and returns the exact
  * snapshot body the route writes. No HTTP surface, no filesystem writes, no
  * module-level state — so `test/routes.test.mjs` can pin every branch (the
- * 14-key snapshot contract, the vision-vs-catalog distinction, the
+ * 15-key snapshot contract, the vision-vs-catalog distinction, the
  * quota-flip re-registration) without mounting the full container.
  *
  * @module dsh-connect-sensenova-token-plan/snapshot-aggregate

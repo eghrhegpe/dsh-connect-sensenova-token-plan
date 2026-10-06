@@ -72,13 +72,11 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"pool.window5h": "5 小时",
 			"pool.window7d": "每周",
 			"pool.used": "已用",
-			"pool.remaining": "剩余",
 			"pool.exhausted": "已耗尽",
 			"pool.exhaustedNotice": "部分积分池已耗尽（剩余 0），最早于 {time} 重置；所属模型在额度恢复前暂不可选。",
 			"pool.reset": "重置 {time}",
 			"pool.grant": "返赠余额 {balance}",
 			"pool.grantExpiry": "最近返赠到期 {time}（{balance} 分）",
-			"pool.models": "模型",
 			"pool.dedicated": "专属池",
 			"pool.default": "通用池",
 			"pool.callable": "可调用",
@@ -103,7 +101,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.title": "API Key",
 			"llm.providerTitle": "语言模型",
 			"llm.keyField": "API Key",
-			"llm.keyEditor": "更换 / 清除 API Key",
 			"llm.placeholder": "粘贴 sk- 开头的 API Key",
 			"llm.save": "保存 API Key",
 			"llm.saving": "保存中…",
@@ -125,7 +122,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.registered": "已注册 {id}：{models} 个模型，{vision} 个支持图片输入。",
 			"llm.noService": "registerProvider 已开启，但当前 Host 没有提供 LLM 注册服务。",
 			"llm.error": "提供方注册失败：{error}",
-			"llm.id": "提供方 ID：{id}（勾选开关后生效）",
 			"llm.switch": "向 DSH 注册",
 			"llm.switchTitle": "开启后立刻向 DSH 注册 SenseNova 提供方（无需重启）；关闭则从模型下拉框移除，已保存的设置保留。",
 			"llm.switchBusy": "切换中…",
@@ -162,13 +158,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.switchTitle": "开启后 Host 给 agent 注册 sensenova_draw_image 工具。开关值立即生效，但工具的实际挂载/缺席发生在下一次 Host 启动。",
 			"draw.switchBusy": "切换中…",
 			"draw.switchError": "切换失败：{error}",
-			"draw.on": "agent 可用{model}生成图片。",
 			"draw.onList": "agent 出图将使用以下模型：",
 			"draw.badge": "出图",
 			"draw.badgeNone": "暂无可选模型",
-			"draw.badgeAuto": "{badge} · 自动选择",
-			"draw.badgePinned": "{badge} · 配置已指定",
-			"draw.candidates": "共 {count} 个出图模型",
 			"draw.autoOption": "自动选择（目录第一个出图模型）",
 			"draw.effective": "当前生效",
 			"draw.off": "未注册——勾选上方开关即可开启。",
@@ -177,7 +169,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.noToolsRefused": "drawEnabled 已开启，但工具注册被 Host 拒绝，出图工具缺席（Host 问题，非配置）。",
 			"draw.needsKey": "尚未配置 API Key；保存后即可出图。",
 			"draw.noCandidates": "当前 API Key 目录里暂无出图模型；出图不可用。",
-			"draw.modelFallback": "第一个可用模型",
 			"tab.quota": "积分额度",
 			"tab.api": "接入 API",
 			"tab.raccoon": "小浣熊",
@@ -188,7 +179,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.switchTitle": "开启后向 DSH 注册小浣熊的模型；关闭则从模型下拉框移除，登录与勾选设置都保留，重新开启即恢复。",
 			"raccoon.webSearch": "启用联网搜索（小浣熊）",
 			"raccoon.webSearchTitle": "开启后 DSH 的联网搜索工具改用小浣熊凭据搜索，不需要你再给搜索端点配 key；前提是小浣熊已登录。",
-			"raccoon.switchBusy": "切换中…",
 			"raccoon.switchError": "切换失败：{error}",
 			"raccoon.webSearchError": "联网搜索开关失败：{error}",
 			"raccoon.login": "微信扫码登录",
@@ -273,13 +263,11 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"pool.window5h": "5 hours",
 			"pool.window7d": "Weekly",
 			"pool.used": "Used",
-			"pool.remaining": "Remaining",
 			"pool.exhausted": "Exhausted",
 			"pool.exhaustedNotice": "Some credit pools are exhausted (0 remaining); the earliest resets at {time}. Models in those pools are unavailable until quota recovers.",
 			"pool.reset": "resets {time}",
 			"pool.grant": "Grant balance {balance}",
 			"pool.grantExpiry": "Next grant expiry {time} ({balance} cr)",
-			"pool.models": "Models",
 			"pool.dedicated": "dedicated",
 			"pool.default": "default",
 			"pool.callable": "Callable",
@@ -304,7 +292,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.title": "API key",
 			"llm.providerTitle": "Language models",
 			"llm.keyField": "API key",
-			"llm.keyEditor": "Change / clear the API key",
 			"llm.placeholder": "Paste your sk- API key",
 			"llm.save": "Save API key",
 			"llm.saving": "Saving…",
@@ -326,14 +313,13 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.registered": "Registered {id}: {models} model(s), {vision} with image input.",
 			"llm.noService": "registerProvider is on, but this Host exposes no LLM registration service.",
 			"llm.error": "Provider registration failed: {error}",
-			"llm.id": "Provider id: {id} (takes effect once the switch is ticked)",
 			"llm.switch": "Register with DSH",
 			"llm.switchTitle": "On registers the SenseNova provider with DSH at once (no restart); off removes it from the model picker while saved settings stay.",
 			"llm.switchBusy": "Switching…",
 			"llm.switchError": "Switch failed: {error}",
 			"llm.roster": "Models pushed to DSH",
 			"llm.rosterHint": "Ticking decides which models are pushed into DSH's model list; models the catalogue gains later are not pushed by default.",
-			"llm.rosterEmpty": "No models to push yet - save a key in the API key card first.",
+			"llm.rosterEmpty": "No models to push yet — save a key in the API key card first.",
 			"llm.rosterSearchPlaceholder": "Search a model name or id",
 			"llm.rosterCount": "{selected} ticked / {total} total",
 			"llm.rosterAll": "Tick all",
@@ -341,7 +327,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.rosterSave": "Save",
 			"llm.rosterSaving": "Saving…",
 			"llm.rosterDiscard": "Discard",
-			"llm.rosterSaved": "Saved - the model list has been updated.",
+			"llm.rosterSaved": "Saved — the model list has been updated.",
 			"llm.rosterUnsaved": "Unsaved changes",
 			"llm.rosterError": "Save failed: {error}",
 			"llm.rosterNoMatch": "No model matches.",
@@ -363,13 +349,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.switchTitle": "On registers sensenova_draw_image for the agent. The switch value takes effect at once, but the tool mounts/absents at the next Host start.",
 			"draw.switchBusy": "Switching…",
 			"draw.switchError": "Switch failed: {error}",
-			"draw.on": "The agent can generate images with {model}.",
 			"draw.onList": "Draw calls will use the model below:",
 			"draw.badge": "image",
 			"draw.badgeNone": "no model available yet",
-			"draw.badgeAuto": "{badge} · auto-picked",
-			"draw.badgePinned": "{badge} · pinned in config",
-			"draw.candidates": "{count} image-capable model(s)",
 			"draw.autoOption": "Auto — first image-capable model in the catalogue",
 			"draw.effective": "active",
 			"draw.off": "Not registered — tick the switch above.",
@@ -378,7 +360,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.noToolsRefused": "drawEnabled is on, but the Host refused the tool registration; the draw tool is absent (a Host fault, not config).",
 			"draw.needsKey": "No API key yet; save one to start generating images.",
 			"draw.noCandidates": "This API key's catalogue has no image model; drawing is unavailable.",
-			"draw.modelFallback": "the first available model",
 			"tab.quota": "Quota & Usage",
 			"tab.api": "API Integration",
 			"tab.raccoon": "Raccoon",
@@ -390,7 +371,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.webSearch": "Enable web search (Raccoon)",
 			"raccoon.webSearchTitle": "On makes DSH's web search tool search through the Raccoon credential, so you no longer need a key for the search endpoint; Raccoon must be signed in.",
 			"raccoon.webSearchError": "Web search switch failed: {error}",
-			"raccoon.switchBusy": "Switching…",
 			"raccoon.switchError": "Switch failed: {error}",
 			"raccoon.login": "Sign in with WeChat QR",
 			"raccoon.loggingIn": "Waiting for QR confirmation…",
@@ -456,7 +436,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return fallbackMs;
 		return Math.max(1, Math.floor(seconds)) * 1e3;
 	}
-	/** `HH:MM` for one epoch second. */
+	/** `HH:MM` for one epoch second. Internal: a building block for {@link when}. */
 	function clock(epoch) {
 		if (typeof epoch !== "number" || !Number.isFinite(epoch) || epoch <= 0) return "—";
 		const date = /* @__PURE__ */ new Date(epoch * 1e3);
@@ -1800,7 +1780,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 
 //#endregion
 //#region src/client/models.ts
-/** The model ids a roster advertises, junk entries dropped. */
+/** The model ids a roster advertises, junk entries dropped. Internal. */
 	function rosterIds(roster) {
 		return (Array.isArray(roster) ? roster : []).filter((model) => typeof model === "string" && model !== "");
 	}
@@ -4077,7 +4057,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				}),
 				styles: S,
 				helpers: Object.freeze({
-					clock,
 					clockLong,
 					when,
 					count,
