@@ -154,7 +154,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 查某条事实「当初从哪来」 / 要落盘新参照件 | `docs/REFERENCES.md`（`upstream/` 容器清单：来源 / 版本 / 许可 / 承重在哪） |
 | 加配置字段 / 改路由 | `docs/API.md`、`docs/SETUP.md`；提供方开关见 `docs/PROVIDER-HOT-RELOAD.md` |
 | 改测试前 | `docs/TESTING.md` |
-| 改任何代码前扫一眼 | `docs/PITFALLS.md`（38 条现象→根因→修法） |
+| 改任何代码前扫一眼 | `docs/PITFALLS.md`（39 条现象→根因→修法） |
 | **改文件时工具「什么都没做」**（`replace` 不匹配、`Edit` 反复失败、多半是行尾）| `docs/PITFALLS.md` §38（工作树 CRLF/LF 分布用 `git ls-files --eol` 自明，**别写死数字**——`i/lf` 与 `w/crlf` 各计一遍再下锚点；`replace` 后必须断言变化） |
 | 排查「这条配置到底生效没」 / 改了源码却没变 | `docs/PITFALLS.md` §22（bundles 装载 → patch overlay → `$DSH_HOME/state/<profile>/<name>/` 三层，desktop 是安装副本、web 是 symlink） |
 | 加/改 **state 文件**、读 `profileContext`、判断某状态该不该按 profile 分段 | `docs/PITFALLS.md` §23（catalog/provider/draw 分段；throttle 与凭据 grant **故意共享**，别统一） |
@@ -167,7 +167,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 这条顺序是 2026-10-02 全库审查后的复盘：先建坐标系，再读代码。
 
 1. **先文档，后代码**：本文件 → `docs/README.md` 索引 → `docs/ARCHITECTURE.md` §5
-   （三条不变量 + §5.5 双上游裁定）→ `docs/PITFALLS.md` 38 条扫一遍。这些是判断
+   （三条不变量 + §5.5 双上游裁定）→ `docs/PITFALLS.md` 39 条扫一遍。这些是判断
    「代码对不对」的坐标系；跳过它们 = 把 `index.ts` 里已写清的接线重新验证一遍。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，
    「刚提交的文件」（尤其 `client/` 与 `sensenova-auth.ts`）最可能有新鲜改动或未

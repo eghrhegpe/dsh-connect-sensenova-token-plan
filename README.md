@@ -84,7 +84,7 @@
 - [docs/API.md](docs/API.md) — 路由与控制台端点
 - [docs/TESTING.md](docs/TESTING.md) — 测试体系
 - [docs/SENSENOVA-API.md](docs/SENSENOVA-API.md) — 商汤接口全集（实测）
-- [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（38 条）
+- [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（39 条）
 - [CHANGELOG.md](CHANGELOG.md) — 版本变化
 - [docs/README.md](docs/README.md) — docs/ 全量索引（含 ADR / ROADMAP / PROVIDER-HOT-RELOAD / TROUBLESHOOTING 等上表未列的）
 
