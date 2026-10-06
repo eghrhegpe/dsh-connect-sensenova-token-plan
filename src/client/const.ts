@@ -4,10 +4,8 @@
 export const NS = "dsh-connect-sensenova-token-plan";
 
 /**
- * The plugin slug, under its marker name: carried by the coin glyph's
- * `data-dsh-panel-entry` marker (see `cards.ts`) and the page root's
- * `data-dsh-plugin` marker (see `panel-page.ts`), so the card's icon stays
- * tied to this plugin.
+ * The plugin slug, carried by the page root's `data-dsh-plugin` marker (see
+ * `panel-page.ts`), so the page stays tied to this plugin.
  *
  * Derived, not re-spelled: `REGISTRATION.id` in `index.ts`, every log
  * prefix in `apply.ts`, and every route below read {@link NS} or this

@@ -354,9 +354,10 @@ export function filterByEnabled(entries: unknown, enabledIds?: unknown): object[
  * an id that matches nothing, which is the offer the user asked for. A bare
  * `[]` cannot mean both "all models" and "no models" at once.
  *
- * The panel carries the SAME literal (`client.js` `HIDE_ALL_MODELS`) because
- * the browser bundle cannot import this module; `test/provider.test.mjs` pins
- * the two together so a rename on either side goes red.
+ * The panel carries the SAME literal (`src/client/models.ts` `HIDE_ALL_MODELS`,
+ * re-exported through the client bundle) because the browser half cannot
+ * import this module; `test/provider.test.mjs` pins the two together so a
+ * rename on either side goes red.
  */
 export const HIDE_ALL_MODELS = "__hide_all__";
 

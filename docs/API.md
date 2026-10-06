@@ -6,7 +6,7 @@
 
 ## 1. 本插件路由（Host 半边注册）
 
-七条路由都经过**同源校验**：带 `Origin` 的请求必须与 Host 同源，因此只有本机 DSH 自己提供的页面能写入账号或 Key。请求体上限 **4 KB**。
+七条路由都经过**同源校验**：带 `Origin` 的请求必须与 Host 同源，因此只有本机 DSH 自己提供的页面能写入账号或 Key。六条 Token Plan 路由的请求体上限 **4 KB**；小浣熊路由（下面第 7 节）的 POST 上限是它自己的 **2 KB**。
 
 ### `GET /api/dsh-connect-sensenova-token-plan/snapshot`
 面板轮询的聚合结果。返回体（HTTP 恒为 200，成败靠 body 区分）：
@@ -121,6 +121,20 @@
 `{ "enabled": true|false }` —— 把出图开关写入插件私有状态文件（`$DSH_HOME/state/<profile>/<plugin>/draw.json`，按 profile 分段、见 [PITFALLS.md](./PITFALLS.md) §23），与 `/provider` 走的是同一套「存私有状态」机制，但**不触发任何即时发布**——agent 工具的实际注册/缺席发生在下一个 Host 启动（或重新安装）时，由 `lifecycle.ts` 的 `startSideEffects` 重读生效值。优先级：面板保存的值 > `cordis.patch.yml` 的 `drawEnabled`。非布尔 `enabled` 返回 400；跨域返回 403。
 
 `{ "drawModelId": "sensenova-u1.5-lite" }`（或 `null` = 自动选择）—— 把出图模型偏好写入同一个 `draw.json`。生效时机与开关相同：`startSideEffects` 在下一次挂载时用它覆盖 `cordis.patch.yml` 的 `drawModelId`（优先级：面板 > 配置；面板清除后回落配置，配置也为空则自动取目录第一个出图模型）。非空字符串之外的非 null 值返回 400；跨域返回 403。`{ "forget": true }` **仅清除出图开关**的面板保存值，并**刻意保留**模型偏好——`src/host/draw-store.ts` 的 `forget()` 用现有 `modelId` 重写该行，重置模型偏好的入口是显式传 `drawModelId`（`src/host/routes/draw.ts` 未暴露 `forgetModel`）；别把 `forget` 读成「重置全部」。
+
+### `GET /api/dsh-connect-sensenova-token-plan/raccoon`
+小浣熊（第二上游，`sensenova-raccoon`，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §5.5）面板轮询的去密状态：登录态（`loggedIn` / `loginStatus` / `scanUrl` / `scanCode`）、余额与凭证时钟、生效的开关与推送模型数、以及 `webSearchEnabled` 的生效值与来源。`?debug=1`（**仅 GET 可用**）额外附 401 分诊六字段（`balanceDetail` 等），POST 分支从不携带——诊断脚手架只经显式 GET 出盘。
+
+### `POST /api/dsh-connect-sensenova-token-plan/raccoon`
+一个端点、按 body 的 `action` 分发（与上面六条 Token Plan 路由的「一资源一路由」不同；请求体上限 **2 KB**，跨域 403，未知 action 400）：
+
+- `{ "action": "switch", "enabled": boolean }` —— 小浣熊 provider 开关；保存后**同一请求内**用当前名单（live 目录或内置备用，经面板允许清单过滤）重新发布 provider。
+- `{ "action": "webSearch", "enabled": boolean }` —— 联网搜索接管开关；保存后 reconcile `ctx.web` 的 `searchProviderId`（无 `web` 服务的 Host 上仅落库、下次启动生效）。
+- `{ "action": "models", "enabledModelIds": string[] }` —— 小浣熊的模型允许清单（空数组 = 全推；上限 500，超出 400），保存后重新发布。
+- `{ "action": "login" }` —— 发起微信扫码：返回 `status: "scanning"` 与 `scanUrl` / `scanCode`（二维码负载）；已有在途 scan 时**复用**它而非重发。凭据写入 DSH 凭据服务（与 Token Plan 的凭据**互不相通**，各走各的引用名）。
+- `{ "action": "logout" }` —— 忘记小浣熊凭据、清掉其专属缓存、并把 provider 发布落到 `not_configured` 卸载分支（仍经面板允许清单过滤，与其余发布路径同型）。
+
+小浣熊凭据**永不**经由本插件的账号表单或 Token Plan 登录流；两边 publisher / store / 凭据引用物理隔离（ARCHITECTURE §5.5），隔离的机械半由 `duplication-gate.mjs` 兜底。
 
 ---
 

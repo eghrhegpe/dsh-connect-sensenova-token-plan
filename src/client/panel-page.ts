@@ -224,7 +224,12 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
               // The cache age is quoted from the snapshot, not written down
               // here: a note that says 60 while the Host caches for 300 is a
               // lie the reader has no way to catch. It lives in THIS card's
-              // title because the cache belongs to the data it ages.
+              // title because the cache belongs to the data it ages. The
+              // `?? 60` / `?? 24` below are backstops for a snapshot that
+              // stops carrying the fields — today every Host build states
+              // both, so they are unreachable; if that contract ever breaks,
+              // these literals are the lies the comment above forbids, and
+              // the fix is to drop the fallbacks, not retune the numbers.
               { title: format(tt("section.trend"), { hours: trend?.hours ?? 24, cache: data?.cacheSeconds ?? 60 }), open: openSections.trend, onToggle: () => toggleSection("trend"), tt },
               h(TrendTable, { trend, tt })
             ),

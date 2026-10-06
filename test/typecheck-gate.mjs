@@ -14,9 +14,13 @@
  * Invoked as `node <path>/bin/tsc` (not the .cmd shim, not npx, not PATH):
  * the exact local compiler runs on every platform with no global leakage.
  *
- * Not a *.test.mjs, so it lives OUTSIDE test/package.test.mjs's three-way
- * roster pin — it is listed explicitly in package.json's `test` chain and in
- * ci.yml's offline job, exactly like build-gate.mjs.
+ * Not a `*.test.mjs` — so the disk-vs-roster half of test/package.test.mjs's
+ * pin exempts it by name — but it IS a roster member: since the runner
+ * replaced the `npm test` chain (2026-10-05) it sits in `test/suites.mjs`,
+ * runs in `npm test` / CI offline, and package.test checks it EXISTS per the
+ * roster (the roster⊆disk direction, which first saw the gate files in 2026).
+ * The pre-runner world it was written for — "explicitly listed in package.json's
+ * `test` chain and ci.yml" — is gone: both entry points now invoke the runner.
  *
  * TWO configs run: tsconfig.json (everything, strict flags at project level)
  * and tsconfig.strict-null.json (the per-file strictNullChecks allowlist from

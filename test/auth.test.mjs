@@ -1,5 +1,5 @@
 /**
- * Offline checks for sensenova-auth.js.
+ * Offline checks for sensenova-auth.ts.
  *
  * Every request in this file is served by a stub, and every key is generated
  * here: no account credential is used, and nothing leaves the machine. The
@@ -19,7 +19,7 @@ import {
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
 
-// The crypto primitives moved to sensenova-crypto.js, so the seal checks pull
+// The crypto primitives moved to sensenova-crypto.ts, so the seal checks pull
 // them from there and hand in the endpoint/key the stub answers on.
 const TEST_JWKS_ENDPOINT = "https://signin.sensecore.cn/.well-known/jwks.json";
 const TEST_ENC_KEY_ID = "public:hydra.openid.id-token";

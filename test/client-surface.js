@@ -1,18 +1,21 @@
 // @ts-check
 /**
- * The shipped client bundle, loaded as a module instead of scraped as text.
+ * The client half, loaded as a module instead of scraped as text.
  *
- * `client.js` is a browser artifact: it registers a lazy factory through
- * `window.__ModuleLoader__.load({ id, factory })` and touches nothing else at
- * module scope. That is exactly enough to run it in Node: this module installs
- * a capturing `__ModuleLoader__`, imports the real `client.js`, materializes
- * its factory with a minimal React stand-in, and exports what comes back.
+ * The panel test surface is materialized by importing the client SOURCE
+ * (`src/client/index.ts`, run by Node's strip-only TS loader — the same one
+ * every offline suite uses), not the built `client.js` bundle: the source
+ * registers its module through the very `__ModuleLoader__` seam a browser
+ * Host would use, so this loader installs a capturing stand-in, imports the
+ * source, materializes its factory with a minimal React stand-in, and
+ * exports what comes back. Testing the source — what `npm run build` would
+ * bundle — keeps the checks valid before a build has even happened.
  *
  * This replaces the previous approach — cutting functions out of the source
  * with balanced-brace walks and evaluating the snippets with `new Function`.
  * That worked, but its anchors were the client's *formatting*: renaming a
  * variable or moving a brace broke the tests for reasons that had nothing to
- * do with behaviour. Loading the real module has no anchors at all. If the
+ * do with behaviour. Loading the module has no anchors at all. If the
  * client's structure changes, these checks keep testing whatever the panel
  * actually runs.
  *
@@ -86,7 +89,7 @@ await import("../src/client/index.ts");
 const registration = registrations.find((entry) => entry.id === CLIENT_ID);
 if (registration === undefined) {
   throw new Error(
-    `client-surface: client.js did not register "${CLIENT_ID}"; ` +
+    `client-surface: the client module did not register "${CLIENT_ID}"; ` +
       "the bundle's entry structure changed, update this loader to match."
   );
 }

@@ -26,18 +26,32 @@
  *      invariant that is being spent.
  *
  * Not a `*.test.mjs`: like typecheck-gate/build-gate/e2e-gate it is a gate
- * script, wired into the `npm test` chain and ci.yml's offline job (which
- * installs devDependencies, so jscpd is present there).
+ * script in `test/suites.mjs`'s roster, so `npm test` (the run-all runner)
+ * and ci.yml's offline job (which installs devDependencies, so jscpd is
+ * present there) run it; without jscpd it SKIPs loudly like its siblings.
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// Same skip-rule as typecheck-gate/build-gate/e2e-gate: jscpd is a devDependency,
+// so a machine without dev deps SKIPs loudly instead of crashing on the
+// readFileSync below (an uncaught ENOENT is a red gate that says nothing about
+// the code — the §30 failure shape). CI installs dev deps, so it still runs.
+if (!existsSync(join(root, "node_modules", "jscpd", "package.json"))) {
+  process.stderr.write(
+    `\n[duplication-gate] SKIPPED — jscpd is not installed in this project's node_modules.\n` +
+    `[duplication-gate]   Bootstrap dev deps with: npm install --legacy-peer-deps\n\n`
+  );
+  process.exit(0);
+}
+
 const results = [];
 function check(name, pass, detail) {
   results.push({ name, pass, detail: detail || "" });

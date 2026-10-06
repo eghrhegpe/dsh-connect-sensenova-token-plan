@@ -41,13 +41,16 @@ import { createRaccoonWalk, LOGIN_STATUS } from "../raccoon-walk.ts";
 export const RACCOON_PATH = `/api/${name}/raccoon`;
 
 // The QR walk's two timing constants (`RACCOON_LOGIN_TIMEOUT_MS`,
-// `RACCOON_QR_POLL_INTERVAL_MS`) are gateway wire facts owned by `raccoon.ts`;
-// `raccoon-walk.ts` is the only importer, so they must never be re-declared
-// here (ROADMAP §6.1.4; single-source check in `test/raccoon.test.mjs`).
+// `RACCOON_QR_POLL_INTERVAL_MS`) are gateway wire facts owned by
+// `raccoon-consts.ts` (re-exported through the `raccoon.ts` barrel); their
+// importers are `raccoon-walk.ts` and `raccoon-status.ts` (the scan cadence
+// it reports), so they must never be re-declared HERE (ROADMAP §6.1.4;
+// single-source check in `test/raccoon.test.mjs`).
 
 /**
  * Register the Raccoon route. Wiring subset: `settings`, `raccoonStore`,
- * `raccoonSwitch`, `raccoonPublisher`, `raccoonCache`.
+ * `raccoonSwitch`, `raccoonPublisher`, `raccoonCache`, `webSearchStore`,
+ * `reconcileWebSearch`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
  * @param {Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "reconcileWebSearch">} wiring
  *   - the Raccoon half's subset, as assembled by `apply()` in `index.ts`. The
