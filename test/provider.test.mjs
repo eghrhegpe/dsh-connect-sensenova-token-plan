@@ -734,7 +734,7 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       `${JSON.stringify({ version: PROVIDER_VERSION, enabled: true, updatedAt: "2026-01-01T00:00:00.000Z" })}\n`,
       { encoding: "utf8" });
     writeFileSync(join(legacyDir, "draw.json"),
-      `${JSON.stringify({ version: DRAW_STORE_VERSION, enabled: true, updatedAt: "2026-01-01T00:00:00.000Z" })}\n`,
+      `${JSON.stringify({ version: DRAW_STORE_VERSION, enabled: true, drawModelId: "m-draw", updatedAt: "2026-01-01T00:00:00.000Z" })}\n`,
       { encoding: "utf8" });
     writeFileSync(join(legacyDir, "catalog.json"),
       `${JSON.stringify({ version: CATALOG_VERSION, fetchedAt: 1_700_000_000_000, entries: [{ id: "m1" }], enabledModelIds: ["m1"] })}\n`,
@@ -758,6 +758,22 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     // away would silently reset its switch.
     check("the legacy file is left in place for an older Host",
       existsSync(join(legacyDir, "provider.json")));
+
+    // Regression for the draw BACKFILL WRITE shape: the one-shot adoption
+    // hands the write closure the WHOLE inherited record ({enabled, modelId})
+    // and it must persist it as the store's own payload. The previous closure
+    // stored the record AS the `enabled` value, which a fresh process then read
+    // back as "not set" — silently resetting the switch and the model
+    // preference, the §23 risk class through the migration path.
+    const backfilledDraw = readFileSync(join(adoptedDir, "draw.json"), "utf8");
+    const backfilled = JSON.parse(backfilledDraw);
+    check("the backfilled draw file keeps the switch a plain boolean",
+      backfilled.enabled === true, backfilledDraw);
+    check("the backfilled draw file carries the model preference",
+      backfilled.drawModelId === "m-draw", backfilledDraw);
+    check("a fresh store instance re-reads the backfilled draw values",
+      (await createFileDrawStore({ profile: "web" }).enabled()) === true
+        && (await createFileDrawStore({ profile: "web" }).modelId()) === "m-draw");
 
     // Adoption is one-shot: after the first read the profile has its own file,
     // so a later edit to the legacy one must NOT win.

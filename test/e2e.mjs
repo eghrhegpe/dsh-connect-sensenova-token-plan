@@ -470,19 +470,24 @@ try {
     }).then(async (response) => ({ status: response.status, body: await response.json() }));
 
     // RFC 7636 §4.1: below 43 is refused (this is how the 11-char verifier
-    // bug reached a user, back when the fake checked nothing).
+    // bug reached a user, back when the fake checked nothing). Both length
+    // probes assert on the DESCRIPTION: with the gate loosened they would still
+    // 400 via the digest mismatch and this whole section would stay green —
+    // "between 43 and 128" is what ties the refusal to the length gate itself.
     const tooShort = await tokenPost({
       grant_type: "authorization_code", code: "the-code", code_verifier: "x".repeat(42)
     });
     check("the fake refuses a PKCE verifier below 43 chars",
-      tooShort.status === 400 && tooShort.body?.error === "invalid_grant",
+      tooShort.status === 400 && tooShort.body?.error === "invalid_grant"
+        && String(tooShort.body?.error_description ?? "").includes("between 43 and 128"),
       JSON.stringify(tooShort).slice(0, 160));
     // …and ABOVE 128, which was the half still unchecked.
     const tooLong = await tokenPost({
       grant_type: "authorization_code", code: "the-code", code_verifier: "x".repeat(129)
     });
     check("the fake refuses a PKCE verifier above 128 chars",
-      tooLong.status === 400 && tooLong.body?.error === "invalid_grant",
+      tooLong.status === 400 && tooLong.body?.error === "invalid_grant"
+        && String(tooLong.body?.error_description ?? "").includes("between 43 and 128"),
       JSON.stringify(tooLong).slice(0, 160));
     // The boundary itself must not be refused FOR LENGTH. This probe carries no
     // matching code_challenge (the fake's `seen.codeChallenge` is from the real
@@ -496,6 +501,27 @@ try {
     check("the fake does not refuse a verifier at the 128 boundary for length",
       !atMaxDescription.includes("between 43 and 128"),
       JSON.stringify(atMax).slice(0, 160));
+
+    // No challenge, no exchange: the fake must refuse an authorization_code
+    // exchange it has no challenge to verify against. This is the hole that
+    // let the PKCE check stay vacuous while the guard only ran when a
+    // challenge happened to be present — a Host that stops sending
+    // `code_challenge` (or skips the auth step entirely) would have been
+    // handed a full token pair. Save the real sign-in's challenge, null the
+    // slot, probe, restore.
+    const savedChallenge = fake.seen.codeChallenge;
+    const savedMethod = fake.seen.codeChallengeMethod;
+    fake.seen.codeChallenge = null;
+    fake.seen.codeChallengeMethod = null;
+    const noChallenge = await tokenPost({
+      grant_type: "authorization_code", code: "the-code", code_verifier: "x".repeat(48)
+    });
+    fake.seen.codeChallenge = savedChallenge;
+    fake.seen.codeChallengeMethod = savedMethod;
+    check("the fake refuses a token exchange with no code challenge",
+      noChallenge.status === 400 && noChallenge.body?.error === "invalid_grant"
+        && /challenge/i.test(String(noChallenge.body?.error_description ?? "")),
+      JSON.stringify(noChallenge).slice(0, 160));
 
     // A refresh token the fake never issued must be refused. The old fake
     // answered 200 for ANY value, so a refresh path that could not tell a live

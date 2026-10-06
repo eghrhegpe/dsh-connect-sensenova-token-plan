@@ -73,16 +73,16 @@ const skip = flag("skip");
  *
  * `only` and `skip` are SUBSTRING matches, not globs or regexes: a contributor
  * typing `--only=raccoon` should get the four raccoon suites without knowing
- * whether one of them is spelled `raccoon-web`. An empty `--only=` is
- * treated as "no filter" rather than "match nothing", so a stray env expansion
- * cannot silently produce an empty green run — that is precisely the failure
- * mode of the chain it replaces (a gate that verifies nothing looks identical
- * to a gate that passed).
+ * whether one of them is spelled `raccoon-web`. An empty `--only=` or
+ * `--skip=` is treated as "no filter" rather than "match nothing", so a stray
+ * env expansion cannot silently produce an empty green run — that is precisely
+ * the failure mode of the chain it replaces (a gate that verifies nothing
+ * looks identical to a gate that passed).
  * @returns {typeof SUITES} the suites to run, in roster order.
  */
 const selected = SUITES.filter((suite) => {
   if (only !== null && only !== "" && !suite.name.includes(only)) return false;
-  if (skip !== null && !skip.includes("") && suite.name.includes(skip)) return false;
+  if (skip !== null && skip !== "" && suite.name.includes(skip)) return false;
   return true;
 });
 

@@ -26,6 +26,7 @@
  * earns the same nail.
  */
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { SUITES, CI_FLAGS } from "./suites.mjs";
@@ -244,6 +245,41 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
   // wires it in, the pin fails rather than letting a green run reach the platform.
   check("live-jwks.test.mjs stays out of the default gate", !rosterSet.has("live-jwks.test.mjs"),
     "the network tier must not be a default-run check");
+}
+
+// --- 7. the runner's selection flags behave as documented ------------------
+// `--only` / `--skip` are the per-domain escape hatch the docs advertise (and
+// the CI offline job's `--skip=e2e-gate` is the "e2e is its own job" invariant
+// expressed as a flag). `--skip` once silently did NOTHING (`!skip.includes("")`
+// is true for every string, so the filter never fired) while every gate stayed
+// green, because no check exercised the flag. Pin the BEHAVIOUR: spawn the
+// runner in list mode and demand the exact roster lines back.
+{
+  const TEST_DIR = join(root, "test");
+  const RUNNER = join(TEST_DIR, "run-all.mjs");
+  const list = (flags) => spawnSync(process.execPath, [RUNNER, "--list", ...flags], { encoding: "utf8", timeout: 30_000 });
+  const names = (result) => (result.stdout ?? "").trim().split("\n").filter((line) => line !== "").map((line) => line.split("\t")[0]);
+  const all = SUITES.map((entry) => entry.name);
+  const withGates = all.filter((name) => name.includes("gate"));
+  const withoutGates = all.filter((name) => !name.includes("gate"));
+
+  check("--list prints the whole roster", names(list([])).join(",") === all.join(","),
+    `${names(list([])).length} of ${all.length} line(s)`);
+  const skipped = names(list(["--skip=gate"]));
+  check("--skip=gate drops exactly the gate entries", skipped.join(",") === withoutGates.join(","),
+    `got ${skipped.length}, want ${withoutGates.length}`);
+  const onlyGates = names(list(["--only=gate"]));
+  check("--only=gate keeps exactly the gate entries", onlyGates.join(",") === withGates.join(","),
+    `got ${onlyGates.length}, want ${withGates.length}`);
+  check("an empty --skip= is a no-op, like an empty --only=",
+    names(list(["--skip="])).join(",") === all.join(","),
+    `${names(list(["--skip="])).length} of ${all.length} line(s)`);
+  // The run-mode twin: filters that cancel each other must exit red, never a
+  // silent "all zero suites passed".
+  const emptyRun = spawnSync(process.execPath, [RUNNER, "--only=gate", "--skip=gate"], { encoding: "utf8", timeout: 30_000 });
+  check("a cancelled selection in run mode exits red",
+    emptyRun.status === 1 && /no suite matched/.test(emptyRun.stderr ?? ""),
+    `status=${emptyRun.status} stderr=${(emptyRun.stderr ?? "").slice(0, 80)}`);
 }
 
 console.log(JSON.stringify(results, null, 2));

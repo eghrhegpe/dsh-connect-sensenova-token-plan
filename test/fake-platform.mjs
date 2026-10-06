@@ -226,6 +226,21 @@ const server = createServer(async (req, res) => {
     if (grant === "authorization_code") {
       // Redeem PKCE the way Hydra does. The error payloads are the platform's
       // own words, so a failure looks like the failure a user would report.
+      //
+      // No challenge, no exchange: a Host that stopped sending
+      // `code_challenge` (or skipped the authorization step entirely) must not
+      // be handed a token pair. An exchange the fake cannot verify is the same
+      // hole class as the 11-character verifier that reached a user when the
+      // fake looked at nothing — a green run proves the fake checks, not the
+      // Host's honesty, only while every check is reachable.
+      if (seen.codeChallenge === null) {
+        return json(res, 400, {
+          error: "invalid_grant",
+          error_description:
+            "The PKCE code challenge was not presented with the authorization " +
+            "request, so the code exchange cannot be verified."
+        });
+      }
       const verifier = params.get("code_verifier") ?? "";
       // Both RFC 7636 bounds, not just the floor: an over-long verifier is
       // refused by the real platform too, and only checking the floor let that
@@ -244,7 +259,7 @@ const server = createServer(async (req, res) => {
       const digest = Buffer.from(
         await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))
       ).toString("base64url");
-      if (seen.codeChallenge !== null && digest !== seen.codeChallenge) {
+      if (digest !== seen.codeChallenge) {
         return json(res, 400, {
           error: "invalid_grant",
           error_description: "The PKCE code verifier did not match the code challenge."

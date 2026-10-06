@@ -120,8 +120,20 @@ export function createFileDrawStore(options: StoreOptions = {}) {
     ttlMs,
     inheritFrom: legacyFile === null ? null : {
       read: async () => parseSwitch(await readStateJson(legacyFile)),
-      write: async (enabled) => {
-        await writePayload({ version: DRAW_STORE_VERSION, enabled, updatedAt: new Date().toISOString() });
+      // The value handed back is the INHERITED RECORD (`{enabled, modelId}`,
+      // the `T` of `read`), not the switch alone. A closure that persisted it
+      // under `enabled` stored an object, which the next read normalized to
+      // "not set" — silently resetting the profile's switch and model
+      // preference after the one-shot migration. The conditional-key shape is
+      // the store's own writers' shape (a null field is ABSENT, not `null`),
+      // so a backfilled file reads back exactly as the in-memory record.
+      write: async (value) => {
+        await writePayload({
+          version: DRAW_STORE_VERSION,
+          ...(value.enabled !== null ? { enabled: value.enabled } : {}),
+          ...(value.modelId !== null ? { drawModelId: value.modelId } : {}),
+          updatedAt: new Date().toISOString()
+        });
       }
     }
   });
