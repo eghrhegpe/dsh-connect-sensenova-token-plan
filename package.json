@@ -2,7 +2,7 @@
   "name": "dsh-connect-sensenova-token-plan",
   "displayName": "DSH Connect SenseNova Token Plan",
   "icon": "./icon.svg",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "SenseNova connect family bundle for the Harness Web UI: Token Plan credit panel (per-pool quota windows, per-model consumption, self-renewing console token) plus optional provider registration that brings SenseNova models into DSH conversation, with host-side 429 rate-limit self-healing.",
   "keywords": [
     "dsh-plugin",

@@ -2,6 +2,22 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
+## [0.5.2] — 2026-10-10
+
+本版是把 0.5.1 之后已进 `main` 的一批修复集结发出：重点是出图回写、凭据边界、provider 并发安全，以及小浣熊的 vision 能力判定与 401 登录自愈。
+
+- **出图请求体回写不再写坏盘**（`src/host/draw-store.ts`）：draw-store 将出图请求体回填磁盘时偏移越界，特定输入下损坏本地记录；现修正写入边界。
+- **凭据边界三条修正**（`src/host/api-key-store.ts`、`console-client.ts`、`token-store/acquire.ts`、`token-store/throttle.ts`）：误把节流状态写进凭据记录（违反红线 2 的「私有状态不进凭据服务」）、`forget` 吞掉真实错误、`doctor.ts` 残留类型误导排查；均归位修正。
+- **provider 注册并发安全两条**（`src/host/console-client.ts`、`publish-core.ts`、`provider-publish.ts`、`raccoon-publish.ts`）：console 缓存键缺身份维度导致不同账号串缓存；dispose 闸在残窗内仍可能被并发触发。现加身份维度并复查残窗。
+- **小浣熊 vision 能力判定双实测覆盖**（`lib/raccoon-models.js`、`src/host/raccoon-catalog.ts`、`raccoon-fallback.ts`）：原判定对 `glm-5-3` 错报为支持、对 `glm-5-3-flash` 漏报；用真凭据双向实测修正。
+- **小浣熊 401 登录自愈 + 状态写失败清 temp**（`src/host/raccoon-auth.ts`、`state-store.ts`）：401 偶发时被 latch 锁死无法重试；状态文件写失败残留临时文件；现修 latch 洞并在失败时清 temp。
+- **适配器工厂失败不再被 memo 死**（`src/host/publish-core.ts`）：一次失败的 peer import 原会把 rejected promise 钉死，用户修好 peer 仍需重启 Host；现失败清槽、可重试。
+- **小浣熊开关判定收进具名 API**（`src/host/switch-precedence.ts`、`raccoon-publish.ts`、`raccoon-status.ts`、`routes/raccoon.ts`）：「无 config 默认」豁免从内联分支收进具名 API，开关语义不变、判定更可断言。
+
+### 发布质量（用户不可见）
+
+`1d013bf` 的出图回写修复由 `package.test.mjs` / `provider.test.mjs` / `e2e.mjs` 钉住；并发两条由 `routes.test.mjs` / `wiring.test.mjs` 新增场景锁死；`raccoon-auth` 的 latch 洞与 state-store 写失败由 `raccoon.test.mjs` / `store-baseline.test.mjs`（48 帧）覆盖；工厂失败由 `provider-rollback-guard.test.mjs` 补强。
+
 ## [0.5.1] — 2026-10-06
 
 本版全是修复。主线是一条 0.5.0 时代就已写下的纪律在**失败路径**上反复失效：保护写对了意图，却在元失败那一步朝反方向执行。五处里三处直接落在凭据边界与锁号路径上（AGENTS.md 红线 1 / 5），另两处是并发竞态与一个死参数；末尾是一次插件卡图标重绘。
