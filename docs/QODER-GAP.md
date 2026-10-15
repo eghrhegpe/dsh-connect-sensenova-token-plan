@@ -96,7 +96,7 @@
 
 **本插件没有的**：JSX（用 `h()` 换取 Node 直载源码的可测性，理由见 §2 与
 `src/client/runtime.ts` 头注）。本文当年同时列出的「jsdom 真渲染断言」已于
-2026-10-15 补上最小档——`test/render-dom.test.mjs`，产物 `client.js` + 真
+2026-10-15 补上——`test/render-dom.test.mjs`，产物 `client.js` + 真
 React + jsdom，落地形态与取舍见 §6.2 末段。
 
 ---
@@ -146,12 +146,15 @@ stable across a rebuild"）与产物 freshness 门禁。本插件的 `client-sur
 恰恰是为淘汰这套才存在的（见其头注）。所以这不是"白捡 JSX"，是拿测试轻量换
 格式可读性。
 
-**落地（2026-10-15，最小可用版）**：产物 + jsdom 这条已以
+**落地（2026-10-15，产物 + jsdom 档）**：产物 + jsdom 这条已以
 `test/render-dom.test.mjs` 补上——jsdom realm eval 产物 `client.js`，
 `__ModuleLoader__` 捕获注册后以 devDeps 的真 React 物化工厂、`react-dom/client`
-挂载；覆盖额度卡的真 DOM 映射（`aria-valuenow`、内联 `style.width`）与
+挂载；覆盖额度卡的真 DOM 映射（`aria-valuenow`、内联 `style.width`）、
 `AccountForm` 的 hook 往返（受控输入、显/隐密码、空字段拒绝、登录成功后密码
-离开组件状态的红线 1 产物级取证）。**没有搬来花括号抽文本**——产物自身就暴露
+离开组件状态的红线 1 产物级取证）、`ModelPicker` 的草稿/保存状态机（「已保存」
+声明等 poll 回声落定；「全勾 → 空列表」极端在 DOM 上往返）、以及 `PanelPage`
+的轮询生命周期（首帧 loading 门、Host 声明节奏驱动 jsdom 真定时器、卸载后无
+孤儿轮询）。**没有搬来花括号抽文本**——产物自身就暴露
 同一个 `panel` 测试面，抓取这套短板根本不需要；接受掉的只有另一半：产物
 freshness 仍归 `build-gate` 守，且本套件在 devDeps 缺席时醒目 SKIP 退出 0，
 CI offline job 装 devDeps、那边真跑。纯规则层照旧直引源码 `.ts`
