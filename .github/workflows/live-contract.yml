@@ -1,0 +1,65 @@
+name: Live platform contract
+
+# Daily drift watch — why this is its own workflow and not a job in ci.yml.
+#
+# `test/live-contract.mjs` replays the frozen SenseNova inference contract
+# against the LIVE platform, and it is the only thing here that can see a
+# platform dialect drift: a renamed field, a flipped 400, a new modality
+# spelling. That class is not rare in this repository's history — see
+# PITFALLS §20 (the official API doc disagreed with the platform), §21 (two
+# thinking dialects split by model family) and §40 (capability tags that are
+# wrong in BOTH directions). Every one of those arrived as a silent change on
+# someone else's server, and none of them can be seen by a suite that stubs
+# the network.
+#
+# It used to run inside ci.yml on every push, marked `continue-on-error`. That
+# shape hid it perfectly: a red there was (correctly) nobody's regression, so it
+# never got looked at — and a check that is never looked at might as well not
+# run. Worse, its failures shared a page with the offline hard gate, so the one
+# signal meant INFORMATION sat next to the one meant BLOCK.
+#
+# So the tier moves here, to a workflow whose ONLY job is this one run:
+#
+#   - `schedule` — it runs on the platform's clock, not on our commits. Drift
+#     is a time-dependent property; a per-push run measures our push cadence,
+#     not the platform's change cadence.
+#   - NO `continue-on-error` — deliberately different from ci.yml. Here a red
+#     IS the deliverable: GitHub mails the owner when a scheduled workflow
+#     fails, which is exactly the "shows up the day it happens" property
+#     ci.yml's header promised and could not deliver while being swallowed.
+#   - still not a gate on your work — nothing about this workflow blocks a push.
+#     A red here means: read it, decide whether the fix belongs in the comment
+#     layer / docs/SENSENOVA-API.md §7, and fix it there. Do NOT revert a commit
+#     to turn this green; it is a measurement of someone else's server.
+#
+# Dispatchable so it can be re-run by hand after fixing the contract, instead of
+# waiting for tomorrow's cron.
+#
+# The key comes from the repo secret the owner injects and is never written into
+# the repository. Without it the suite SKIPs loudly and exits 0
+# (test/live-contract.mjs header), the same shape as the e2e gate's
+# missing-dsh-CLI skip — and that skip is honest here, because there is nothing
+# for the suite to compare the platform against without a key.
+
+on:
+  schedule:
+    # 03:17 UTC = 11:17 CST: late enough that the platform has rolled over,
+    # early enough that the working day can still absorb a drift report.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  live-contract:
+    name: Live platform contract (daily drift watch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No dependencies to install: the live suite runs on bare node against the
+      # platform. This repository declares its peers, not deps, by design.
+      - name: Run the live platform contract
+        run: node test/live-contract.mjs
+        env:
+          SENSENOVA_API_KEY: ${{ secrets.SENSENOVA_API_KEY }}

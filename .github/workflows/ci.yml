@@ -36,16 +36,21 @@ name: CI
 #                  This plugin's worst bug (a nested `auth:` block posting a REAL
 #                  login to the platform) was caught only by e2e — the offline job
 #                  above stubs the network, so it could never have seen it.
-#   live-contract— replays the frozen SenseNova inference contract against the LIVE
-#                  platform (`test/live-contract.mjs`), so a platform dialect drift
-#                  (a renamed field, a flipped 400, a new modality spelling) shows
-#                  red the day it happens instead of on the next manual run. Needs
-#                  the `SENSENOVA_API_KEY` repo secret (owner-injected, never in
-#                  the code); without it the suite SKIPs loudly and exits 0 — the
-#                  same shape as e2e's missing-dsh-CLI skip. Red here is
-#                  INFORMATION, not a regression (the fix belongs in the comment
-#                  layer, docs/SENSENOVA-API.md §7), which is why it is best-effort
-#                  too and never gates the offline job.
+#   live-contract— MOVED OUT to `.github/workflows/live-contract.yml` (2026-10-16).
+#                  It replays the frozen SenseNova inference contract against the
+#                  LIVE platform (`test/live-contract.mjs`), so a platform dialect
+#                  drift (a renamed field, a flipped 400, a new modality spelling)
+#                  shows up at all. The reason it left this file is in that file's
+#                  header, and it is the same argument rostro to PITFALLS §30:
+#                  a check nobody reads might as well not run. As a `continue-on-error`
+#                  job on every push, a red here was correctly nobody's regression
+#                  and therefore never got looked at — while sharing a page with the
+#                  offline hard gate, whose red means exactly the opposite. It now
+#                  runs on `schedule` (drift is time-dependent, not commit-dependent)
+#                  in a workflow whose only job is that one run, so its failure is
+#                  the deliverable rather than noise next to a real gate. Still not
+#                  a gate on your push; still needs the `SENSENOVA_API_KEY` secret,
+#                  without which it SKIPs loudly (test/live-contract.mjs header).
 #
 # The e2e suite also runs inside `npm test` locally via test/e2e-gate.mjs, which
 # SKIPs cleanly when the CLI is absent; this workflow keeps a separate, explicit
@@ -189,23 +194,5 @@ jobs:
           diff -r lib.first lib
           diff client.first.js client.js
 
-  live-contract:
-    name: Live platform contract (best effort)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      # No dependencies to install: the live suite runs on bare node against the
-      # platform, unlike the offline job (which installs dev deps for its three
-      # build-shaped gates). peerDependencies only, by design.
-      # The key comes from the repo secret the owner injects; without it the
-      # suite SKIPs loudly and exits 0 (`test/live-contract.mjs` header), the
-      # same shape as the e2e gate's missing-dsh-CLI skip. Note this is NOT a
-      # `*.test.mjs` line, so it stays out of the three-way roster pin.
-      - name: Run the live platform contract
-        run: node test/live-contract.mjs
-        env:
-          SENSENOVA_API_KEY: ${{ secrets.SENSENOVA_API_KEY }}
+# The live platform contract no longer lives in this file — see
+# `.github/workflows/live-contract.yml` (and the tier list above).
