@@ -10,6 +10,7 @@
 import { NS } from "./const.ts";
 import { en, zh } from "./i18n.ts";
 import { PanelPage } from "./panel-page.ts";
+import { ComposerUsagePill } from "./composer-usage-pill.ts";
 import type { Tt } from "./runtime.ts";
 
 /** Required services: the slot system, the locale registry. */
@@ -76,6 +77,29 @@ export function apply(ctx: ClientCtx): void {
     );
   } catch (error) {
     console.warn(`[${NS}] config card registration failed:`, error);
+  }
+
+  // 对话框用量胶囊（ROADMAP §6.3）：`conversation.input.right` 座席。`useProjection`
+  // 由 slot 系统自动物化注入（session 作用域严格必需，见 composer-slot-gate.mjs），
+  // 这里的 inject 只补插件自己的字典翻译 `tt`。注册失败照 §5 不变量 2 降级：面板
+  // 照常用、该模块缺席。
+  try {
+    disposers.push(
+      ctx.slots.inject("conversation.input.right", () =>
+        ctx.slots.register(
+          {
+            name: "conversation.input.right",
+            id: `${NS}-composer-pill`,
+            locale: NS,
+            order: 4,
+            inject: () => ({ tt })
+          },
+          ComposerUsagePill
+        )
+      ) as () => void
+    );
+  } catch (error) {
+    console.warn(`[${NS}] composer pill registration failed:`, error);
   }
 
   ctx.effect(() => () => {

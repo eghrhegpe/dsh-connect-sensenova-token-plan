@@ -442,6 +442,118 @@ function typeInto(input, value) {
     `${snapshotFetches - atUnmount} fetch(es) after unmount`);
 }
 
+// === E. The composer pill survives a model switch (2026-10-15 regression) ===
+// The reported bug: the pill painted only on first load, then vanished after
+// the user switched models — forever. The old single-component gate called
+// `useSnapshotPolling()` (real hooks) AFTER an ownership early-return, so a
+// switch that left the gate rendered fewer hooks than the previous pass and
+// React tore the component out of the tree ("Rendered fewer hooks than
+// expected"); switching back could never re-add hooks, so the pill stayed
+// gone until a page reload. The fix moves the gate to a component boundary
+// (outer decides whether the inner pill mounts; all poller hooks live in the
+// inner one — opencode-go's `UsagePill`/`ActiveUsage` shape), so every render
+// of the outer calls a constant hook count and mount/unmount stays a legal
+// React operation. This section drives that switch-out/switch-back on REAL
+// react-dom: the old shape fails here at the first rerender, the new shape
+// rounds the pill back. A second reported facet is pinned too: an empty
+// transient `next` (the picker's in-flight switch frame) must not shadow a
+// usable `lastUsed`, or owned models read "no provider" and the pill hides
+// even though the selection still belongs to this plugin.
+{
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const pillSnapshot = {
+    ok: true,
+    pools: {
+      pools: [{
+        id: "p1",
+        name: "通用池",
+        poolType: "default",
+        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: Date.now() + 2 * 3_600_000 },
+        window7d: { limit: 10000, used: 100, remaining: 9900 }
+      }]
+    },
+    trend: { hours: 24, models: [] }
+  };
+  let pillFetches = 0;
+  win.fetch = (path) => {
+    pillFetches += 1;
+    return Promise.resolve({ ok: true, status: 200, json: async () => pillSnapshot });
+  };
+  // The keyed hook the slot system materializes in the real host. The fake
+  // must register a REAL hook (useState) in the component's hook list, the way
+  // the host's materialized one does: only then does a conditional early-return
+  // that skips the poller's hooks actually violate the Rules of Hooks. A plain
+  // function would let the old shape limp through this section.
+  const selection = { next: { provider: "sensenova-token-plan", model: "deepseek-v4-flash" } };
+  const useProjection = () => {
+    React.useState(selection);
+    return selection;
+  };
+  const pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  const button = () => pill.host.querySelector("button.dsh-sensenova-composer-pill");
+  const text = () => pill.host.textContent;
+
+  await act(async () => { await sleep(0); });
+  check("an owned Token Plan model mounts the pill with its two-window reading",
+    button() !== null && text().includes("composer.pool5h 20%") && text().includes("composer.pool7d 1%"),
+    `fetches=${pillFetches} text=${text().slice(0, 120)}`);
+  check("the reset instant rides in the title, not the pill body",
+    button()?.getAttribute("title")?.includes("composer.resetAt") === true
+      && !text().includes("composer.resetAt"),
+    `title=${button()?.getAttribute("title")}`);
+
+  // The switch that used to kill the pill: a model from a foreign provider.
+  selection.next = { provider: "openai", model: "gpt-x" };
+  let foreignSwitchError = null;
+  try {
+    pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  } catch (error) {
+    foreignSwitchError = error;
+  }
+  const fetchesWhileForeign = pillFetches;
+  check("a foreign-provider model unmounts the pill instead of crashing it",
+    foreignSwitchError === null && button() === null && pillFetches === fetchesWhileForeign,
+    `error=${foreignSwitchError?.message ?? "none"} button=${button() !== null} fetches=${pillFetches} (stable while foreign: ${pillFetches === fetchesWhileForeign})`);
+
+  // Switching BACK — the exact step the old hook mismatch made unrecoverable.
+  selection.next = { provider: "sensenova-token-plan", model: "deepseek-v4-flash" };
+  let switchBackError = null;
+  try {
+    pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  } catch (error) {
+    switchBackError = error;
+  }
+  await act(async () => { await sleep(0); });
+  check("switching back to an owned model brings the pill back (the reported 'gone forever')",
+    switchBackError === null && button() !== null && text().includes("composer.pool5h 20%") && pillFetches === fetchesWhileForeign + 1,
+    `error=${switchBackError?.message ?? "none"} fetches=${pillFetches} text=${text().slice(0, 120)}`);
+
+  // The transient state right after a picker switch: `next` arrives as an
+  // empty object before it carries the new selection. An empty `next` must
+  // not shadow a still-usable `lastUsed` — the old `next ?? lastUsed` read
+  // a provider off `{}` and hid the pill for OWNED models on exactly these
+  // frames (the reported switch: the selected model was still a Token Plan
+  // one when the pill vanished).
+  selection.next = {};
+  selection.lastUsed = { provider: "sensenova-token-plan", model: "sensenova-6.8-flash-lite" };
+  pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  check("an empty transient `next` does not shadow a usable `lastUsed`",
+    button() !== null && text().includes("composer.pool5h 20%"),
+    `button=${button() !== null} text=${text().slice(0, 120)}`);
+
+  // A Raccoon model stays owned but borrows no Token Plan pool: grey "—"
+  // readings and the explanatory note, never a foreign pool's numbers.
+  selection.next = { provider: "sensenova-raccoon", model: "sn-sensenova-6-8-flash" };
+  pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  check("a Raccoon model shows grey placeholders, not the Token Plan pool",
+    button() !== null && text().includes("composer.pool5h —") && text().includes("composer.pool7d —")
+      && button()?.getAttribute("title")?.includes("composer.noPool") === true,
+    `text=${text().slice(0, 160)} title=${button()?.getAttribute("title")}`);
+
+  pill.unmount();
+  check("unmounting the pill leaves no poller alive", pill.host.childNodes.length === 0);
+}
+
 console.log(JSON.stringify(results, null, 2));
 const failed = results.filter((r) => !r.pass);
 if (failed.length > 0) {

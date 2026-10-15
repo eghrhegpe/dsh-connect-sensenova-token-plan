@@ -73,6 +73,7 @@ import { RaccoonCard } from "./raccoon-card.ts";
 import { RaccoonRoster } from "./raccoon-roster.ts";
 import { RaccoonTab, RACCOON_POLL_MS, RACCOON_SCAN_POLL_MS } from "./raccoon-tab.ts";
 import { buildQrMatrix, qrDataUrl } from "./qr.ts";
+import { ComposerUsagePill } from "./composer-usage-pill.ts";
 
 function clientFactory(loaderRequire: (specifier: string) => unknown): {
   inject: string[];
@@ -136,7 +137,8 @@ function clientFactory(loaderRequire: (specifier: string) => unknown): {
       HeaderStatus,
       RaccoonTab,
       RaccoonCard,
-      RaccoonRoster
+      RaccoonRoster,
+      ComposerUsagePill
     }),
     // The Raccoon QR encoder lives on the test surface too: the suite
     // differential-tests it against the upstream zero-dep reference (the

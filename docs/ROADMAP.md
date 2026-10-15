@@ -511,7 +511,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 
 ### 6.3 对话框用量显示（composer 用量胶囊）——形态裁定与可行性验证（2026-10-15）
 
-**定位**：给已在用商汤模型（`sensenova-token-plan` / `sensenova-raccoon`）的会话，在输入框工具栏显示额度读数。形态跟随 opencode-go 的「用量胶囊」，**不**跟随 workbuddy 的「纯文本余额读数」。本节是**裁定 + 字节级可行性验证**，不是实现记录；落地前需把下文的「三档」「座席」「池归组」再钉一次测试面。
+**定位**：给已在用商汤模型（`sensenova-token-plan` / `sensenova-raccoon`）的会话，在输入框工具栏显示额度读数。形态跟随 opencode-go 的「用量胶囊」，**不**跟随 workbuddy 的「纯文本余额读数」。本节是**裁定 + 字节级可行性验证**，不是实现记录；落地前需把下文的「三档」「座席」「池归组」再钉一次测试面（该测试面已于 MVP 落地时钉住：`composer-slot-gate.mjs` 四件套契约 + `render-dom.test.mjs` E 段回归，见本节末「落地状态」段）。
 
 **可行性验证（2026-10-15，本机 profile 安装的 `@deepseek-ai/dsh-client-ui-conversation@0.2.0-rc.1` 字节提取）**——三条都成立：
 
@@ -565,6 +565,13 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 
 **落地前确认②——已落地**（2026-10-15）：新增门禁 `test/composer-slot-gate.mjs`（已入 `test/suites.mjs` 名册，`npm test` 恒跑；名字含 `gate`，故被 `--skip=gate` / `--only=gate` 正确分类）。它扫描本机**每个**可解析的 DSH client 副本（profile 的 `node_modules`、`dsh-asar-unpacked` / `app.asar.unpacked` 的运行时树、`$DSH_HOME` checkout、`~/dsh-plugins` 兄弟插件的 `node_modules`），逐版本静态断言四件契约：A. `slots.d.ts` 把 `'conversation.input.right'` 声明为 `kind:'list'` + `scope:'session'`；B. `client.js` 仍 `renderSlot("conversation.input.right", …)`；C. `ui-session` 的 `keyedHooks` 仍声明 `projection`；D. `ui-renderer` 的 `materializeStandardBinding` 仍把 keyedHooks 经 `standardHookPropName(name)` 物化为 `use<Name>` prop，且 session（非 `session-maybe`）作用域 `optional=false`（缺源抛 `SlotAssemblyError`）。任一漂移即红，并指向本节「明确不做」/「换座席」。四件套缺一按失败处理（环境不完整），不按 SKIP；找不到任何副本才 SKIP（与 `store.test.mjs` / `peer-contract.test.mjs` 的 peer 缺席范式一致）。opencode-go 用的是「拉真 Host + pack tarball + 装隔离 consumer」的重形态；本项目选更轻的纯静态断言——不装 peer、不拉 Host、不碰网络，且覆盖本机所有副本。**已知局限**：只能覆盖本机存在的版本；CI 未装 client UI 包时 SKIP，届时矩阵靠 CI workflow 补。
 
+**落地状态（2026-10-15，MVP 已落地）**：`src/client/composer-usage-pill.ts` 注册 `conversation.input.right` 座席（`apply.ts`，注册失败照 §5 不变量 2 降级缺席），`auto` 归属门控（`useProjection("modelSelection")`）已按上文裁定实现；`always` / `off` 三档开关与面板设置未做（§7 该行剩余项）。两条结构裁定由 `test/render-dom.test.mjs` E 段回归钉住（旧形状红、新形状绿）：
+
+1. **门控放组件边界**：归属判定只决定内层组件的挂/摘，轮询 hook（`useSnapshotPolling`）全在内层调用。同一组件内「先调 hook、再按门控早退」会踩 React 的 hook 顺序红线（`Rendered fewer hooks than expected`）——切模型即把胶囊甩出组件树且切回也起不来，正是用户报告的症状；opencode-go 的 `UsagePill` / `ActiveUsage` 两层即此形状。
+2. **候选选择防空对象遮蔽**：切换模型后的过渡帧 `next` 可能是空对象（尚未携带新选择），`next ?? lastUsed` 会把可用 `lastUsed` 遮蔽成「无 provider」，归属模型也读成无归属而隐藏胶囊——故候选判定要求 `next` 真携带 `provider` / `model` 才优先，否则回落 `lastUsed`。
+
+配套裁定：小浣熊模型**不**回落 Token Plan 通用池（画灰「—」，tooltip 说明，其余额在小浣熊 tab 读）；重置时间进 tooltip 不进胶囊正文（正文密度对齐 opencode-go：两档百分比 + 标记）。
+
 ## 7. 优先级与时间盒
 
 | 优先级 | 项 | 侵入性 | 门禁 |
@@ -579,7 +586,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 | **P2 ✅ 部分落地** | 第二上游 provider：已随 0.4.3 落地（三个 tab 之一 + `sensenova-raccoon`），2026-10-01 补做网关契约复测，**契约成立**（§6.1.2）；剩余未做的是 desktop 融合路径（第二**登录路径**，见 §6.1.1）——它已实测判死，维持观望。接入面盘点与死负载处置见 §6.1.4（2026-10-01：诊断收进 `?debug=1` + 常量单真源） | 高（新上游 + 新凭据生命周期） | 已落地：`test/raccoon.test.mjs` 离线 101 项 + `docs.test.mjs` 检查 9 + **`test/live-raccoon.mjs`（2026-10-01 补齐此前的「仍缺」项，比照 §2.2 给商汤做的 `live-contract`：L1 无凭据路由存在性含对照组 + L2 带凭据契约；两条红线写死在脚本里） |
 | P2（可选） | 每日积分机制的唯一悬案（§6.1.8）：「当天登录」的服务端语义（登录事件 vs. 任意认证请求）——复测方法已定：凭据当天在读只读 `GET /bills` 看当日 `daily_grant.expire_at`，零副作用；若做面板「每日发放有效期」展示，数据源是 `bills`（`balance` 不返有效期） | 低（只读端点，无新凭据域） | 接入展示时按小浣熊域 `raccoon-status` + 面板测试补断言 |
 | P2（可选，先观察） | 网关 499 `client_request_aborted_error` 的宿主侧纠正（§6.1.9）：比照 429 误判纠正层的同构做法，在流出口把这种体归入可重试类，让退避重试吃掉偶发的网关内部取消。**触发条件 = 复现率说话**：偶发一次不值得预支一层纠正逻辑；攒到复现样本（带 `x-request-id` 与时间点）再动 | 低（流出口纠正，不动 peer 内部；peer-free 判据可离线钉测） | 若做：`test/error-fix.test.mjs` 同构补用例 + `test/retry.test.mjs` 复核分类契约 |
-| P2（可选，先验证） | 对话框用量胶囊（§6.3）：形态已裁定（opencode-go 路线 + 两窗口 + 池归组 + `auto/always/off` 三档），字节级可行性已验（`conversation.input.right` 与 `modelSelection` 投影在本机 DSH 0.2.0-rc.1 在位）；落地前确认①已成立（`useProjection` 是 session 作用域槽位的**严格必需** prop，证据链见 §6.3）；确认②已落地（`test/composer-slot-gate.mjs` 入名册：扫描本机所有 DSH client 副本、逐版本静态断言四件契约，红即提示换座席/放弃） | 中（client 新组件 + 三档开关 + 池归组查询函数 + 面板开关写 settings；Host 侧零新路由，复用快照） | 若做：新 client 组件测试 + `composer-slot-gate.mjs`（已落地）+ 面板开关测试 + `docs.test.mjs` |
+| **P2 ✅ 部分落地**（可选剩余） | 对话框用量胶囊（§6.3）：MVP 已落地（2026-10-15：`composer-usage-pill.ts` 两层结构 + `auto` 归属门控 + 池归组 + 重置进 tooltip，`apply.ts` 注册 `conversation.input.right`，切模型回归钉在 `render-dom.test.mjs` E 段；`composer-slot-gate.mjs` 在名册）；剩余：`auto/always/off` 三档开关 + 面板设置项 + 点击展开面板（窗口明细/重试） | 中（剩余项 = 三档开关 + 面板开关写 settings；Host 侧零新路由，复用快照） | 已落地：`render-dom.test.mjs` E 段 + `composer-slot-gate.mjs`；剩余若做：面板开关测试 + `docs.test.mjs` |
 | 明确不做 | 多 Key / 签到 / 跨 provider 聚合 | — | — |
 | 明确不做 | 伪倍率折进注册模型名（qoder ② 法：把倍率嵌进 DSH 原生选择器的模型名里，绕「选择器无旁路字段」限制）。2026-09-30 决议 | 低 | 现状即决议：`×N` 只作**面板侧标记**（模型花名册行尾 + 趋势图，同一匹配器、同一数值，均标「非官方」）。理由：① 倍率是操作者手填的对比数据、非平台计费事实，折进 DSH 全局模型名会把个人配置泄漏给所有会话；② qoder 嵌名是「DSH 无字段携带平台真实倍率」的 workaround，本插件的倍率本就没有平台出处，面板就是它唯一合理的位置；③ 模型名是 DSH 配置 / 选择器的稳定标识（id 匹配），加 `×N` 会破坏 id 语义。**本条只管伪倍率**——小浣熊网关倍率是平台声明的计费事实，允许嵌名，是本条的唯一例外，见 §6.1.5 |
 

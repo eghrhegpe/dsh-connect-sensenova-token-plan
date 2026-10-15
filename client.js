@@ -44,6 +44,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"panel.configError": "插件配置有误：{error}",
 			"panel.consoleTransient": "商汤控制台暂时无法读取，通常下一次自动刷新即可恢复；若持续出现，请检查网络后稍再重试。",
 			"panel.shapeDrift": "上游返回的结构可能有变：{detail}",
+			"composer.pillTitle": "商汤 Token Plan 额度",
+			"composer.pool5h": "5 小时",
+			"composer.pool7d": "本周",
+			"composer.stale": "上次数据",
+			"composer.noPool": "该模型不在 Token Plan 额度池内（余额见小浣熊 tab）",
+			"composer.resetAt": "重置于",
 			"auth.title": "连接商汤控制台",
 			"auth.registerHint": "还没有账号？前往官网注册，免费开通 Token Plan 额度 →",
 			"auth.portalHint": "前往官网管理额度 / 获取 API Key →",
@@ -235,6 +241,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"panel.configError": "The plugin is misconfigured: {error}",
 			"panel.consoleTransient": "The SenseNova console could not be read just now. This usually clears on the next automatic refresh; if it persists, check your network and try again shortly.",
 			"panel.shapeDrift": "The upstream payload shape may have changed: {detail}",
+			"composer.pillTitle": "SenseNova Token Plan quota",
+			"composer.pool5h": "5h",
+			"composer.pool7d": "week",
+			"composer.stale": "stale data",
+			"composer.noPool": "not in a Token Plan quota pool (balance in the Raccoon tab)",
+			"composer.resetAt": "resets at",
 			"auth.title": "Connect the SenseNova console",
 			"auth.registerHint": "No account yet? Register on the official site for a free Token Plan quota →",
 			"auth.portalHint": "Manage quota / get API keys on the official site →",
@@ -3950,6 +3962,156 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	}));
 
 //#endregion
+//#region src/client/composer-usage-pill.ts
+/**
+	* The candidate selection: `next` wins over `lastUsed` — BUT an empty `next`
+	* object (the transient state right after a picker switch, before it carries
+	* the new selection) must not shadow a still-usable `lastUsed`. The old
+	* `next ?? lastUsed` read a provider off `{}` and returned `undefined`,
+	* hiding the pill for OWNED models on exactly the frames a switch produces.
+	*/
+	function candidateOf(projection) {
+		const p = projection ?? {};
+		const usable = (c) => c !== null && c !== void 0 && (typeof c.provider === "string" || typeof c.model === "string");
+		if (usable(p.next)) return p.next;
+		if (usable(p.lastUsed)) return p.lastUsed;
+	}
+	/**
+	* The provider the session is currently pointed at.
+	*
+	* `next` wins over `lastUsed`: a switch that has landed but not yet been sent is
+	* still the selection the composer displays — the same precedence the shell uses.
+	*/
+	function selectedProviderOf(projection) {
+		const provider = candidateOf(projection)?.provider;
+		return typeof provider === "string" && provider !== "" ? provider : void 0;
+	}
+	/** The selected model id, `next` winning as above. */
+	function selectedModelOf(projection) {
+		const model = candidateOf(projection)?.model;
+		return typeof model === "string" && model !== "" ? model : void 0;
+	}
+	/**
+	* Which pool's windows this model draws from.
+	*
+	* A pool is model-scoped when it declares `modelIds`; a Token Plan model that
+	* names no pool falls back to the first (general) pool — never to an invented
+	* aggregate. The fallback is Token Plan only: a Raccoon model belongs to the
+	* Raccoon gateway's own credit universe (its balance is read in the Raccoon
+	* tab), so it never borrows a Token Plan pool — it yields `undefined` and the
+	* pill shows grey "—" instead of a foreign number.
+	*/
+	function poolFor(pools, modelId, provider) {
+		const hit = modelId !== void 0 ? pools?.find((p) => Array.isArray(p.modelIds) && p.modelIds.includes(modelId)) : void 0;
+		if (hit !== void 0) return hit;
+		return provider === TOKEN_PLAN ? pools?.[0] : void 0;
+	}
+	/** The colour for a window, by share of its limit already spent. */
+	function tierOf(window) {
+		const limit = typeof window?.limit === "number" ? window.limit : NaN;
+		const used = typeof window?.used === "number" ? window.used : NaN;
+		if (!Number.isFinite(limit) || !Number.isFinite(used) || limit <= 0) return "unknown";
+		const share = used / limit;
+		if (share >= 1) return "exhausted";
+		if (share >= .8) return "warn";
+		return "ok";
+	}
+	/** The worse of two tiers, for the pill's single colour. */
+	function worseTier(a, b) {
+		const rank = {
+			exhausted: 4,
+			warn: 3,
+			ok: 2,
+			unknown: 1
+		};
+		return rank[a] >= rank[b] ? a : b;
+	}
+	/** The used share of a window as a rounded percent, or `null` when unknowable. */
+	function percentOf(window) {
+		const limit = typeof window?.limit === "number" ? window.limit : NaN;
+		const used = typeof window?.used === "number" ? window.used : NaN;
+		if (!Number.isFinite(limit) || !Number.isFinite(used) || limit <= 0) return null;
+		return Math.round(used / limit * 100);
+	}
+	/**
+	* The reset instant for the tooltip, or `null` when none should be worded:
+	* a reset that has already passed (the window is mid-reset or the snapshot
+	* lagged it) is dropped rather than worded "重置中" — the stale mark, when
+	* present, carries that reading instead.
+	* @param resetAt - epoch ms.
+	* @param now - epoch ms (injectable for tests).
+	*/
+	function resetFor(resetAt, now) {
+		if (typeof resetAt !== "number" || !Number.isFinite(resetAt)) return null;
+		return resetAt > now ? resetAt : null;
+	}
+	/**
+	* The composer pill. Renders nothing unless the session's model belongs to this
+	* plugin — so no other provider's conversations carry a foreign credit readout,
+	* and no fetch loop runs while it is absent (the inner poller is not mounted).
+	*/
+	function ComposerUsagePill(props) {
+		const { tt, useProjection } = props;
+		const projection = (useProjection ?? (() => void 0))("modelSelection");
+		const provider = selectedProviderOf(projection);
+		return provider !== void 0 && PROVIDER_IDS.has(provider) ? h(ActiveComposerPill, {
+			tt,
+			provider,
+			model: selectedModelOf(projection)
+		}) : null;
+	}
+	/**
+	* The mounted pill: owns the snapshot poller (unconditionally, first hook) and
+	* draws the reading. Unmounted wholesale when the session leaves an owned
+	* provider, which is also what stops its fetch loop.
+	*/
+	function ActiveComposerPill({ tt, provider, model }) {
+		const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
+		const pool = poolFor(data?.pools?.pools ?? [], model, provider);
+		const w5 = pool?.window5h ?? null;
+		const w7 = pool?.window7d ?? null;
+		const tier = worseTier(tierOf(w5), tierOf(w7));
+		const p5 = percentOf(w5);
+		const p7 = percentOf(w7);
+		const now = Date.now();
+		const stale = error !== null || updatedAt > 0 && now - updatedAt > 9e4;
+		const noPool = loadedOnce && pool === void 0 && provider !== TOKEN_PLAN;
+		const resetTime = resetFor(w5?.resetAt ?? w7?.resetAt ?? null, now);
+		const label = (prefix, pct) => `${prefix} ${pct === null ? "—" : `${pct}%`}`;
+		const title = [
+			tt("composer.pillTitle"),
+			pool?.name ? String(pool.name) : noPool ? tt("composer.noPool") : null,
+			resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime).toLocaleString()}` : null,
+			stale ? tt("composer.stale") : null
+		].filter(Boolean).join(" · ");
+		return h("button", {
+			type: "button",
+			className: "dsh-sensenova-composer-pill",
+			title,
+			"aria-label": title,
+			style: { color: TIER_COLOR[tier] }
+		}, h("span", {
+			className: "dsh-sensenova-composer-pill-dot",
+			"aria-hidden": "true",
+			style: { background: TIER_COLOR[tier] }
+		}), " ", h("span", { className: "dsh-sensenova-composer-pill-text" }, label(tt("composer.pool5h"), p5), " · ", label(tt("composer.pool7d"), p7), stale ? ` · ${tt("composer.stale")}` : ""));
+	}
+	var PROVIDER_IDS, TOKEN_PLAN, TIER_COLOR, STALE_AFTER_MS;
+	var init_composer_usage_pill = __esmMin((() => {
+		init_runtime();
+		init_use_snapshot_polling();
+		PROVIDER_IDS = /* @__PURE__ */ new Set(["sensenova-token-plan", "sensenova-raccoon"]);
+		TOKEN_PLAN = "sensenova-token-plan";
+		TIER_COLOR = {
+			ok: "#22c55e",
+			warn: "#eab308",
+			exhausted: "#ef4444",
+			unknown: "#9ca3af"
+		};
+		STALE_AFTER_MS = 9e4;
+	}));
+
+//#endregion
 //#region src/client/apply.ts
 /**
 	* Register the dictionaries and the plugin config card.
@@ -3994,6 +4156,17 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		} catch (error) {
 			console.warn(`[${NS}] config card registration failed:`, error);
 		}
+		try {
+			disposers.push(ctx.slots.inject("conversation.input.right", () => ctx.slots.register({
+				name: "conversation.input.right",
+				id: `${NS}-composer-pill`,
+				locale: NS,
+				order: 4,
+				inject: () => ({ tt })
+			}, ComposerUsagePill)));
+		} catch (error) {
+			console.warn(`[${NS}] composer pill registration failed:`, error);
+		}
 		ctx.effect(() => () => {
 			for (const dispose of disposers.splice(0)) try {
 				dispose();
@@ -4005,6 +4178,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_const();
 		init_i18n();
 		init_panel_page();
+		init_composer_usage_pill();
 		inject = ["slots", "locale"];
 	}));
 
@@ -4030,6 +4204,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_raccoon_roster();
 		init_raccoon_tab();
 		init_qr();
+		init_composer_usage_pill();
 		function clientFactory(loaderRequire) {
 			provideClientReact(loaderRequire("react"));
 			/**
@@ -4094,7 +4269,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 					HeaderStatus,
 					RaccoonTab,
 					RaccoonCard,
-					RaccoonRoster
+					RaccoonRoster,
+					ComposerUsagePill
 				}),
 				qr: Object.freeze({
 					buildQrMatrix,
