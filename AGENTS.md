@@ -64,7 +64,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   候选根（`$DSH_HOME` → 插件 `node_modules` → 桌面运行时 → npm 全局 CLI 运行时树）。
   **CI 不适用这条**：offline job 已装 CLI 供应运行时（`.github/workflows/ci.yml`），
   那里报同一句 = 真回归（2026-10-01 的 §30 事故：硬门禁红了一整天没人管）。
-- 测试数会随并行会话变化，只看自己域的增减。套件名册共 **30 项**（26 套件 + 4 门禁，
+- 测试数会随并行会话变化，只看自己域的增减。套件名册共 **31 项**（27 套件 + 4 门禁，
   真源 `test/suites.mjs`，`npm run test:list` 只列不跑）；单套件计数看
   `test/<域>.test.mjs` 结尾的 passed/total 行。
 - **动了契约/接缝文件，跑全量，别按域裁剪**。`src/shared/*`、`client.js`、`lib/index.js`
@@ -74,7 +74,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 - **全量现在是安全的，且能给出完整信号**（2026-10-05 起）。此前 `npm test` 是一条 `&&` 链：
   第二个套件（peer 依赖的 `store.test.mjs`）一红，后面 26 项**一次都没跑过**，而输出看起来
   只是一次普通的用例失败——这正是 PITFALLS §30 根因 2，那条 lesson 写了一年没修。现已换成
-  `test/run-all.mjs`：跑完 30 项再汇总，失败项逐个点名，并附「N 项跑过并通过」。
+  `test/run-all.mjs`：跑完 31 项再汇总，失败项逐个点名，并附「N 项跑过并通过」。
   **所以「跑全量」不再是件有代价的事**（本机 peer 可解析时约一分多钟），别再因为怕卡机器
   而只跑自己那一个域——那正是让 §30 那次事故藏了一整天的姿势。
 - **撞了封闭集合检查，别绕过，按它的修法补进去**。仓库的高 ROI 门禁多是闭合清单
@@ -192,7 +192,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
    ——要的话是更大的事，先停下来说。测试里 `check(name, condition, detail)` 的
    `name` 本身就是契约，1.8 万行测试是规格，不是附件。
 8. **验证闭环**：改完跑对应域单测（`node test/<域>.test.mjs`）→ 全量 `npm test`
-   （= `node test/run-all.mjs`：跑完 26 套件 + 4 门禁共 30 项再汇总，失败项逐个点名；
+   （= `node test/run-all.mjs`：跑完 27 套件 + 4 门禁共 31 项再汇总，失败项逐个点名；
    「末尾绿」「按链序定位」都是旧 `&&` 链的读法，别再用）。
 
 ## 已知的真实坑（改前先看这里有没有）

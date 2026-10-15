@@ -311,7 +311,7 @@
 - **现象**：CI 每一次 push 都红，回溯至少一整天（`0.4.3` / `0.4.4` / `0.4.5` 三个 release 全在红着的门禁下发出）。日志永远是同一句，出现在 offline job（唯一的硬门禁）的**第二个**套件：`Error: cannot resolve the peer dependency @deepseek-ai/dsh-credentials. Looked in: <repo>/node_modules: no @deepseek-ai scope`。而本机 `npm test` 全绿。
 - **根因**（三层，缺一层都不至于此）：
   1. **依赖来源与 runner 不匹配**：`test/peer-roots.mjs` 的候选根全是「装了 DSH 的机器」形状（`$DSH_HOME` → 插件 `node_modules` → `~/.dsh/dsh-asar-unpacked` → 打包安装目录）。干净 runner 上只剩 `<repo>/node_modules`，而 `npm install --legacy-peer-deps` 对它**跳过 peer**——`--force` 也不行，实测 `dsh-credentials` / `cordis` 都没落地，只有未被声明为 peer 的 `dsh-credentials-local` 进去了。**门禁在这台机器上永远不可能绿。**
-  2. **`set -e` + 19 个套件写在同一个 step**（2026-10-01 时点名册共 19 项，现已扩到 30 项）：第 2 个套件一抛错，后面 17 个（含 `build-gate`）**一次都没跑过**。于是「门禁红」看起来像某个用例失败，实际是**门禁根本没在验证**。
+  2. **`set -e` + 19 个套件写在同一个 step**（2026-10-01 时点名册共 19 项，现已扩到 31 项）：第 2 个套件一抛错，后面 17 个（含 `build-gate`）**一次都没跑过**。于是「门禁红」看起来像某个用例失败，实际是**门禁根本没在验证**。
      **已修（2026-10-05）**——本条曾长期是「写进 lesson 却没修」的活例子：§30 的验收只处理了根因 1 与 3，而根因 2 恰恰是唯一一条**当时就在文档里写着、却没人动**的。修法见下方新增的第 4 条。
   3. **注释替这堆问题背了书**：workflow 写着这些套件「resolve peers from stubs」——`peer-roots.mjs` 里**没有任何 stub**，只有真实运行时查找；又写 peer「cannot resolve from any registry」——包其实都在 registry 上，只是**只发预发布版**，而声明范围 `>=0.1.5 <0.3` 在 npm 默认 semver 规则下**不匹配预发布**（`npm view '@deepseek-ai/dsh-credentials@>=0.1.5 <0.3'` 直接 E404）。两条加起来，读注释的人会得出「CI 本来就这样」——**这正是它红了一整天没人管的原因**。
 - **修法**（2026-10-01 已做）：offline job 增加 `npm install -g @deepseek-ai/dsh`（**全局**装：不读本仓 manifest，npm 才会去拉运行时自己的 peer 闭包），`test/peer-roots.mjs` 新增 `cliRuntimeModules()`（从 `test/e2e.mjs` 抽出并共享；`npm root -g` → `<prefix>/@deepseek-ai/dsh/node_modules`，marker `dsh-base`，每进程 memo 一次）作为**最后**一个候选根。本地优先级不变，开发机仍优先跑它真正运行的那份运行时。

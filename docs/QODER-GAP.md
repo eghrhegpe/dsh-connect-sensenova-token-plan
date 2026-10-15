@@ -37,7 +37,7 @@
 | client 测试加载什么 | `test/client-surface.js:84` **直接 `import("../src/client/index.ts")`**，Node 原生剥类型 | **打产物，绝不 import 源码**：`test/helpers/render-card.js`（明写 "deliberately not an import of `src/client/card.tsx`"）用 jsdom + 真 react 渲染 `lib/client.js`；其余测试 `readFileSync('../lib/client.js')` 从产物文本抽函数 |
 | JSX 能否自由使用 | 不能（Node 直载源码不转 JSX） | 能（Node 从不加载 client 源码） |
 | 卡片规则兜底手段 | 不需要——规则可直接 import 断言 | 已转为直引真模块：`card-host-parity.test.js:45` `import { windowLabelOf } from '../src/client/card-model.ts'`；仍保留 `:53` 抓 bundle 文本 + `:56` 历史镜像 `OLD_cardWindowLabelOf`（"transcribed from `src/client/card.tsx` AFTER the fix"，:58 注释明说已降为历史参照） |
-| 测试重依赖 | 无 DOM 重依赖，极简 React stand-in | `jsdom` / `react` / `react-dom` 进 devDeps，真 DOM 渲染 |
+| 测试重依赖 | 主测试面极简 React stand-in、无 DOM；**产物真渲染档**（`render-dom.test.mjs`，2026-10-15）jsdom/react/react-dom 进 devDeps、缺席自 SKIP | `jsdom` / `react` / `react-dom` 进 devDeps，真 DOM 渲染 |
 
 ---
 
@@ -95,7 +95,9 @@
 `provider-controls.ts` / `use-snapshot-polling.ts` / `use-polling-interval.ts`（两个 tab 共用的轮询循环，TESTING §2 的 H 组直测它）——与 qoder 那 3 个容器同类。
 
 **本插件没有的**：JSX（用 `h()` 换取 Node 直载源码的可测性，理由见 §2 与
-`src/client/runtime.ts` 头注）、jsdom 真渲染断言。
+`src/client/runtime.ts` 头注）。本文当年同时列出的「jsdom 真渲染断言」已于
+2026-10-15 补上最小档——`test/render-dom.test.mjs`，产物 `client.js` + 真
+React + jsdom，落地形态与取舍见 §6.2 末段。
 
 ---
 
@@ -143,6 +145,18 @@
 stable across a rebuild"）与产物 freshness 门禁。本插件的 `client-surface.js`
 恰恰是为淘汰这套才存在的（见其头注）。所以这不是"白捡 JSX"，是拿测试轻量换
 格式可读性。
+
+**落地（2026-10-15，最小可用版）**：产物 + jsdom 这条已以
+`test/render-dom.test.mjs` 补上——jsdom realm eval 产物 `client.js`，
+`__ModuleLoader__` 捕获注册后以 devDeps 的真 React 物化工厂、`react-dom/client`
+挂载；覆盖额度卡的真 DOM 映射（`aria-valuenow`、内联 `style.width`）与
+`AccountForm` 的 hook 往返（受控输入、显/隐密码、空字段拒绝、登录成功后密码
+离开组件状态的红线 1 产物级取证）。**没有搬来花括号抽文本**——产物自身就暴露
+同一个 `panel` 测试面，抓取这套短板根本不需要；接受掉的只有另一半：产物
+freshness 仍归 `build-gate` 守，且本套件在 devDeps 缺席时醒目 SKIP 退出 0，
+CI offline job 装 devDeps、那边真跑。纯规则层照旧直引源码 `.ts`
+（`client-surface.js` 原样保留），JSX 也照旧不引入——最小档只补渲染证据，
+不改测试面的地基。
 
 ---
 

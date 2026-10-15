@@ -58,12 +58,14 @@
  * are the slowest and the most likely to be SKIPped by a missing devDependency.
  *
  * `e2e-gate` is last on purpose: it boots a real Host process, so it must not
- * hold up the 29 cheap verdicts that precede it.
+ * hold up the 30 cheap verdicts that precede it (`render-dom.test.mjs` is
+ * cheap only when its devDeps resolve; without them it prints SKIP and exits
+ * 0 in milliseconds).
  *
  * @type {ReadonlyArray<{name: string, kind: "suite"|"gate", note: string}>}
  */
 export const SUITES = Object.freeze([
-  // ── the 26 *.test.mjs suites (this exact set is what package.test.mjs pins
+  // ── the 27 *.test.mjs suites (this exact set is what package.test.mjs pins
   //    against disk; the four gate files below are exempt there, as e2e-gate
   //    has been since it stopped being a *.test.mjs) ───────────────────────
   { name: "auth.test.mjs", kind: "suite", note: "login / PKCE / JWE / throttle classification" },
@@ -72,6 +74,7 @@ export const SUITES = Object.freeze([
   { name: "routes.test.mjs", kind: "suite", note: "the HTTP route family" },
   { name: "panel.test.mjs", kind: "suite", note: "panel decisions + zh/en dictionary parity" },
   { name: "render.test.mjs", kind: "suite", note: "the client render surface" },
+  { name: "render-dom.test.mjs", kind: "suite", note: "shipped client.js in jsdom + REAL react (SKIPs without the devDeps)" },
   { name: "parsers.test.mjs", kind: "suite", note: "response parsing + shape-drift detection" },
   { name: "snapshot-aggregate.test.mjs", kind: "suite", note: "snapshot body aggregation" },
   { name: "provider.test.mjs", kind: "suite", note: "provider registration state machine" },
