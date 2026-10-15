@@ -509,6 +509,62 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 「无构建」表述已全库同步（`DSH-PLUGIN.md` §7、`ARCHITECTURE.md` 半边表、
 `TESTING.md` 链条枚举、`AGENTS.md` 验证段、`PITFALLS.md` §22）。
 
+### 6.3 对话框用量显示（composer 用量胶囊）——形态裁定与可行性验证（2026-10-15）
+
+**定位**：给已在用商汤模型（`sensenova-token-plan` / `sensenova-raccoon`）的会话，在输入框工具栏显示额度读数。形态跟随 opencode-go 的「用量胶囊」，**不**跟随 workbuddy 的「纯文本余额读数」。本节是**裁定 + 字节级可行性验证**，不是实现记录；落地前需把下文的「三档」「座席」「池归组」再钉一次测试面。
+
+**可行性验证（2026-10-15，本机 profile 安装的 `@deepseek-ai/dsh-client-ui-conversation@0.2.0-rc.1` 字节提取）**——三条都成立：
+
+| 验证项 | 结论 | 证据 |
+|---|---|---|
+| `conversation.input.right` 仍声明 | ✅ `kind: 'list'`、`scope: 'session'`，渲染在提交动作前的 `standardControls` 里（与 `conversation.input.model` 同列） | 该包 `lib/types/client/contract/slots.d.ts` + `lib/client.js` |
+| 左侧与 ambient 座席仍在 | ✅ `conversation.input.left`、`conversation.composer.dock` 都是 list 座席 | 同上 |
+| `modelSelection` 投影可用 | ✅ `useProjection("modelSelection")` → `{ next, lastUsed }`，`next` 优先；每条含 `provider` / `model` / `reasoningEffort` | 该包 `SessionInputShell.submissionState` 即取 `model.next ?? model.lastUsed` |
+
+结论：opencode-go 依赖的右侧座席在本机 Host 上**没有被移除**，workbuddy 那套「读 `modelSelection` 投影判归属」的路径也可复用。
+
+**形态裁定：选 opencode-go，不选 workbuddy**——理由不是美观，是语义同构：
+
+| 维度 | workbuddy 读数 | opencode-go 用量胶囊 | 商汤 Token Plan 合谁 |
+|---|---|---|---|
+| 度量 | 剩余积分单一数字（余额制） | 各窗口**已用百分比 + 重置时间**（滚动额度制） | opencode-go。商汤是 5h/周滚动池，**没有**单一余额可显示 |
+| 门控 | 严格按 provider 归属 | `auto` / `always` / `off` 三档 | opencode-go。`always` 让「配了账号但此刻用别的模型」也能看额度——本项目 provider 是 opt-in 默认关，纯归属门控会把显示面窄到几乎不开 |
+| 座席 | `conversation.input.left` | `conversation.input.right` | opencode-go。右侧座席与 workbuddy 的左侧**不冲突**，无需再给自己做「stats 第二座席」 |
+| 分级 | 无 | 绿 <80% / 黄 80% / 红 100% 或限流 | opencode-go。本项目 `exhaustedModelIds(pools)`（`src/host/llm-models.ts`）已能判定池耗尽，直接映射红色 |
+
+**商汤适配的四点差异**（照 opencode-go 搬会搬错的地方）：
+
+1. **窗口数是两档，不是三档**：opencode-go 有 5h / 周 / 月，商汤是**滚动 5h + 周**（无月窗口，见 [SENSENOVA-API.md](./SENSENOVA-API.md) §3.1）。胶囊只画两档。
+2. **额度是池级归组**：`pool-usage` 按池返回（通用池 / Flash-Lite 专属池，`parsePools` 每个 pool 带 `modelIds`）。胶囊显示哪个池要按当前模型归组——比 opencode-go 的「每账号一套额度」多一层映射，落地时先定「当前模型 → 所属池」的查询函数。
+3. **返赠余额不进胶囊**：商汤的「Flash-Lite 返赠通用积分（30 天有效、不占滚动窗口）」是独立口径，塞进百分比会混淆「窗口消耗」与「可用余额」。它属于插件卡「积分额度」tab 的面板项。
+4. **刷新节奏**：opencode-go 每分钟刷，商汤面板本来就是 60s 轮询 snapshot——胶囊应**复用已有快照路由**，不另开一条轮询打控制台接口；快照路由 HTTP 恒 200、错误当数据下发（[API.md](./API.md)），胶囊据此把失败降级成「上次数据」而不崩。
+
+**显示模式三档**（照 opencode-go 的 `usageDisplay`）：
+
+| 档 | 行为 | 适用 |
+|---|---|---|
+| `auto`（默认） | 仅当前会话所选模型属于本插件 provider 时显示 | 严格归属门控 |
+| `always` | 常驻，即使用别的 provider 也显示已配置账号额度 | 想随时瞥额度 |
+| `off` | 隐藏并停止轮询 | 不想要 |
+
+`auto` 的归属判定沿用 workbuddy 的 `useProjection("modelSelection")`，`next` 优先于 `lastUsed`；商汤侧需同时覆盖 `sensenova-token-plan` 与 `sensenova-raccoon` 两个 provider id。`raccoon` web-search provider 不参与——它没有额度。
+
+**降级边界**（照 §5 不变量 2 的纪律）：胶囊注册失败、槽位在目标 Host 未声明、投影缺失——一律「面板照常用、该模块缺席」，`console.error` 落日志、不抛异常。任何读失败保留上次数值并标「上次数据」，可手动重试。
+
+**明确不做**：
+- 不与 workbuddy 抢 `conversation.input.left`（右侧座席已解决冲突，别再加一个）。
+- 不把返赠余额折进百分比、不发明「余额」数字。
+- 不做签到 / 每日领取联动（延续 §6「明确不做」）。
+
+**落地前确认①——已成立**（2026-10-15 字节级核验，非照注释猜）：DSH slot 系统**强制**把 `useProjection` 物化成 session 作用域槽位的 prop。workbuddy 把该 prop 声明为可选，只是因为它能脱离 Host 单测；真 Host 上它必然存在。证据链（`@deepseek-ai/dsh-client-ui-session` → `@deepseek-ai/dsh-client-ui-renderer`，均 0.2.0-rc.1）：
+
+- `ui-session` 在 session scope adapter 上声明 `keyedHooks: ["projection"]`，实现为 `(key) => binding.session.projections.faceOf(key)`；
+- `renderer` 的 `materializeStandardBinding` 把 `keyedHooks` 里每个 `name` 经 `standardHookPropName(name)` 转成 `use<Name>` prop 并绑成 `keyedObservableHook(source, defaultKey)`——`projection` → `useProjection`，`defaultKey` 取 `scopeBinding.key`（当前 sessionId）；
+- `conversation.input.right` 是 `scope: 'session'`（非 `session-maybe`），所以 `optional=false`：`useProjection` 是**严格必需** prop，缺源会抛 `SlotAssemblyError`，不存在「可能没注入」的形态；
+- 调用形态 `useProjection(key, selector?, equal?)`，单字符串参数即 keyed 形态，返回该 projection 的 observable 快照——`useProjection("modelSelection")` 得到 `{ next, lastUsed }`，与 workbuddy 的 gate 用法逐字一致。
+
+**落地前确认②——已落地**（2026-10-15）：新增门禁 `test/composer-slot-gate.mjs`（已入 `test/suites.mjs` 名册，`npm test` 恒跑；名字含 `gate`，故被 `--skip=gate` / `--only=gate` 正确分类）。它扫描本机**每个**可解析的 DSH client 副本（profile 的 `node_modules`、`dsh-asar-unpacked` / `app.asar.unpacked` 的运行时树、`$DSH_HOME` checkout、`~/dsh-plugins` 兄弟插件的 `node_modules`），逐版本静态断言四件契约：A. `slots.d.ts` 把 `'conversation.input.right'` 声明为 `kind:'list'` + `scope:'session'`；B. `client.js` 仍 `renderSlot("conversation.input.right", …)`；C. `ui-session` 的 `keyedHooks` 仍声明 `projection`；D. `ui-renderer` 的 `materializeStandardBinding` 仍把 keyedHooks 经 `standardHookPropName(name)` 物化为 `use<Name>` prop，且 session（非 `session-maybe`）作用域 `optional=false`（缺源抛 `SlotAssemblyError`）。任一漂移即红，并指向本节「明确不做」/「换座席」。四件套缺一按失败处理（环境不完整），不按 SKIP；找不到任何副本才 SKIP（与 `store.test.mjs` / `peer-contract.test.mjs` 的 peer 缺席范式一致）。opencode-go 用的是「拉真 Host + pack tarball + 装隔离 consumer」的重形态；本项目选更轻的纯静态断言——不装 peer、不拉 Host、不碰网络，且覆盖本机所有副本。**已知局限**：只能覆盖本机存在的版本；CI 未装 client UI 包时 SKIP，届时矩阵靠 CI workflow 补。
+
 ## 7. 优先级与时间盒
 
 | 优先级 | 项 | 侵入性 | 门禁 |
@@ -523,6 +579,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 | **P2 ✅ 部分落地** | 第二上游 provider：已随 0.4.3 落地（三个 tab 之一 + `sensenova-raccoon`），2026-10-01 补做网关契约复测，**契约成立**（§6.1.2）；剩余未做的是 desktop 融合路径（第二**登录路径**，见 §6.1.1）——它已实测判死，维持观望。接入面盘点与死负载处置见 §6.1.4（2026-10-01：诊断收进 `?debug=1` + 常量单真源） | 高（新上游 + 新凭据生命周期） | 已落地：`test/raccoon.test.mjs` 离线 101 项 + `docs.test.mjs` 检查 9 + **`test/live-raccoon.mjs`（2026-10-01 补齐此前的「仍缺」项，比照 §2.2 给商汤做的 `live-contract`：L1 无凭据路由存在性含对照组 + L2 带凭据契约；两条红线写死在脚本里） |
 | P2（可选） | 每日积分机制的唯一悬案（§6.1.8）：「当天登录」的服务端语义（登录事件 vs. 任意认证请求）——复测方法已定：凭据当天在读只读 `GET /bills` 看当日 `daily_grant.expire_at`，零副作用；若做面板「每日发放有效期」展示，数据源是 `bills`（`balance` 不返有效期） | 低（只读端点，无新凭据域） | 接入展示时按小浣熊域 `raccoon-status` + 面板测试补断言 |
 | P2（可选，先观察） | 网关 499 `client_request_aborted_error` 的宿主侧纠正（§6.1.9）：比照 429 误判纠正层的同构做法，在流出口把这种体归入可重试类，让退避重试吃掉偶发的网关内部取消。**触发条件 = 复现率说话**：偶发一次不值得预支一层纠正逻辑；攒到复现样本（带 `x-request-id` 与时间点）再动 | 低（流出口纠正，不动 peer 内部；peer-free 判据可离线钉测） | 若做：`test/error-fix.test.mjs` 同构补用例 + `test/retry.test.mjs` 复核分类契约 |
+| P2（可选，先验证） | 对话框用量胶囊（§6.3）：形态已裁定（opencode-go 路线 + 两窗口 + 池归组 + `auto/always/off` 三档），字节级可行性已验（`conversation.input.right` 与 `modelSelection` 投影在本机 DSH 0.2.0-rc.1 在位）；落地前确认①已成立（`useProjection` 是 session 作用域槽位的**严格必需** prop，证据链见 §6.3）；确认②已落地（`test/composer-slot-gate.mjs` 入名册：扫描本机所有 DSH client 副本、逐版本静态断言四件契约，红即提示换座席/放弃） | 中（client 新组件 + 三档开关 + 池归组查询函数 + 面板开关写 settings；Host 侧零新路由，复用快照） | 若做：新 client 组件测试 + `composer-slot-gate.mjs`（已落地）+ 面板开关测试 + `docs.test.mjs` |
 | 明确不做 | 多 Key / 签到 / 跨 provider 聚合 | — | — |
 | 明确不做 | 伪倍率折进注册模型名（qoder ② 法：把倍率嵌进 DSH 原生选择器的模型名里，绕「选择器无旁路字段」限制）。2026-09-30 决议 | 低 | 现状即决议：`×N` 只作**面板侧标记**（模型花名册行尾 + 趋势图，同一匹配器、同一数值，均标「非官方」）。理由：① 倍率是操作者手填的对比数据、非平台计费事实，折进 DSH 全局模型名会把个人配置泄漏给所有会话；② qoder 嵌名是「DSH 无字段携带平台真实倍率」的 workaround，本插件的倍率本就没有平台出处，面板就是它唯一合理的位置；③ 模型名是 DSH 配置 / 选择器的稳定标识（id 匹配），加 `×N` 会破坏 id 语义。**本条只管伪倍率**——小浣熊网关倍率是平台声明的计费事实，允许嵌名，是本条的唯一例外，见 §6.1.5 |
 

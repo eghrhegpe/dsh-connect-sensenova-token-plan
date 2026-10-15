@@ -100,6 +100,7 @@ export const SUITES = Object.freeze([
   //    exempts them (same exemption e2e-gate has always had) — but they are
   //    still part of the default gate and still have to EXIST, which
   //    package.test.mjs now checks against this list. ───────────────────────
+  { name: "composer-slot-gate.mjs", kind: "gate", note: "composer 用量胶囊的 peer 契约（conversation.input.right + useProjection 强制物化）" },
   { name: "duplication-gate.mjs", kind: "gate", note: "jscpd over src/ against a line-capped whitelist" },
   { name: "typecheck-gate.mjs", kind: "gate", note: "local tsc under tsconfig.json's strict flags" },
   { name: "build-gate.mjs", kind: "gate", note: "real tsdown build of lib/ + client.js" },
