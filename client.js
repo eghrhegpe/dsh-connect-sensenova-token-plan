@@ -9,7 +9,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			throw err = [e], e;
 		}
 	};
-	var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
+	var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod, mod.exports), cb = null), mod.exports);
 
 //#endregion
 //#region src/client/const.ts
