@@ -23,7 +23,7 @@ npm run test:errorfix    # 仅 error-fix.test.mjs（429 自愈的 404/429 分诊
 npm run test:peer-contract # 仅 peer-contract.test.mjs（peer 可达时追加真跑、缺席自 SKIP；名册内，同上）
 ```
 
-测试**无需 `npm install`**：`@deepseek-ai/dsh-credentials` 等是 Host 里的 peer 依赖，由 `test/peer-roots.mjs` 就地解析（`$DSH_HOME` → 插件 `node_modules` → 默认安装位置 `~/.dsh/dsh-asar-unpacked` → 打包安装目录 → 工作区内的 `@deepseek-ai/dsh` 元包 → **npm 全局 CLI 的运行时树**，最后两项是为「没装 Host 的机器」准备的，CI 正属此类）。找不到时会列出每个候选根**各自失败的原因**，而不是静默跳过或只报搜索路径。`config.test.mjs` 不依赖任何 peer，干净检出即可跑。
+测试**无需 `npm install`**：`@deepseek-ai/dsh-credentials` 等是 Host 里的 peer 依赖，由 `test/peer-roots.mjs` 就地解析（`$DSH_HOME` → 插件 `node_modules` → 默认安装位置 `~/.dsh/dsh-asar-unpacked` → 打包安装目录 → 工作区内的 `@deepseek-ai/dsh` 元包 → **npm 全局 CLI 的运行时树**，最后两项是为「没装 Host 的机器」准备的，CI 正属此类）。找不到时会列出每个候选根**各自失败的原因**，而不是只报搜索路径；确认缺的是环境而非代码后，套件经 [`test/env-skip.mjs`](../test/env-skip.mjs) **loud skip** 退出 0——汇总里单列成 `SKIPPED` 而不是混进 passed，并写明这轮因此没验证什么。想看被豁免前的那个红用 `DSH_TEST_STRICT_SKIP=1 npm test`（CI 恒为此模式）。`config.test.mjs` 不依赖任何 peer，干净检出即可跑。
 
 > **CI 侧的前车之鉴（2026-10-01，见 [AGENTS.md](../AGENTS.md)「验证」段）**：`npm install --legacy-peer-deps` 会**跳过** peer，所以干净 runner 上这些套件既没有 peer 也没有运行时——硬门禁一度**连续一整天每次都红在第二个套件**（`store.test.mjs`），当时的 `set -e` 链还把它后面的套件一起吞掉（当时记作「后面 17 个套件」）。**根因 2 与根因 3 已于 2026-10-05 一并修掉**：套件名册收进 `test/suites.mjs`，`npm test` 与 `ci.yml` 的 offline job 调同一个 `node test/run-all.mjs`——跑完全部再汇总退出码，于是「门禁红」不再可能是「门禁没在验证」。peer 侧仍需 `ci.yml` 先装 CLI，`peer-roots.mjs` 据此解析。因此：**CI 里这类报错是回归，不是环境问题**；而「干净检出上跑不了」只对本机成立。
 

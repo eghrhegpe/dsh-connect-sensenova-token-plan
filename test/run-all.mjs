@@ -100,6 +100,7 @@ if (selected.length === 0) {
 }
 
 const failures = [];
+const skips = [];
 let totalMs = 0;
 
 console.log(`running ${selected.length} suite${selected.length === 1 ? "" : "s"} from test/suites.mjs`);
@@ -109,11 +110,29 @@ for (const [index, suite] of selected.entries()) {
   const label = `${String(index + 1).padStart(2, " ")}/${selected.length} ${suite.name}`;
   process.stdout.write(`── ${label}\n`);
   const startedAt = Date.now();
-  // stdio: inherit — the suites print their own per-check output, and a
-  // captured buffer would hide which of 29 suites said what until the end.
-  const result = spawnSync(process.execPath, [join(here, suite.name)], { stdio: "inherit" });
+  // stdout is piped (not inherited) for exactly one reason: a suite that skips
+  // itself announces `[skip] <name> — <reason>` there, and the summary below
+  // has to be able to list what was NOT verified. `maxBuffer` is generous
+  // because e2e can legitimately dump a whole Host's activation log.
+  //
+  // stderr stays inherited, so both skip explanations and per-check output keep
+  // streaming in the interleaved order they were written.
+  const result = spawnSync(process.execPath, [join(here, suite.name)], {
+    stdio: ["ignore", "pipe", "inherit"],
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
   const ms = Date.now() - startedAt;
   totalMs += ms;
+  const stdoutResult = typeof result.stdout === "string" ? result.stdout : "";
+  if (stdoutResult !== "") process.stdout.write(stdoutResult);
+  const skipLine = stdoutResult.split("\n").find((line) => line.startsWith("[skip] "));
+  // The sentinel already carries the suite name (`[skip] store.test.mjs — …`);
+  // repeating it in the summary would read as two different suites.
+  const skipReason =
+    skipLine === undefined
+      ? ""
+      : skipLine.slice("[skip] ".length).replace(new RegExp(`^${suite.name.replaceAll(".", "\\.")} — `), "");
 
   if (result.error) {
     // A spawn failure (ENOENT on node, a bad shebang) is a gate verdict, not
@@ -124,7 +143,12 @@ for (const [index, suite] of selected.entries()) {
   }
   const code = result.status;
   if (code === 0) {
-    console.log(`   ✓ ${suite.name} (${(ms / 1000).toFixed(1)}s)\n`);
+    if (skipLine !== undefined) {
+      skips.push({ suite: suite.name, reason: skipReason });
+      console.log(`   ⊘ ${suite.name} SKIPPED — ${skipReason}\n`);
+    } else {
+      console.log(`   ✓ ${suite.name} (${(ms / 1000).toFixed(1)}s)\n`);
+    }
     continue;
   }
   // A suite that self-declares a SKIP (missing typescript / tsdown / dsh CLI)
@@ -138,8 +162,32 @@ for (const [index, suite] of selected.entries()) {
 }
 
 console.log("─".repeat(60));
+
+// A run where EVERYTHING skipped must not read as green. Same rule as the empty
+// selection check above, applied one layer later: "nothing ran" is only
+// acceptable when it says so loudly, and never as a summary line nobody reads.
+// In practice this fires on a checkout where no dependency is installed at all,
+// which looks like success only if you believe the exit code instead of the list.
+if (skips.length === selected.length) {
+  console.error(
+    `every selected suite SKIPPED (${skips.length}/${selected.length}) — this run verified nothing.\n` +
+      `That is a broken environment, not a passing gate (PITFALLS §30: judge by whether\n` +
+      `the gate CAN go green on its target environment, not by whether it is red).`
+  );
+  for (const skip of skips) console.error(`  ${skip.suite} — ${skip.reason}`);
+  process.exit(1);
+}
+
 if (failures.length === 0) {
   console.log(`all ${selected.length} suite${selected.length === 1 ? "" : "s"} passed in ${(totalMs / 1000).toFixed(1)}s`);
+  if (skips.length > 0) {
+    // Skips are reported even on a green run, because otherwise "all passed"
+    // would overstate what was verified — the failure mode this runner was
+    // built to end was precisely a summary that lied about its own coverage.
+    console.error(`\n${skips.length}/${selected.length} suite(s) SKIPPED for environment — NOT verified this run:`);
+    for (const skip of skips) console.error(`  ${skip.suite} — ${skip.reason}`);
+    console.error(`\n(local only: in CI these dependencies are installed by the job, so they do not\nskip — see test/env-skip.mjs. Reproduce that verdict: DSH_TEST_STRICT_SKIP=1 npm test)`);
+  }
   process.exit(0);
 }
 
@@ -147,5 +195,10 @@ console.error(`${failures.length}/${selected.length} suite(s) FAILED (${(totalMs
 for (const failure of failures) console.error(`  ${failure.suite} — ${failure.code}`);
 // The point of the exercise: the suites that DID run are named, so a red here
 // reports what was verified instead of stopping at the first red.
-console.error(`\n(${selected.length - failures.length} suite(s) did run and passed)`);
+console.error(
+  `\n(${selected.length - failures.length - skips.length} suite(s) did run and passed` +
+    (skips.length > 0 ? `, ${skips.length} skipped for environment` : "") +
+    `)`
+);
+for (const skip of skips) console.error(`  ⊘ ${skip.suite} — ${skip.reason}`);
 process.exit(1);

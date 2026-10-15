@@ -54,19 +54,25 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   `continue-on-error`——缺 dsh CLI 时它 SKIP 退出 0，有则真跑且红即拦）。手工排查用 `node test/e2e.mjs` 单跑即可。
 - **e2e 只跑一次**。它要启动真实 Host 进程；需要看两段输出就跑一次落盘再读文件，
   不要把同一条命令串两遍。
-- **peer 套件红 ≠ 回归（只对本机成立）**。依赖 Host runtime 里 peer 的套件是
-  `store.test.mjs`（`@deepseek-ai/dsh-credentials` + `dsh-credentials-local`）与
-  `routes.test.mjs`（`dsh-credentials`）、`wiring.test.mjs`（`@deepseek-ai/cordis`）
-  ——都随 DSH runtime 发行，不在插件目录。小浣熊域反而**不在此列**：`raccoon.test.mjs`
-  自证 peer-free（头注写明，决策面在 clean checkout 可跑）；`peer-contract` /
-  `retry` 是半依赖形态——peer 可达时追加真跑、缺席时自 SKIP，红才算回归。
-  本机报 `cannot resolve the peer dependency` 是环境问题：查 `test/peer-roots.mjs`
-  候选根（`$DSH_HOME` → 插件 `node_modules` → 桌面运行时 → npm 全局 CLI 运行时树）。
-  **CI 不适用这条**：offline job 已装 CLI 供应运行时（`.github/workflows/ci.yml`），
-  那里报同一句 = 真回归（2026-10-01 的 §30 事故：硬门禁红了一整天没人管）。
-- 测试数会随并行会话变化，只看自己域的增减。套件名册共 **31 项**（27 套件 + 4 门禁，
-  真源 `test/suites.mjs`，`npm run test:list` 只列不跑）；单套件计数看
-  `test/<域>.test.mjs` 结尾的 passed/total 行。
+- **peer 套件缺依赖是 SKIP，不是红——但只在本地**。`store.test.mjs`
+  （`@deepseek-ai/dsh-credentials` + `dsh-credentials-local`）、`routes.test.mjs`
+  （`dsh-credentials`）、`wiring.test.mjs`（`@deepseek-ai/cordis`）依赖随 DSH runtime
+  发行的 peer，不在插件目录；`e2e-gate.mjs` 还要一棵能被 Host 真正引导的 runtime 树
+  （判据与 `test/e2e.mjs` 同源，都是 `cliRuntimeModules()`，见 `test/peer-roots.mjs`——
+  刻意不去发明第二个"什么算完整"的答案）。本机缺这些时它们经 `test/env-skip.mjs`
+  **loud skip**：stdout 一行 `[skip] <套件> — <原因>`（`run-all.mjs` 据此把它们单列进
+  汇总，不算作通过）+ stderr 写明这轮**没验证什么**。`cannot resolve the peer dependency`
+  因此不再出现在本地汇总里；要看那个红：`DSH_TEST_STRICT_SKIP=1 npm test`。
+  小浣熊域不在此列：`raccoon.test.mjs` 自证 peer-free（头注写明，决策面在 clean
+  checkout 可跑）；`peer-contract` / `retry` 是半依赖形态——peer 可达时追加真跑、缺席时自
+  SKIP，红才算回归。
+  **CI 恒为严格模式**：offline job 已装 CLI 供应运行时（`.github/workflows/ci.yml`），
+  那里同一缺口 = 真回归——`env-skip` 在 `CI` 下把每个 skip 升回失败（2026-10-01 的 §30
+  事故是「红了一整天没人管」，它的镜像同样致命：四个被文档豁免的常驻红，会让第五个
+  红失去说服力）。
+- 测试数会随并行会话变化，只看自己域的增减。**套件项数不在这里写死**——它是每次改测试就腐
+  的即时值，真源是 `test/suites.mjs`，用 `npm run test:list` 自证（该命令只列不跑）。单套件
+  计数看 `test/<域>.test.mjs` 结尾的 passed/total 行。
 - **动了契约/接缝文件，跑全量，别按域裁剪**。`src/shared/*`、`client.js`、`lib/index.js`
   以及被多个模块消费的文件，消费者不可枚举——按域裁剪会漏掉跨域契约（实测：只给面板加一个
   渲染分支，draw/render/typecheck 全绿，全量才在 `panel.test.mjs` 的 table-driven tt 白名单上红）。

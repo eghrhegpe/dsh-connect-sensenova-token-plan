@@ -177,11 +177,19 @@ export async function loadPeer(name) {
         "(CI gets one from `npm install -g @deepseek-ai/dsh`)."
       : " Candidate roots existed but none carried the peer marker — a stale or partial install. " +
         "A clean runtime should ship the whole @deepseek-ai set; verify the install, do not 'just add one package'.";
-  throw new Error(
+  // `peerMissing` is the contract with test/env-skip.mjs: it lets a peer-less
+  // machine skip these suites loudly instead of failing them, while leaving any
+  // OTHER throw from inside the peer fatal. Marking it here (rather than having
+  // each call site string-match the message) keeps that one distinction in one
+  // place — a suite that pattern-matched the text would silently stop skipping
+  // the day someone rewrote this sentence.
+  const error = new Error(
     `cannot resolve the peer dependency ${specifier}.\n` +
       `Looked in:\n${attempts.map((a) => `  - ${a}`).join("\n")}\n` +
       hint
   );
+  error.peerMissing = true;
+  throw error;
 }
 
 export { ROOT };

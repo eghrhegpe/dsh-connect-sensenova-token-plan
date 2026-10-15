@@ -7,6 +7,7 @@ import { purgeGrant } from "../src/host/token-store/grant.ts";
 import { createFileThrottleStore, createMemoryThrottleStore } from "../src/host/throttle-store.ts";
 import { createVersionedJsonWriter } from "../src/host/state-store.ts";
 import { loadPeer, installNetworkGuard, findPeerRoot, isolateStateDir } from "./peer-roots.mjs";
+import { skipOnMissingPeer, suiteName } from "./env-skip.mjs";
 import { createRequire } from "node:module";
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,8 +17,16 @@ import { pathToFileURL } from "node:url";
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
 
-const { credentialKey, credentialRef } = await loadPeer("dsh-credentials");
-const { parseCredentialsDocument } = await loadPeer("dsh-credentials-local");
+// These peers are not installable — they ship inside the DSH Host runtime — so
+// a machine without one skips loudly rather than failing (see env-skip.mjs; the
+// same miss in CI stays red, because there the job installs the runtime).
+const skipMissingPeer = skipOnMissingPeer(suiteName(import.meta.url), [
+  "NOT verified in this run: token renewal, refresh_token rotation, rejection",
+  "memory, login throttle windows, and the credentials grant round-trip.",
+  "restore health with the desktop runtime or `npm install -g @deepseek-ai/dsh`.",
+]);
+const { credentialKey, credentialRef } = await loadPeer("dsh-credentials").catch(skipMissingPeer);
+const { parseCredentialsDocument } = await loadPeer("dsh-credentials-local").catch(skipMissingPeer);
 // The YAML renderer is resolved from the credentials package itself, so it is
 // the exact dependency it writes the file with — comparable byte for byte.
 const yaml = await import(pathToFileURL(

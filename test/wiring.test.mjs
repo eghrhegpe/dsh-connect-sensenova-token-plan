@@ -15,13 +15,23 @@
  * the seam that a fake context cannot.
  */
 import { loadPeer, installNetworkGuard, isolateHostEnv, isolateStateDir } from "./peer-roots.mjs";
+import { skipOnMissingPeer, suiteName } from "./env-skip.mjs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
 /** This machine's own SenseNova keys must not steer a check. */
 const restoreHostEnv = isolateHostEnv();
 
-const { Context } = await loadPeer("cordis");
+// Not installable here — it ships inside the DSH Host runtime — so a machine
+// without it skips loudly instead of failing (env-skip.mjs; a CI miss stays
+// red, because there the job installs the runtime).
+const skipMissingPeer = skipOnMissingPeer(suiteName(import.meta.url), [
+  "NOT verified in this run: cordis wiring — service hand-off, registerPairs",
+  "ordering, teardown symmetry, and the raccoon switch store's $DSH_HOME",
+  "segmentation.",
+  "restore health with the desktop runtime or `npm install -g @deepseek-ai/dsh`.",
+]);
+const { Context } = await loadPeer("cordis").catch(skipMissingPeer);
 
 // The Raccoon "second upstream provider" stores (ROADMAP §6.1): the switch's
 // state file is shared with the plugin's own instance through `$DSH_HOME`

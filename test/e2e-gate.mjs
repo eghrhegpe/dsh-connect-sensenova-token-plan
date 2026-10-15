@@ -10,14 +10,39 @@
  * e2e, and keeping e2e out of the default gate left that whole class unguarded
  * between manual runs.
  *
- * So the rule is: if the CLI is present, RUN the e2e and propagate its exit
- * code — a genuine failure fails the build. If it is absent, print a loud SKIP
- * and exit 0, because refusing to install dsh is not a regression. The skip is
- * surfaced on stderr precisely so it cannot pass unnoticed in a green run.
+ * So the rule is: if the CLI AND a complete runtime tree are present, RUN the
+ * e2e and propagate its exit code — a genuine failure fails the build. If
+ * either is missing, print a loud SKIP and exit 0, because refusing to install
+ * dsh is not a regression. The skip is surfaced through `env-skip.mjs`, which
+ * also writes the `[skip]` line on stdout so `run-all.mjs` can list what this
+ * run did NOT cover — a green summary that silently swallowed the boot would
+ * be the exact §30 failure this runner exists to remove.
+ *
+ * TWO preconditions, and the second is the one worth arguing for. `cliPresent()`
+ * alone used to be enough, until a machine showed up where the CLI was on PATH
+ * but its install tree carried no `@deepseek-ai/dsh-base`: the gate then booted
+ * the Host, watched 154 of its own plugins fail to import, and reported a
+ * FAILED run whose cause had nothing to do with this plugin. `test/e2e.mjs`
+ * already knows that shape (it prints "no CLI install tree to share" and boots
+ * anyway), so this gate asks the SAME question with the SAME function rather
+ * than inventing a second guess about what "complete" means — a divergent
+ * criterion is how a pre-check starts disagreeing with the thing it guards.
  */
 import { spawnSync } from "node:child_process";
+import { cliRuntimeModules } from "./peer-roots.mjs";
+import { envSkip } from "./env-skip.mjs";
 
 const DSH = process.env.DSH_CLI ?? "dsh";
+const NAME = "e2e-gate.mjs";
+
+/** What the run loses when this gate does not complete. See env-skip.mjs. */
+const COVERAGE = [
+  "NOT verified in this run: the real Host boot — plugin loader, route",
+  "registration, the same-origin trust fence, and the cordis.patch.yml hand-off.",
+  "This is the ONLY check that sees them: every offline suite stubs the network,",
+  "so the class of bug caught by e2e (a nested `auth:` block posting a REAL",
+  "login to the platform) is unguarded until this suite runs.",
+];
 
 function cliPresent() {
   // Ask the CLI itself rather than trusting PATH bookkeeping; `--version` is the
@@ -28,13 +53,27 @@ function cliPresent() {
 }
 
 if (!cliPresent()) {
-  process.stderr.write(
-    `\n[e2e] SKIPPED — the "${DSH}" CLI is not available on this machine.\n` +
-    `[e2e]   Install DSH or set DSH_CLI to run the end-to-end suite (npm run test:e2e).\n` +
-    `[e2e]   This is the only suite that boots a real Host; do not treat the green run\n` +
-    `[e2e]   above as having exercised the loader, routes, or trust fence.\n\n`
+  envSkip(
+    NAME,
+    `the "${DSH}" CLI is not available on this machine`,
+    [
+      ...COVERAGE,
+      "Install DSH or set DSH_CLI to exercise it (npm run test:e2e).",
+    ]
   );
-  process.exit(0);
+}
+
+if (cliRuntimeModules() === undefined) {
+  envSkip(
+    NAME,
+    `the "${DSH}" CLI is on PATH but its install tree has no complete @deepseek-ai runtime`,
+    [
+      ...COVERAGE,
+      `Install the runtime the CLI boots from: npm install -g @deepseek-ai/dsh`,
+      `(a CLI alone can start the Host but cannot resolve its own packages — see`,
+      `cliRuntimeModules() in peer-roots.mjs, the same test e2e.mjs applies).`,
+    ]
+  );
 }
 
 const run = spawnSync(process.execPath, ["test/e2e.mjs"], { stdio: "inherit" });

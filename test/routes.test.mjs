@@ -12,6 +12,7 @@
  * the form was then unreachable.
  */
 import { loadPeer, installNetworkGuard, isolateHostEnv, isolateStateDir } from "./peer-roots.mjs";
+import { skipOnMissingPeer, suiteName } from "./env-skip.mjs";
 import { createFileThrottleStore } from "../src/host/throttle-store.ts";
 import { RACCOON_CREDENTIAL_REF, serializeRaccoonCredential } from "../src/host/raccoon-store.ts";
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -22,7 +23,16 @@ const releaseNetworkGuard = installNetworkGuard();
 /** The host's own SenseNova keys must not steer a check. See isolateHostEnv. */
 const restoreHostEnv = isolateHostEnv();
 
-const { credentialKey } = await loadPeer("dsh-credentials");
+// Not installable here — it ships inside the DSH Host runtime — so a machine
+// without it skips loudly instead of failing (env-skip.mjs; a CI miss stays
+// red, because there the job installs the runtime).
+const skipMissingPeer = skipOnMissingPeer(suiteName(import.meta.url), [
+  "NOT verified in this run: the whole HTTP route family — snapshot / account /",
+  "api-key / provider / models / draw / raccoon — including the same-origin",
+  "trust fence and the 200-with-ok:false failure envelope.",
+  "restore health with the desktop runtime or `npm install -g @deepseek-ai/dsh`.",
+]);
+const { credentialKey } = await loadPeer("dsh-credentials").catch(skipMissingPeer);
 const { interpretSnapshot, decidePanelView } = await import("./panel-decision.js");
 
 /** After the peers are found: the throttle is real state, kept off the real Home. */
