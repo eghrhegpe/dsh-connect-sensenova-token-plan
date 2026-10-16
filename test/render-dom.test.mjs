@@ -1263,10 +1263,19 @@ function typeInto(input, value) {
   // And with a REAL translator the 48-hour clock must carry its date, not read as
   // a time later today — the bug `when()` was written for, now pinned through the
   // shipped dictionary rather than through a key-echoing `tt`.
+  // The same-day side must NOT be pinned with `inHours(1)`: after 23:00 local
+  // that crosses midnight, `when()` correctly switches to `MM-DD HH:mm`, and the
+  // bare `HH:mm` expectation went red for the last hour of every day (caught
+  // 2026-10-16 23:39 with `1h=10-17 00:39`, green again at 00:07 — a wall-clock
+  // flake of the same family as the seconds/ms bug above, this time in the
+  // fixture). Today's local NOON is the same calendar day at any run time —
+  // `when()` reads the day, not the future — so the exact reading "12:00" is
+  // assertable, which pins the branch harder than the shape-only regex did.
+  const noonToday = Math.floor(new Date().setHours(12, 0, 0, 0) / 1000);
   check("the date-aware clock formats a cross-day reset as MM-DD HH:mm",
     /^\d{2}-\d{2} \d{2}:\d{2}$/.test(panel.helpers.when(inHours(48)))
-      && /^\d{2}:\d{2}$/.test(panel.helpers.when(inHours(1))),
-    `48h=${panel.helpers.when(inHours(48))} 1h=${panel.helpers.when(inHours(1))}`);
+      && panel.helpers.when(noonToday) === "12:00",
+    `48h=${panel.helpers.when(inHours(48))} noon=${panel.helpers.when(noonToday)}`);
   pill.unmount();
 
   // One word for one window: the pill said 「本周」 while its own panel said
