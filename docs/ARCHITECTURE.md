@@ -103,6 +103,8 @@ client.js: interpretSnapshot(body) → {data, error}
 
 关键点：**HTTP 永远 200**，成败靠 body 里的 `ok` 与 `code` 区分；`auth` 块会随失败一起下发，所以连不上控制台时面板也能说出「令牌是否能自愈」。
 
+上图的驱动者只有面板——这在过去成立，因为聚合器唯一的消费者就是面板。0.6.x 之后注册 provider 是常驻执行通道，于是同一引擎多了一个无面板读者：`providerRefreshMinutes`（默认 15，0 关）在 effective provider 开关为 ON 时按低频定时驱动**同一个** `buildSnapshotBody`（共享 cache，面板开着时不产生双倍上游流量；每个 tick 先重读开关，关着的 Host 一个请求都不发）。实现见 `src/host/provider-refresh.ts`；配额维度随目录持久化（catalog.json v2），所以**重启路径**也不再需要面板在场才能继承 last-known 的阻断集。
+
 ---
 
 ## 4. 登录与令牌生命周期
