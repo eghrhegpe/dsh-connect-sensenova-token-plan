@@ -246,11 +246,11 @@ export const S = {
     background: "none", borderStyle: "none",
     color: "inherit", fontFamily: "inherit", fontSize: 12, lineHeight: "20px",
     whiteSpace: "nowrap", userSelect: "none",
-    // The MVP pill READS, it does not act (the expand-panel is still §6.3's
-    // next phase), so it promises no pointer rather than inviting a click that
-    // does nothing. The moment the panel lands this gives way to
-    // `cursor: "pointer"`, a real handler and a focus ring.
-    cursor: "default"
+    // `cursor: "pointer"` because the pill now ACTS: it toggles its quota panel.
+    // The focus ring is deliberately NOT suppressed — `outline` is left alone
+    // above, so the UA's own ring shows when a keyboard user tabs onto the
+    // trigger, and with no stylesheet there is no other way to give it one.
+    cursor: "pointer"
   },
   // The tier's whole job is the 7px dot (opencode-go's shape too): the reading
   // keeps the host's label ink so a routine 1% never shouts. `flexShrink: 0`
@@ -284,5 +284,61 @@ export const S = {
   // A window that is actually spent is an alarm, not a meter, so it is the one
   // tier that tints the reading as well as the dot — same ruling as
   // `statError` above: an exhausted quota must not read as a calm 100%.
-  pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" }
+  pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" },
+  // === the pill's expand panel: the SAME guest, one size up ================
+  // The 28px pill can carry a reading but not the figures behind it, so the
+  // details live in a popover over the composer. It stays a guest of the HOST's
+  // chrome rather than an import of this plugin's card: host tokens, host radii
+  // (8–10px, not the card's 12), and a 12px type scale that matches the pill's
+  // own rather than the card's 13. What it borrows from `cards.ts` is only the
+  // IDEA of a window row (label + bar + used/limit + reset); it deliberately
+  // does NOT borrow that card's 70/90 thresholds — two tiers disagreeing in one
+  // screenshot is worse than either.
+  //
+  // `bottom: "100%"` rather than `top: "100%"`: the composer row sits at the
+  // BOTTOM of the input box, so an upward popover never covers the draft the
+  // user is typing (and cannot be clipped by the input's own scroll). The host's
+  // `.uV2eYG_row` sets no `overflow`, so the absolutely-positioned child escapes
+  // it — verified against the shipped host CSS, which is why this needs no
+  // portal and no z-index fight with the input.
+  pillPopover: {
+    position: "absolute", bottom: "100%", right: 0, zIndex: 100,
+    // A hairline border and an opaque layer: the popover floats OVER the
+    // composer's own surface, so it cannot be translucent.
+    border: "1px solid var(--dsw-alias-border-l1)", borderRadius: 10,
+    background: "var(--dsw-alias-bg-layer-1)",
+    boxShadow: "0 6px 24px rgba(0, 0, 0, 0.18)",
+    // `min(320px, …)` because the popover is right-anchored in the composer and
+    // a narrow window would otherwise push it off-screen on the left; the
+    // `calc` leaves a 16px gutter against the viewport edge.
+    width: "min(320px, calc(100vw - 32px))",
+    padding: "10px 12px", marginBottom: 8,
+    textAlign: "left", color: "var(--dsw-alias-label-primary)",
+    fontSize: 12, lineHeight: "18px", fontFamily: "inherit",
+    boxSizing: "border-box"
+  },
+  // The trigger becomes the popover's anchor, so it is the one element in the
+  // toolbar that establishes a containing block. Without it the panel would be
+  // positioned against the whole composer row and pinned to ITS right edge.
+  pillPopoverAnchor: { position: "relative", display: "inline-flex" },
+  pillPopoverHead: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 8 },
+  pillPopoverTitle: { fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-label-primary)" },
+  pillPopoverPool: { color: "var(--dsw-alias-label-secondary)" },
+  pillPopoverStale: { color: "var(--dsw-alias-label-tertiary)" },
+  // One window per row: label + bar on the first line, the raw figures and the
+  // reset clock on the second. The figures are the reason the panel exists — the
+  // pill's percentages are rounded, and "1%" cannot answer "can I still run a
+  // long context request", which is the question that opens this panel.
+  pillPopoverRow: { padding: "6px 0" },
+  pillPopoverRowLine: { display: "flex", alignItems: "baseline", gap: 8 },
+  pillPopoverLabel: { fontSize: 12, color: "var(--dsw-alias-label-secondary)" },
+  pillPopoverFigure: { marginLeft: "auto", fontVariantNumeric: "tabular-nums", color: "var(--dsw-alias-label-primary)" },
+  pillPopoverBar: { height: 4, borderRadius: 2, margin: "2px 0 4px", overflow: "hidden", background: "var(--dsw-alias-bg-layer-2)" },
+  pillPopoverFill: { height: "100%", borderRadius: 2 },
+  pillPopoverFoot: { display: "flex", alignItems: "baseline", gap: 8, color: "var(--dsw-alias-label-tertiary)" },
+  pillPopoverReset: { marginLeft: "auto", fontVariantNumeric: "tabular-nums" },
+  // The Raccoon branch's single "window" is a stock, not a window: one figure,
+  // no bar, and the signed-in/signed-out fact beside it. Drawn as a row anyway
+  // so the two branches share one panel frame and one set of metrics.
+  pillPopoverNote: { marginTop: 8, color: "var(--dsw-alias-label-tertiary)" }
 };

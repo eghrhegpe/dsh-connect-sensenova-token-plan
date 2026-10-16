@@ -54,6 +54,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.raccoonPrefix": "浣熊",
 			"composer.raccoonTitle": "小浣熊积分余额",
 			"composer.balanceUnit": "分",
+			"composer.balanceLabel": "积分余额",
+			"composer.poolHit": "本模型计入此池",
+			"composer.poolShared": "本模型无专属池，按通用池计",
 			"composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
 			"composer.raccoonUnknown": "积分余额未知（见小浣熊 tab）",
 			"auth.title": "连接商汤控制台",
@@ -257,6 +260,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.raccoonPrefix": "Raccoon",
 			"composer.raccoonTitle": "Raccoon credit balance",
 			"composer.balanceUnit": "cr",
+			"composer.balanceLabel": "Credit balance",
+			"composer.poolHit": "this model draws from this pool",
+			"composer.poolShared": "no dedicated pool for this model — drawn from the general pool",
 			"composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
 			"composer.raccoonUnknown": "balance unknown (see the Raccoon tab)",
 			"auth.title": "Connect the SenseNova console",
@@ -1233,7 +1239,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				lineHeight: "20px",
 				whiteSpace: "nowrap",
 				userSelect: "none",
-				cursor: "default"
+				cursor: "pointer"
 			},
 			pillDot: {
 				width: 7,
@@ -1251,7 +1257,84 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			pillTierWarn: "var(--dsw-alias-state-warn-primary, #eab308)",
 			pillTierExhausted: "var(--dsw-alias-state-error-primary, #ef4444)",
 			pillTierUnknown: "var(--dsw-alias-label-tertiary, #9ca3af)",
-			pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" }
+			pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" },
+			pillPopover: {
+				position: "absolute",
+				bottom: "100%",
+				right: 0,
+				zIndex: 100,
+				border: "1px solid var(--dsw-alias-border-l1)",
+				borderRadius: 10,
+				background: "var(--dsw-alias-bg-layer-1)",
+				boxShadow: "0 6px 24px rgba(0, 0, 0, 0.18)",
+				width: "min(320px, calc(100vw - 32px))",
+				padding: "10px 12px",
+				marginBottom: 8,
+				textAlign: "left",
+				color: "var(--dsw-alias-label-primary)",
+				fontSize: 12,
+				lineHeight: "18px",
+				fontFamily: "inherit",
+				boxSizing: "border-box"
+			},
+			pillPopoverAnchor: {
+				position: "relative",
+				display: "inline-flex"
+			},
+			pillPopoverHead: {
+				display: "flex",
+				alignItems: "center",
+				gap: 6,
+				flexWrap: "wrap",
+				marginBottom: 8
+			},
+			pillPopoverTitle: {
+				fontSize: 12,
+				fontWeight: 600,
+				color: "var(--dsw-alias-label-primary)"
+			},
+			pillPopoverPool: { color: "var(--dsw-alias-label-secondary)" },
+			pillPopoverStale: { color: "var(--dsw-alias-label-tertiary)" },
+			pillPopoverRow: { padding: "6px 0" },
+			pillPopoverRowLine: {
+				display: "flex",
+				alignItems: "baseline",
+				gap: 8
+			},
+			pillPopoverLabel: {
+				fontSize: 12,
+				color: "var(--dsw-alias-label-secondary)"
+			},
+			pillPopoverFigure: {
+				marginLeft: "auto",
+				fontVariantNumeric: "tabular-nums",
+				color: "var(--dsw-alias-label-primary)"
+			},
+			pillPopoverBar: {
+				height: 4,
+				borderRadius: 2,
+				margin: "2px 0 4px",
+				overflow: "hidden",
+				background: "var(--dsw-alias-bg-layer-2)"
+			},
+			pillPopoverFill: {
+				height: "100%",
+				borderRadius: 2
+			},
+			pillPopoverFoot: {
+				display: "flex",
+				alignItems: "baseline",
+				gap: 8,
+				color: "var(--dsw-alias-label-tertiary)"
+			},
+			pillPopoverReset: {
+				marginLeft: "auto",
+				fontVariantNumeric: "tabular-nums"
+			},
+			pillPopoverNote: {
+				marginTop: 8,
+				color: "var(--dsw-alias-label-tertiary)"
+			}
 		};
 	}));
 
@@ -4138,6 +4221,38 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		return resetAt > now ? resetAt : null;
 	}
 	/**
+	* One window as a panel row: the label, a bar that carries the same share the
+	* pill's percentage rounds, the RAW figures, and the reset clock.
+	*
+	* Why the bar and the raw figures but no percentage: the pill already shows the
+	* rounded percentage, and a second rounded percentage beside it would be the
+	* same number twice. What the pill cannot show is the question that opens this
+	* panel — "1%" cannot say whether a long-context request still fits — so the
+	* row spends its width on used/limit instead.
+	*
+	* `aria` mirrors `cards.ts`'s progressbar: same role, same value triple, so a
+	* screen reader is told the same thing by both surfaces.
+	*/
+	function QuotaRow({ label, window, tt }) {
+		const limit = typeof window?.limit === "number" ? window.limit : 0;
+		const used = typeof window?.used === "number" ? window.used : 0;
+		const share = limit > 0 ? Math.min(100, used / limit * 100) : null;
+		const tier = tierOf(window);
+		const resetAt = resetFor(window?.resetAt ?? null, Date.now());
+		return h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, label), h("span", { style: S.pillPopoverFigure }, `${count(used)} / ${count(limit)}`)), h("div", {
+			style: S.pillPopoverBar,
+			role: "progressbar",
+			"aria-label": `${label} ${tt("pool.used")}`,
+			"aria-valuenow": share === null ? 0 : Math.round(share),
+			"aria-valuemin": 0,
+			"aria-valuemax": 100
+		}, share === null ? null : h("div", { style: {
+			...S.pillPopoverFill,
+			width: `${share}%`,
+			background: TIER_INK[tier]
+		} })), resetAt === null ? null : h("div", { style: S.pillPopoverFoot }, h("span", { style: S.pillPopoverReset }, format(tt("pool.reset"), { time: when(resetAt) }))));
+	}
+	/**
 	* The Raccoon gateway's balance reader: the same polling core the panel's
 	* snapshot reader uses, pointed at the plugin's OWN `/raccoon` route — which the
 	* Host already answers from a 5-minute cache, so a composer pill adds no gateway
@@ -4162,14 +4277,49 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			updatedAt
 		};
 	}
-	/** The shared shell: the tier dot, the reading, the plan prefix. */
+	/**
+	* The panel itself: a popover anchored to the pill, carrying the figures the
+	* pill cannot fit.
+	*
+	* It is a `<div role="dialog">` sibling of the trigger rather than its child: a
+	* dialog inside a `<button>` is invalid nesting (a button's content model is
+	* phrasing content, and interactive content inside it is worse), and the panel
+	* has its own rows. The anchor wrapper is a plain `<span>` for the same reason.
+	*
+	* No outside-click listener and no Escape handling, deliberately: this plugin
+	* injects no stylesheet and owns no document-level listener, so the only
+	* dismissal it can express is the trigger's own toggle. That is a constraint
+	* written down rather than an omission — see `styles.ts`'s popover note.
+	*
+	* The `id` lives HERE rather than on an extra wrapper: `aria-controls` has to
+	* resolve to the node that actually carries the panel, and one wrapper between
+	* the id and the panel would make the reference point at a bare wrapper.
+	*/
+	function QuotaPopover(props) {
+		const { tt, title, stale, poolLine, note, children } = props;
+		return h("div", {
+			className: "dsh-sensenova-composer-pill-popover",
+			id: POPOVER_ID,
+			role: "dialog",
+			"aria-label": title,
+			style: S.pillPopover
+		}, h("div", { style: S.pillPopoverHead }, h("span", { style: S.pillPopoverTitle }, title), poolLine === null ? null : h("span", { style: S.pillPopoverPool }, poolLine), stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null), children, note === null ? null : h("div", { style: S.pillPopoverNote }, note));
+	}
+	/** The shared shell: the tier dot, the reading, the plan prefix, the panel anchor. */
 	function PillBody(props) {
-		const { tt, planLabel, tier, children, stale = false, title } = props;
-		return h("button", {
+		const { tt, planLabel, tier, children, stale = false, title, open = false, onToggle, panel = null } = props;
+		return h("span", {
+			className: "dsh-sensenova-composer-pill-anchor",
+			style: S.pillPopoverAnchor
+		}, h("button", {
 			type: "button",
 			className: "dsh-sensenova-composer-pill",
 			title,
 			"aria-label": title,
+			"aria-expanded": open,
+			"aria-haspopup": "dialog",
+			"aria-controls": open ? POPOVER_ID : void 0,
+			onClick: onToggle,
 			style: S.pillTrigger
 		}, h("span", {
 			className: "dsh-sensenova-composer-pill-dot",
@@ -4184,7 +4334,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		}, `${planLabel} · `), h("span", {
 			className: "dsh-sensenova-composer-pill-text",
 			style: tier === "exhausted" ? S.pillTierExhaustedText : void 0
-		}, children, stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null));
+		}, children, stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null)), open && panel !== null ? panel : null);
 	}
 	/**
 	* The composer pill. Renders nothing unless the session's model belongs to this
@@ -4213,6 +4363,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	*/
 	function TokenPlanPill({ tt, model }) {
 		const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
+		const [open, setOpen] = useState(false);
+		const toggle = useCallback(() => setOpen((wasOpen) => !wasOpen), []);
 		const pool = poolFor(data?.pools?.pools ?? [], model, TOKEN_PLAN);
 		const w5 = pool?.window5h ?? null;
 		const w7 = pool?.window7d ?? null;
@@ -4229,12 +4381,40 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime).toLocaleString()}` : null,
 			stale ? tt("composer.stale") : null
 		].filter(Boolean).join(" · ");
+		const matched = model !== void 0 && pool !== void 0 ? Array.isArray(pool.modelIds) && pool.modelIds.includes(model) : false;
+		const poolLine = pool === void 0 ? null : `${String(pool.name ?? "")} · ${matched ? tt("composer.poolHit") : tt("composer.poolShared")}`;
+		const panel = pool === void 0 ? h(QuotaPopover, {
+			tt,
+			title: tt("composer.pillTitle"),
+			stale,
+			poolLine: null,
+			note: loadedOnce ? tt("composer.noPool") : "…",
+			children: null
+		}) : h(QuotaPopover, {
+			tt,
+			title: tt("composer.pillTitle"),
+			stale,
+			poolLine,
+			note: null,
+			children: [h(QuotaRow, {
+				label: tt("pool.window5h"),
+				window: w5,
+				tt
+			}), h(QuotaRow, {
+				label: tt("pool.window7d"),
+				window: w7,
+				tt
+			})]
+		});
 		return h(PillBody, {
 			tt,
 			planLabel: tt("composer.planPrefix"),
 			tier,
 			stale,
 			title,
+			open,
+			onToggle: toggle,
+			panel,
 			children: [
 				h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
 				" · ",
@@ -4254,6 +4434,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	*/
 	function RaccoonPill({ tt }) {
 		const { state, error, loadedOnce, updatedAt } = useRaccoonBalance();
+		const [open, setOpen] = useState(false);
+		const toggle = useCallback(() => setOpen((wasOpen) => !wasOpen), []);
 		const balance = balanceOf(state);
 		const stale = error !== null || updatedAt > 0 && Date.now() - updatedAt > 9e4;
 		const signedOut = state !== null && state.loggedIn !== true;
@@ -4265,16 +4447,27 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			stale ? tt("composer.stale") : null
 		].filter(Boolean).join(" · ");
 		const pending = !loadedOnce && balance === null;
+		const panel = h(QuotaPopover, {
+			tt,
+			title: tt("composer.raccoonTitle"),
+			stale: stale && loadedOnce,
+			poolLine: null,
+			note: signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
+			children: h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")), h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`)))
+		});
 		return h(PillBody, {
 			tt,
 			planLabel: tt("composer.raccoonPrefix"),
 			tier,
 			stale: stale && loadedOnce,
 			title,
+			open,
+			onToggle: toggle,
+			panel,
 			children: h("span", { style: S.pillReading }, pending ? "…" : reading)
 		});
 	}
-	var TOKEN_PLAN, RACCOON, RACCOON_POLL_MS, TIER_INK, STALE_AFTER_MS, RACCOON_ROUTE;
+	var TOKEN_PLAN, RACCOON, RACCOON_POLL_MS, POPOVER_ID, TIER_INK, STALE_AFTER_MS, RACCOON_ROUTE;
 	var init_composer_usage_pill = __esmMin((() => {
 		init_runtime();
 		init_styles();
@@ -4285,6 +4478,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		TOKEN_PLAN = "sensenova-token-plan";
 		RACCOON = "sensenova-raccoon";
 		RACCOON_POLL_MS = 6e4;
+		POPOVER_ID = "dsh-sensenova-composer-pill-popover";
 		TIER_INK = {
 			ok: S.pillTierOk,
 			warn: S.pillTierWarn,

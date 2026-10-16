@@ -797,6 +797,7 @@ function typeInto(input, value) {
   // a captured `host` would still point at the detached one and every later
   // assertion would silently read a dead tree.
   const plan = () => pill.host.querySelector(".dsh-sensenova-composer-pill-plan");
+  const trigger = () => pill.host.querySelector("button.dsh-sensenova-composer-pill");
   const body = () => pill.host.textContent;
   check("the Token Plan reading leads with its plan name",
     plan()?.textContent === "composer.planPrefix · ",
@@ -814,9 +815,13 @@ function typeInto(input, value) {
     css(plan(), "flexShrink") === "0",
     `flex-shrink=${css(plan(), "flexShrink")}`);
   // Position, not just presence: the plan name has to come BEFORE the figures,
-  // which is the whole point of the reference's `Go · `.
-  const order = [...pill.host.querySelectorAll("span")].findIndex((el) => el === plan());
-  const readingAt = [...pill.host.querySelectorAll("span")].findIndex((el) => el.textContent?.includes("composer.pool5h"));
+  // which is the whole point of the reference's `Go · `. Both are looked up
+  // among the trigger's OWN spans: the pill is now wrapped in an anchor element
+  // (§H), so a host-wide search would match that wrapper first and report every
+  // descendant as being "after" it.
+  const triggerSpans = [...trigger().querySelectorAll("span")];
+  const order = triggerSpans.findIndex((el) => el === plan());
+  const readingAt = triggerSpans.findIndex((el) => el.textContent?.includes("composer.pool5h"));
   check("the plan name precedes the figures, not trails them",
     order !== -1 && readingAt !== -1 && order < readingAt,
     `plan at ${order}, reading at ${readingAt}`);
@@ -851,6 +856,231 @@ function typeInto(input, value) {
     `text=${body().slice(0, 120)} dot=${css(signedOutDot, "background")}`);
 
   pill.unmount();
+}
+
+// === H. the pill EXPANDS into the figures it cannot fit (2026-10-16) ========
+// The reported gap: 「没有点击弹窗，显示准确的额度卡」 — the pill reads a rounded
+// percentage, and "1%" cannot answer the question that makes a user open
+// anything: can I still afford a long-context request before this window rolls?
+// So the panel spends its width on the RAW figures (used/limit), the exact reset
+// clock, and the pool attribution — and deliberately does NOT repeat the pill's
+// rounded percentage, which would be the same number twice.
+//
+// Three structural claims are pinned here, each of which could silently rot:
+//   1. the trigger is a real toggle (aria-expanded + aria-controls + a second
+//      click closes) — a panel with no way back is a trap;
+//   2. the panel is the pill's SIBLING inside an anchor, not its child: a
+//      `<div role="dialog">` inside a `<button>` is invalid nesting, and the
+//      absolute positioning needs a containing block that is not the button's
+//      own padding box;
+//   3. a provider switch UNMOUNTS the panel with the inner pill, so a panel can
+//      never outlive the model whose quota it was quoting.
+{
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const okSnapshot = {
+    ok: true,
+    pools: {
+      pools: [{
+        id: "p1", name: "通用池", poolType: "default",
+        // `used`/`limit` chosen so `count()` shows the separator rule on BOTH
+        // sides of the ratio — the panel is where raw figures live, so this is
+        // exactly where a comma-less 1.25M would ship wrong.
+        window5h: { limit: 1_250_000, used: 12_500, remaining: 1_237_500, resetAt: Date.now() + 2 * 3_600_000 },
+        window7d: { limit: 60_000_000, used: 1_200_000, remaining: 58_800_000 }
+      }]
+    },
+    trend: { hours: 24, models: [] }
+  };
+  let raccoonState = { ok: true, loggedIn: true, balance: 42150 };
+  const routes = [];
+  win.fetch = (path) => {
+    routes.push(path);
+    const body = path === RACCOON_PATH ? raccoonState : okSnapshot;
+    return new Promise((resolve) => setTimeout(
+      () => resolve({ ok: true, status: 200, json: async () => body }), 0));
+  };
+  const selection = { next: { provider: "sensenova-token-plan", model: "deepseek-v4-flash" } };
+  const useProjection = () => { React.useState(selection); return selection; };
+  let pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+
+  const button = () => pill.host.querySelector("button.dsh-sensenova-composer-pill");
+  const panelNode = () => pill.host.querySelector(".dsh-sensenova-composer-pill-popover");
+  const click = async (el) => {
+    await act(async () => { el.dispatchEvent(new win.MouseEvent("click", { bubbles: true })); });
+    await act(async () => { await sleep(0); });
+  };
+
+  // Closed to begin with, and the trigger does not name a panel that is absent.
+  check("the panel starts closed and the trigger claims no panel id yet",
+    panelNode() === null && button()?.getAttribute("aria-expanded") === "false"
+      && button()?.getAttribute("aria-controls") === null,
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")} controls=${button()?.getAttribute("aria-controls")}`);
+
+  await click(button());
+  const openPanel = panelNode();
+  const openText = pill.host.textContent;
+  check("one click opens the quota panel",
+    openPanel !== null && button()?.getAttribute("aria-expanded") === "true",
+    `panel=${openPanel !== null} expanded=${button()?.getAttribute("aria-expanded")} text=${openText.slice(0, 200)}`);
+  check("the trigger names the panel it controls, and that id resolves to the node",
+    button()?.getAttribute("aria-controls") === openPanel?.id && typeof openPanel?.id === "string" && openPanel.id !== "",
+    `aria-controls=${button()?.getAttribute("aria-controls")} panel id=${JSON.stringify(openPanel?.id)}`);
+  check("the panel announces itself as a dialog owned by the trigger",
+    openPanel?.getAttribute("role") === "dialog"
+      && button()?.getAttribute("aria-haspopup") === "dialog"
+      && openPanel?.getAttribute("aria-label")?.includes("composer.pillTitle") === true,
+    `role=${openPanel?.getAttribute("role")} haspopup=${button()?.getAttribute("aria-haspopup")} label=${openPanel?.getAttribute("aria-label")}`);
+
+  // The panel is the pill's SIBLING inside the anchor — never inside the button.
+  // Invalid nesting is one thing; the containing block matters more: an
+  // absolutely-positioned child of the button would be positioned against the
+  // button's own padding box and its 320px width would blow the toolbar open.
+  check("the panel is a sibling of the trigger, not a child of the button",
+    openPanel !== null && button()?.contains(openPanel) === false
+      && openPanel?.parentElement === button()?.parentElement
+      && css(openPanel?.parentElement, "position") === "relative",
+    `inside button=${button()?.contains(openPanel)} same parent=${openPanel?.parentElement === button()?.parentElement} anchor position=${css(openPanel?.parentElement, "position")}`);
+
+  // The panel's OWN text, not the host's: the trigger's rounded percentages sit
+  // in the same container, so asserting against `host.textContent` would fail on
+  // the pill's own reading rather than on anything the panel drew.
+  const panelText = () => openPanel?.textContent ?? "";
+  check("the panel shows each window's raw used/limit, not the rounded percent again",
+    panelText().includes("12,500 / 1,250,000") && panelText().includes("1,200,000 / 60,000,000"),
+    `panel text=${panelText().slice(0, 320)}`);
+  check("the panel does not repeat the pill's rounded percentage",
+    !panelText().includes("composer.pool5h") && !panelText().includes("composer.pool7d"),
+    `panel text=${panelText().slice(0, 320)}`);
+  // The 5h window carries a reset instant; the 7d one does not in this fixture,
+  // so exactly ONE reset line may appear — a second one would mean a clock is
+  // being drawn where the platform declared none.
+  check("the exact reset clock is drawn only where the platform declared one",
+    (panelText().match(/pool\.reset/g) ?? []).length === 1,
+    `reset lines=${(panelText().match(/pool\.reset/g) ?? []).length} text=${panelText().slice(0, 320)}`);
+
+  // Pool attribution: this model names no pool, so the panel must SAY it is
+  // billed from the general pool rather than let the reader assume a dedicated
+  // one. The name rides beside that fact, not instead of it.
+  check("the panel names the pool and how the model was attributed to it",
+    panelText().includes("通用池 · composer.poolShared") && !panelText().includes("composer.poolHit"),
+    `panel text=${panelText().slice(0, 200)}`);
+
+  // The bar carries the SAME tier ink the pill's dot does — one threshold for
+  // one plugin (80% warn), NOT `cards.ts`'s 70/90: two tiers disagreeing inside
+  // one screenshot is worse than either number.
+  const fills = [...(openPanel?.querySelectorAll("div") ?? [])].filter((el) => el.style.width !== "");
+  check("each window's bar is filled with the shared tier ink, not a plugin hex",
+    fills.length === 2 && fills.every((el) => css(el, "background").startsWith("var(--dsw-alias-state-")),
+    `fills=${fills.map((el) => `${el.style.width}/${css(el, "background")}`).join(" ")}`);
+  const bars = [...(openPanel?.querySelectorAll("[role='progressbar']") ?? [])];
+  check("the bars are reachable by assistive tech, sized to the value they draw",
+    bars.length === 2 && bars.every((bar) => bar.getAttribute("aria-valuemax") === "100"
+      && Number(bar.getAttribute("aria-valuenow")) >= 0 && bar.querySelector("div") !== null),
+    `bars=${bars.map((bar) => `${bar.getAttribute("aria-valuenow")}/${bar.querySelector("div") === null ? "no fill" : "fill"}`).join(",")}`);
+
+  // The host chrome, at the host's scale: the popover floats ABOVE the composer
+  // (the row sits at the input's bottom, so a downward panel would cover the
+  // draft), it is opaque (it floats over the input's own surface), and it uses
+  // the shell's tokens so a retheme reaches it.
+  check("the panel floats above the composer row instead of covering the draft",
+    css(openPanel, "position") === "absolute" && css(openPanel, "bottom") === "100%"
+      && Number.parseInt(css(openPanel, "zIndex"), 10) >= 100,
+    `position=${css(openPanel, "position")} bottom=${css(openPanel, "bottom")} z-index=${css(openPanel, "zIndex")}`);
+  check("the panel is opaque and wears the shell's own border and surface tokens",
+    css(openPanel, "background").startsWith("var(--dsw-alias-bg-layer-1")
+      && css(openPanel, "border").includes("var(--dsw-alias-border-l1"),
+    `background=${css(openPanel, "background")} border=${css(openPanel, "border")}`);
+  check("the panel fits a narrow viewport instead of running off the left edge",
+    /100vw/.test(css(openPanel, "width")) && css(openPanel, "width").startsWith("min("),
+    `width=${css(openPanel, "width")}`);
+  // A trigger that promises no pointer reads as broken the moment it acts.
+  check("the trigger offers a pointer now that it acts",
+    css(button(), "cursor") === "pointer",
+    `cursor=${css(button(), "cursor")}`);
+
+  // Re-clicking closes it — the ONLY dismissal this plugin can express (no
+  // stylesheet, no document-level listener, so no outside-click and no Escape).
+  await click(button());
+  check("a second click closes the panel and leaves no node behind",
+    panelNode() === null && button()?.getAttribute("aria-expanded") === "false"
+      && button()?.getAttribute("aria-controls") === null,
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")} controls=${button()?.getAttribute("aria-controls")}`);
+
+  // Toggling is pure UI state: opening must not fetch. The request log is the
+  // proof, because "no extra fetch" is otherwise invisible — the panel reads the
+  // numbers already on screen.
+  const fetchesBeforeToggles = routes.length;
+  await click(button());
+  await click(button());
+  check("opening the panel costs no request (it reads what the pill already polled)",
+    routes.length === fetchesBeforeToggles,
+    `${routes.length - fetchesBeforeToggles} new request(s)`);
+
+  // A provider switch unmounts the inner pill, so the panel goes with it. The
+  // panel quotes ONE model's quota; left mounted it would keep showing figures
+  // for a model the session no longer points at — the exact confusion the panel
+  // exists to prevent.
+  selection.next = { provider: "sensenova-raccoon", model: "sn-sensenova-6-8-flash" };
+  pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  check("switching provider takes the Token Plan panel down with the pill",
+    panelNode() === null && button()?.getAttribute("aria-expanded") === "false",
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")} text=${pill.host.textContent.slice(0, 160)}`);
+
+  // The Raccoon panel is a STOCK, not a window: one figure, no bar, no borrowed
+  // pool. It reuses the same frame so the two branches read as one widget.
+  await click(button());
+  const raccoonPanel = panelNode();
+  const raccoonText = pill.host.textContent;
+  check("the Raccoon panel shows the balance and invents no window for it",
+    raccoonPanel !== null && raccoonText.includes("42,150 composer.balanceUnit")
+      && !raccoonText.includes("pool.window5h") && !raccoonText.includes("pool.window7d")
+      && raccoonPanel?.querySelectorAll("[role='progressbar']").length === 0,
+    `panel=${raccoonPanel !== null} text=${raccoonText.slice(0, 240)}`);
+  check("the Raccoon panel borrows no Token Plan pool line",
+    !raccoonText.includes("通用池") && raccoonText.includes("composer.raccoonTitle"),
+    `text=${raccoonText.slice(0, 240)}`);
+  await click(button());
+  check("the Raccoon panel closes on a second click too",
+    panelNode() === null && button()?.getAttribute("aria-expanded") === "false",
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")}`);
+
+  // Signed out: the panel must state the FACT (and where to fix it) rather than
+  // show a dash with nothing behind it. Reached by remount, as in §E/§G:
+  // polling reloads on a cadence, not per render.
+  raccoonState = { ok: true, loggedIn: false };
+  pill.unmount();
+  pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  await click(button());
+  const signedOutPanelText = panelNode()?.textContent ?? "";
+  check("a signed-out Raccoon session's panel says so instead of showing a dash",
+    panelNode() !== null && signedOutPanelText.includes("composer.raccoonSignedOut")
+      && !/\d/.test(signedOutPanelText),
+    `panel text=${signedOutPanelText.slice(0, 200)}`);
+  pill.unmount();
+
+  // A Token Plan answer with NO pool must not render borrowed rows: the panel
+  // says the model is outside the pools, and draws no window for a pool that
+  // does not exist.
+  selection.next = { provider: "sensenova-token-plan", model: "sn-unknown-model" };
+  win.fetch = (path) => Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => path === RACCOON_PATH ? raccoonState : { ok: true, pools: { pools: [] }, trend: { hours: 24, models: [] } }
+  });
+  pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  await click(button());
+  const emptyPanelText = panelNode()?.textContent ?? "";
+  check("a Token Plan model with no pool in the answer gets no invented quota rows",
+    panelNode() !== null && panelNode()?.querySelector("[role='progressbar']") === null
+      && emptyPanelText.includes("composer.noPool"),
+    `panel text=${emptyPanelText.slice(0, 200)}`);
+
+  pill.unmount();
+  check("unmounting the pill with its panel open leaves nothing behind", pill.host.childNodes.length === 0);
 }
 
 console.log(JSON.stringify(results, null, 2));

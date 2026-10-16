@@ -53,6 +53,9 @@ export const zh = {
   // The unit rides the number rather than standing alone: "浣熊 · 4,215 分"
   // reads as a quantity, "浣熊 · 4,215" as an id.
   "composer.balanceUnit": "分",
+  "composer.balanceLabel": "积分余额",
+  "composer.poolHit": "本模型计入此池",
+  "composer.poolShared": "本模型无专属池，按通用池计",
   "composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
   "composer.raccoonUnknown": "积分余额未知（见小浣熊 tab）",
   "auth.title": "连接商汤控制台",
@@ -275,6 +278,9 @@ export const en: typeof zh = {
   "composer.raccoonPrefix": "Raccoon",
   "composer.raccoonTitle": "Raccoon credit balance",
   "composer.balanceUnit": "cr",
+  "composer.balanceLabel": "Credit balance",
+  "composer.poolHit": "this model draws from this pool",
+  "composer.poolShared": "no dedicated pool for this model — drawn from the general pool",
   "composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
   "composer.raccoonUnknown": "balance unknown (see the Raccoon tab)",
   "auth.title": "Connect the SenseNova console",

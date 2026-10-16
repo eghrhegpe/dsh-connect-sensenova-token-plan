@@ -56,10 +56,21 @@
  *
  * 返赠余额（`grantBalance`）不进胶囊：它是独立口径（30 天有效、不占滚动窗口），
  * 塞进百分比会混淆「窗口消耗」与「可用余额」——它属于插件卡「积分额度」tab。
+ *
+ * **展开面板**（2026-10-16 落地）：胶囊点一下展开额度卡，画的是胶囊**装不下**的
+ * 东西——每个窗口的原始 used/limit、精确重置时刻（`when`，跨日带日期）、以及
+ * 「本模型计入哪个池 / 因无专属池按通用池计」。不放百分比：胶囊已经有四舍五入后的
+ * 百分比，再来一个是同一个数字说两遍；开面板要回答的是「1% 还够不够跑一次长上下文」，
+ * 那个问题只有原始数字答得了。分级阈值与胶囊同一个 `tierOf`（80 黄 / 100 红），
+ * **不**抄 `cards.ts` 的 70/90——同一屏里两套阈值互相打脸比任何一套都糟。
+ *
+ * 关闭方式只有「再点一次胶囊」，这是约束不是省略：本插件不注入样式表、不持有
+ * document 级监听（点外部关闭与 Esc 都要监听器 + 焦点管理）。开合状态放在**内层**
+ * 组件里，所以切模型会连面板一起卸载——面板永远不可能显示上一个模型的额度。
  */
-import { h } from "./runtime.ts";
+import { h, useCallback, useState } from "./runtime.ts";
 import { S } from "./styles.ts";
-import { count } from "./format.ts";
+import { count, format, when } from "./format.ts";
 import { RACCOON_PATH } from "./const.ts";
 import { useRemoteRead, type RemoteRead, type RemoteRoute } from "./use-remote-read.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
@@ -88,6 +99,17 @@ const RACCOON = "sensenova-raccoon";
  * where a real figure is one poll away.
  */
 const RACCOON_POLL_MS = 60_000;
+
+/**
+ * The popover's DOM id, so the trigger's `aria-controls` can name it.
+ *
+ * A constant, not a generated one: only ONE pill is mounted at a time (the
+ * outer gate picks exactly one inner pill), so a fixed id is unique by
+ * construction, and a fixed string is something a test can assert. A generated
+ * id would need a `useId` call in the inner component — harmless, but it buys
+ * uniqueness this component does not need and costs a hook it does not use.
+ */
+const POPOVER_ID = "dsh-sensenova-composer-pill-popover";
 
 /** The slice of the `modelSelection` projection this decision needs. */
 export interface ModelSelectionLike {
@@ -229,6 +251,62 @@ interface ActivePillProps {
 }
 
 /**
+ * One window as a panel row: the label, a bar that carries the same share the
+ * pill's percentage rounds, the RAW figures, and the reset clock.
+ *
+ * Why the bar and the raw figures but no percentage: the pill already shows the
+ * rounded percentage, and a second rounded percentage beside it would be the
+ * same number twice. What the pill cannot show is the question that opens this
+ * panel — "1%" cannot say whether a long-context request still fits — so the
+ * row spends its width on used/limit instead.
+ *
+ * `aria` mirrors `cards.ts`'s progressbar: same role, same value triple, so a
+ * screen reader is told the same thing by both surfaces.
+ */
+function QuotaRow({ label, window, tt }: { label: string; window: QuotaWindowData | null; tt: Tt }) {
+  const limit = typeof window?.limit === "number" ? window.limit : 0;
+  const used = typeof window?.used === "number" ? window.used : 0;
+  // Unknown is a zero-width bar, never a full one: a limit the platform did not
+  // declare must not read as "spent".
+  const share = limit > 0 ? Math.min(100, (used / limit) * 100) : null;
+  const tier = tierOf(window);
+  const resetAt = resetFor(window?.resetAt ?? null, Date.now());
+  return h(
+    "div",
+    { style: S.pillPopoverRow },
+    h(
+      "div",
+      { style: S.pillPopoverRowLine },
+      h("span", { style: S.pillPopoverLabel }, label),
+      h("span", { style: S.pillPopoverFigure }, `${count(used)} / ${count(limit)}`)
+    ),
+    h(
+      "div",
+      {
+        style: S.pillPopoverBar,
+        role: "progressbar",
+        "aria-label": `${label} ${tt("pool.used")}`,
+        "aria-valuenow": share === null ? 0 : Math.round(share),
+        "aria-valuemin": 0,
+        "aria-valuemax": 100
+      },
+      // A bar with no known share draws no fill at all, rather than a 0-width
+      // child that a stray `min-width` in some engine would paint as a nub.
+      share === null ? null : h("div", { style: { ...S.pillPopoverFill, width: `${share}%`, background: TIER_INK[tier] } })
+    ),
+    // `when`, not a bare clock: the weekly reset can land on another day, and
+    // "重置 08:00" reads as later today — wrong, and alarming next to a 1% pill.
+    resetAt === null
+      ? null
+      : h(
+          "div",
+          { style: S.pillPopoverFoot },
+          h("span", { style: S.pillPopoverReset }, format(tt("pool.reset"), { time: when(resetAt) }))
+        )
+  );
+}
+
+/**
  * How one `/raccoon` answer becomes a reading.
  *
  * The route answers `ok:false` for every EXPECTED failure (signed out, gateway
@@ -273,7 +351,48 @@ function useRaccoonBalance(defaultCadenceMs = RACCOON_POLL_MS) {
   return { state: data, error, loadedOnce, updatedAt };
 }
 
-/** The shared shell: the tier dot, the reading, the plan prefix. */
+/**
+ * The panel itself: a popover anchored to the pill, carrying the figures the
+ * pill cannot fit.
+ *
+ * It is a `<div role="dialog">` sibling of the trigger rather than its child: a
+ * dialog inside a `<button>` is invalid nesting (a button's content model is
+ * phrasing content, and interactive content inside it is worse), and the panel
+ * has its own rows. The anchor wrapper is a plain `<span>` for the same reason.
+ *
+ * No outside-click listener and no Escape handling, deliberately: this plugin
+ * injects no stylesheet and owns no document-level listener, so the only
+ * dismissal it can express is the trigger's own toggle. That is a constraint
+ * written down rather than an omission — see `styles.ts`'s popover note.
+ *
+ * The `id` lives HERE rather than on an extra wrapper: `aria-controls` has to
+ * resolve to the node that actually carries the panel, and one wrapper between
+ * the id and the panel would make the reference point at a bare wrapper.
+ */
+function QuotaPopover(props: { tt: Tt; title: string; stale: boolean; poolLine: string | null; note: string | null; children?: unknown }) {
+  const { tt, title, stale, poolLine, note, children } = props;
+  return h(
+    "div",
+    {
+      className: "dsh-sensenova-composer-pill-popover",
+      id: POPOVER_ID,
+      role: "dialog",
+      "aria-label": title,
+      style: S.pillPopover
+    },
+    h(
+      "div",
+      { style: S.pillPopoverHead },
+      h("span", { style: S.pillPopoverTitle }, title),
+      poolLine === null ? null : h("span", { style: S.pillPopoverPool }, poolLine),
+      stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null
+    ),
+    children,
+    note === null ? null : h("div", { style: S.pillPopoverNote }, note)
+  );
+}
+
+/** The shared shell: the tier dot, the reading, the plan prefix, the panel anchor. */
 function PillBody(props: {
   tt: Tt;
   planLabel: string;
@@ -281,48 +400,64 @@ function PillBody(props: {
   children?: unknown;
   stale?: boolean;
   title: string;
+  open?: boolean;
+  onToggle: () => void;
+  panel?: unknown;
 }) {
-  const { tt, planLabel, tier, children, stale = false, title } = props;
+  const { tt, planLabel, tier, children, stale = false, title, open = false, onToggle, panel = null } = props;
   return h(
-    "button",
-    {
-      type: "button",
-      // The class survives as the test selector (`render-dom.test.mjs` queries
-      // it) — and as nothing else: this plugin injects no stylesheet, so a
-      // className is a hook for tests and an eyesore for the author. Everything
-      // the pill LOOKS like is the inline style below.
-      className: "dsh-sensenova-composer-pill",
-      title,
-      "aria-label": title,
-      style: S.pillTrigger
-    },
-    h("span", {
-      className: "dsh-sensenova-composer-pill-dot",
-      "aria-hidden": "true",
-      style: { ...S.pillDot, background: TIER_INK[tier] }
-    }),
-    // The plan name: which quota the numbers below belong to. Rendered as its
-    // own span so it can be tinted/weighted on its own later without touching
-    // the reading (opencode-go wraps its `Go · ` in `css.brand` for the same
-    // reason).
+    "span",
+    { className: "dsh-sensenova-composer-pill-anchor", style: S.pillPopoverAnchor },
     h(
-      "span",
-      { className: "dsh-sensenova-composer-pill-plan", style: S.pillPlan },
-      `${planLabel} · `
-    ),
-    h(
-      "span",
+      "button",
       {
-        className: "dsh-sensenova-composer-pill-text",
-        // Only an EXHAUSTED window tints the text. Everything else stays in
-        // the host's label ink, which is what makes a 1% pill quiet: if the
-        // percentages wore tier colour, a healthy reading would be as loud as
-        // the model picker's own chrome.
-        style: tier === "exhausted" ? S.pillTierExhaustedText : undefined
+        type: "button",
+        // The class survives as the test selector (`render-dom.test.mjs` queries
+        // it) — and as nothing else: this plugin injects no stylesheet, so a
+        // className is a hook for tests and an eyesore for the author. Everything
+        // the pill LOOKS like is the inline style below.
+        className: "dsh-sensenova-composer-pill",
+        title,
+        "aria-label": title,
+        "aria-expanded": open,
+        // `aria-haspopup: "dialog"` says the trigger OWNS a panel (not a menu, so
+        // arrow-key navigation is not promised), and `aria-controls` points at
+        // the panel's id only when it is mounted — pointing at a missing node is
+        // a broken reference, so the attribute is conditional.
+        "aria-haspopup": "dialog",
+        "aria-controls": open ? POPOVER_ID : undefined,
+        onClick: onToggle,
+        style: S.pillTrigger
       },
-      children,
-      stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null
-    )
+      h("span", {
+        className: "dsh-sensenova-composer-pill-dot",
+        "aria-hidden": "true",
+        style: { ...S.pillDot, background: TIER_INK[tier] }
+      }),
+      // The plan name: which quota the numbers below belong to. Rendered as its
+      // own span so it can be tinted/weighted on its own later without touching
+      // the reading (opencode-go wraps its `Go · ` in `css.brand` for the same
+      // reason).
+      h(
+        "span",
+        { className: "dsh-sensenova-composer-pill-plan", style: S.pillPlan },
+        `${planLabel} · `
+      ),
+      h(
+        "span",
+        {
+          className: "dsh-sensenova-composer-pill-text",
+          // Only an EXHAUSTED window tints the text. Everything else stays in
+          // the host's label ink, which is what makes a 1% pill quiet: if the
+          // percentages wore tier colour, a healthy reading would be as loud as
+          // the model picker's own chrome.
+          style: tier === "exhausted" ? S.pillTierExhaustedText : undefined
+        },
+        children,
+        stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null
+      )
+    ),
+    open && panel !== null ? panel : null
   );
 }
 
@@ -355,6 +490,14 @@ export function ComposerUsagePill(props: ComposerPillProps) {
  */
 function TokenPlanPill({ tt, model }: ActivePillProps) {
   const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
+  // The panel's open state lives HERE, in the inner component, not in the outer
+  // gate: an outer `open` flag would make `ComposerUsagePill` return one of
+  // three shapes and could reintroduce the hook-count drift §6.3 ruled out. A
+  // switch to a Raccoon model unmounts this whole component, so the panel
+  // cannot outlive the model whose quota it was quoting — which is the correct
+  // default and needs no listener to enforce it.
+  const [open, setOpen] = useState(false);
+  const toggle = useCallback(() => setOpen((wasOpen) => !wasOpen), []);
   const pools = data?.pools?.pools ?? [];
   const pool = poolFor(pools, model, TOKEN_PLAN);
   const w5 = pool?.window5h ?? null;
@@ -376,12 +519,51 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
     .filter(Boolean)
     .join(" · ");
 
+  // Which pool's windows the model draws from, and HOW it got there — a model
+  // that names its pool and one that falls back to the general pool are billing
+  // differently even when the numbers match, and the panel is where that
+  // distinction has room to be said out loud.
+  const matched =
+    model !== undefined && pool !== undefined
+      ? Array.isArray(pool.modelIds) && pool.modelIds.includes(model)
+      : false;
+  const poolLine = pool === undefined
+    ? null
+    : `${String(pool.name ?? "")} · ${matched ? tt("composer.poolHit") : tt("composer.poolShared")}`;
+  // The pool-less case still gets the FRAME, not a bare note: a panel that
+  // changes shape when the model has no pool teaches the reader two layouts, and
+  // `role="dialog"` / `aria-controls` must describe the same node in both.
+  const panel =
+    pool === undefined
+      ? h(QuotaPopover, {
+          tt,
+          title: tt("composer.pillTitle"),
+          stale,
+          poolLine: null,
+          note: loadedOnce ? tt("composer.noPool") : "…",
+          children: null
+        })
+      : h(QuotaPopover, {
+          tt,
+          title: tt("composer.pillTitle"),
+          stale,
+          poolLine,
+          note: null,
+          children: [
+            h(QuotaRow, { label: tt("pool.window5h"), window: w5, tt }),
+            h(QuotaRow, { label: tt("pool.window7d"), window: w7, tt })
+          ]
+        });
+
   return h(PillBody, {
     tt,
     planLabel: tt("composer.planPrefix"),
     tier,
     stale,
     title,
+    open,
+    onToggle: toggle,
+    panel,
     children: [
       h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
       " · ",
@@ -402,6 +584,8 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
  */
 function RaccoonPill({ tt }: { tt: Tt }) {
   const { state, error, loadedOnce, updatedAt } = useRaccoonBalance();
+  const [open, setOpen] = useState(false);
+  const toggle = useCallback(() => setOpen((wasOpen) => !wasOpen), []);
   const balance = balanceOf(state);
   const now = Date.now();
   const stale = error !== null || (updatedAt > 0 && now - updatedAt > STALE_AFTER_MS);
@@ -422,12 +606,36 @@ function RaccoonPill({ tt }: { tt: Tt }) {
   // missing (signed out vs unreadable), or the reader is back to guessing.
   const pending = !loadedOnce && balance === null;
 
+  const panel = h(QuotaPopover, {
+    tt,
+    title: tt("composer.raccoonTitle"),
+    stale: stale && loadedOnce,
+    // The Raccoon gateway declares no pool and no window: there is nothing to
+    // attribute the stock to, so the pool line stays absent rather than being
+    // filled with a borrowed Token Plan pool.
+    poolLine: null,
+    note: signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
+    children: h(
+      "div",
+      { style: S.pillPopoverRow },
+      h(
+        "div",
+        { style: S.pillPopoverRowLine },
+        h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")),
+        h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`)
+      )
+    )
+  });
+
   return h(PillBody, {
     tt,
     planLabel: tt("composer.raccoonPrefix"),
     tier,
     stale: stale && loadedOnce,
     title,
+    open,
+    onToggle: toggle,
+    panel,
     children: h("span", { style: S.pillReading }, pending ? "…" : reading)
   });
 }
