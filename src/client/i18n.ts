@@ -37,7 +37,12 @@ export const zh = {
   "panel.shapeDrift": "上游返回的结构可能有变：{detail}",
   "composer.pillTitle": "商汤 Token Plan 额度",
   "composer.pool5h": "5 小时",
-  "composer.pool7d": "本周",
+  // 「每周」 not 「本周」: the window ROLLS, so 「本周」 (this week) names a
+  // calendar week the platform never promised. One word for one window — this
+  // key used to say 本周 while the panel's `pool.window7d` said 每周, and the
+  // pill plus its own panel disagreeing about which week they mean is a question
+  // nobody should have to ask. Same length, so the pill's density is unchanged.
+  "composer.pool7d": "每周",
   "composer.stale": "上次数据",
   "composer.noPool": "该模型不在 Token Plan 额度池内（余额见小浣熊 tab）",
   "composer.resetAt": "重置于",
@@ -54,6 +59,10 @@ export const zh = {
   // reads as a quantity, "浣熊 · 4,215" as an id.
   "composer.balanceUnit": "分",
   "composer.balanceLabel": "积分余额",
+  // The heading over the gateway's own split of the total. It exists so the
+  // parts read as a composition OF the balance above them, not as three more
+  // unrelated figures.
+  "composer.balanceParts": "余额构成",
   "composer.poolHit": "本模型计入此池",
   "composer.poolShared": "本模型无专属池，按通用池计",
   "composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
@@ -270,7 +279,7 @@ export const en: typeof zh = {
   "panel.shapeDrift": "The upstream payload shape may have changed: {detail}",
   "composer.pillTitle": "SenseNova Token Plan quota",
   "composer.pool5h": "5h",
-  "composer.pool7d": "week",
+  "composer.pool7d": "weekly",
   "composer.stale": "stale data",
   "composer.noPool": "not in a Token Plan quota pool (balance in the Raccoon tab)",
   "composer.resetAt": "resets at",
@@ -279,6 +288,7 @@ export const en: typeof zh = {
   "composer.raccoonTitle": "Raccoon credit balance",
   "composer.balanceUnit": "cr",
   "composer.balanceLabel": "Credit balance",
+  "composer.balanceParts": "Balance breakdown",
   "composer.poolHit": "this model draws from this pool",
   "composer.poolShared": "no dedicated pool for this model — drawn from the general pool",
   "composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",

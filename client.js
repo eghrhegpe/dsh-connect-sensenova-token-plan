@@ -46,7 +46,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"panel.shapeDrift": "上游返回的结构可能有变：{detail}",
 			"composer.pillTitle": "商汤 Token Plan 额度",
 			"composer.pool5h": "5 小时",
-			"composer.pool7d": "本周",
+			"composer.pool7d": "每周",
 			"composer.stale": "上次数据",
 			"composer.noPool": "该模型不在 Token Plan 额度池内（余额见小浣熊 tab）",
 			"composer.resetAt": "重置于",
@@ -55,6 +55,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.raccoonTitle": "小浣熊积分余额",
 			"composer.balanceUnit": "分",
 			"composer.balanceLabel": "积分余额",
+			"composer.balanceParts": "余额构成",
 			"composer.poolHit": "本模型计入此池",
 			"composer.poolShared": "本模型无专属池，按通用池计",
 			"composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
@@ -252,7 +253,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"panel.shapeDrift": "The upstream payload shape may have changed: {detail}",
 			"composer.pillTitle": "SenseNova Token Plan quota",
 			"composer.pool5h": "5h",
-			"composer.pool7d": "week",
+			"composer.pool7d": "weekly",
 			"composer.stale": "stale data",
 			"composer.noPool": "not in a Token Plan quota pool (balance in the Raccoon tab)",
 			"composer.resetAt": "resets at",
@@ -261,6 +262,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.raccoonTitle": "Raccoon credit balance",
 			"composer.balanceUnit": "cr",
 			"composer.balanceLabel": "Credit balance",
+			"composer.balanceParts": "Balance breakdown",
 			"composer.poolHit": "this model draws from this pool",
 			"composer.poolShared": "no dedicated pool for this model — drawn from the general pool",
 			"composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
@@ -1330,6 +1332,15 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			pillPopoverReset: {
 				marginLeft: "auto",
 				fontVariantNumeric: "tabular-nums"
+			},
+			pillPopoverParts: {
+				borderTop: "1px solid var(--dsw-alias-border-l1)",
+				marginTop: 6,
+				paddingTop: 6
+			},
+			pillPopoverPartsLabel: {
+				color: "var(--dsw-alias-label-tertiary)",
+				marginBottom: 2
 			},
 			pillPopoverNote: {
 				marginTop: 8,
@@ -4209,16 +4220,27 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		return typeof balance === "number" && Number.isFinite(balance) ? balance : null;
 	}
 	/**
-	* The reset instant for the tooltip, or `null` when none should be worded:
-	* a reset that has already passed (the window is mid-reset or the snapshot
+	* The reset instant to WORD, in the same epoch SECONDS the wire uses — or `null`
+	* when none should be worded.
+	*
+	* The units are the whole point of this helper. `window_5h.reset_at` arrives as
+	* decimal epoch seconds (`epochSeconds()` in `parsers.ts`), so a seconds value
+	* compared against `Date.now()`'s milliseconds is ALWAYS in the past — which
+	* silently deleted the reset clock from the panel and the tooltip for every real
+	* reading, while `cards.ts` (which skips this helper and formats straight)
+	* kept showing it. So the comparison converts, and the return value stays in
+	* SECONDS: both `when()` and `new Date(x * 1000)` take seconds, so no caller has
+	* to remember which unit a "resetAt" is in.
+	*
+	* A reset that has already passed (the window is mid-reset, or the snapshot
 	* lagged it) is dropped rather than worded "重置中" — the stale mark, when
 	* present, carries that reading instead.
-	* @param resetAt - epoch ms.
-	* @param now - epoch ms (injectable for tests).
+	* @param resetAtSeconds - epoch seconds, exactly as the wire carries it.
+	* @param nowMs - epoch ms (injectable for tests).
 	*/
-	function resetFor(resetAt, now) {
-		if (typeof resetAt !== "number" || !Number.isFinite(resetAt)) return null;
-		return resetAt > now ? resetAt : null;
+	function resetFor(resetAtSeconds, nowMs) {
+		if (typeof resetAtSeconds !== "number" || !Number.isFinite(resetAtSeconds)) return null;
+		return resetAtSeconds * 1e3 > nowMs ? resetAtSeconds : null;
 	}
 	/**
 	* One window as a panel row: the label, a bar that carries the same share the
@@ -4278,39 +4300,92 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		};
 	}
 	/**
-	* The panel itself: a popover anchored to the pill, carrying the figures the
-	* pill cannot fit.
+	* The dismissal listeners for an open panel: click-away and Escape.
 	*
-	* It is a `<div role="dialog">` sibling of the trigger rather than its child: a
-	* dialog inside a `<button>` is invalid nesting (a button's content model is
-	* phrasing content, and interactive content inside it is worse), and the panel
-	* has its own rows. The anchor wrapper is a plain `<span>` for the same reason.
+	* Both are ordinary document listeners guarded the way `use-polling-interval.ts`
+	* guards its `visibilitychange` one, and both are torn down the moment the panel
+	* closes — a closed panel must not keep the document on a listener that exists
+	* only to close it.
 	*
-	* No outside-click listener and no Escape handling, deliberately: this plugin
-	* injects no stylesheet and owns no document-level listener, so the only
-	* dismissal it can express is the trigger's own toggle. That is a constraint
-	* written down rather than an omission — see `styles.ts`'s popover note.
+	* The containment test reads the anchor's DOM node rather than the panel's: a
+	* click on the trigger itself is a TOGGLE (the button's own `click` handler), so
+	* treating it as "inside" is what keeps the outside-click path from racing it.
+	* `anchorRef` is a ref, not state, so attaching it costs no render and no hook
+	* order risk.
+	*
+	* `pointerdown` and not `click`: by `click` time the trigger's own handler has
+	* already run, so a `click` listener that treated the trigger as "inside" would
+	* close and the toggle would immediately reopen — a panel that cannot be closed
+	* by clicking away. See the module doc for the drag-back caveat.
+	*/
+	function useDismissOn(open, close, anchorRef) {
+		useEffect(() => {
+			if (!open) return;
+			if (typeof document === "undefined" || !("addEventListener" in document)) return;
+			const nodeLike = (value) => typeof value === "object" && value !== null && typeof value.nodeType === "number";
+			const anchorLike = anchorRef.current;
+			const insideAnchor = (target) => nodeLike(target) && typeof anchorLike?.contains === "function" && anchorLike.contains(target);
+			const onPointerDown = (event) => {
+				if (insideAnchor(event.target)) return;
+				close();
+			};
+			const onKeyDown = (event) => {
+				if (event.key !== "Escape") return;
+				close();
+			};
+			document.addEventListener("pointerdown", onPointerDown, true);
+			document.addEventListener("keydown", onKeyDown);
+			return () => {
+				document.removeEventListener("pointerdown", onPointerDown, true);
+				document.removeEventListener("keydown", onKeyDown);
+			};
+		}, [
+			open,
+			close,
+			anchorRef
+		]);
+	}
+	/**
+	* The popover itself: a `<div role="dialog">` sibling of the trigger rather than
+	* its child: a dialog inside a `<button>` is invalid nesting (a button's content
+	* model is phrasing content, and interactive content inside it is worse), and the
+	* panel has its own rows. The anchor wrapper is a plain `<span>` for the same
+	* reason.
 	*
 	* The `id` lives HERE rather than on an extra wrapper: `aria-controls` has to
 	* resolve to the node that actually carries the panel, and one wrapper between
 	* the id and the panel would make the reference point at a bare wrapper.
 	*/
 	function QuotaPopover(props) {
-		const { tt, title, stale, poolLine, note, children } = props;
+		const { tt, title, stale, poolLine, note, footnote = null, children } = props;
 		return h("div", {
 			className: "dsh-sensenova-composer-pill-popover",
 			id: POPOVER_ID,
 			role: "dialog",
 			"aria-label": title,
 			style: S.pillPopover
-		}, h("div", { style: S.pillPopoverHead }, h("span", { style: S.pillPopoverTitle }, title), poolLine === null ? null : h("span", { style: S.pillPopoverPool }, poolLine), stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null), children, note === null ? null : h("div", { style: S.pillPopoverNote }, note));
+		}, h("div", { style: S.pillPopoverHead }, h("span", { style: S.pillPopoverTitle }, title), poolLine === null ? null : h("span", { style: S.pillPopoverPool }, poolLine), stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null), children, note === null ? null : h("div", { style: S.pillPopoverNote }, note), footnote === null ? null : h("div", { style: S.pillPopoverNote }, footnote));
+	}
+	/**
+	* One declared part of the Raccoon balance: a label and its figure, no bar.
+	*
+	* A bar needs a limit to be a share of, and the gateway publishes none here —
+	* so a bar would be a fraction of an invented denominator. The figure is drawn
+	* in the panel's own `count` unit so it adds up in the reader's head against
+	* the total above it.
+	*/
+	function RaccoonPartRow({ label, value, tt }) {
+		return h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, label), h("span", { style: S.pillPopoverFigure }, `${count(value)} ${tt("composer.balanceUnit")}`));
 	}
 	/** The shared shell: the tier dot, the reading, the plan prefix, the panel anchor. */
 	function PillBody(props) {
-		const { tt, planLabel, tier, children, stale = false, title, open = false, onToggle, panel = null } = props;
+		const { tt, planLabel, tier, children, stale = false, title, open = false, onToggle, onClose, panel = null } = props;
+		const anchorRef = useRef(null);
+		useDismissOn(open, onClose, anchorRef);
 		return h("span", {
 			className: "dsh-sensenova-composer-pill-anchor",
-			style: S.pillPopoverAnchor
+			style: S.pillPopoverAnchor,
+			ref: anchorRef
 		}, h("button", {
 			type: "button",
 			className: "dsh-sensenova-composer-pill",
@@ -4365,6 +4440,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
 		const [open, setOpen] = useState(false);
 		const toggle = useCallback(() => setOpen((wasOpen) => !wasOpen), []);
+		const close = useCallback(() => setOpen(false), []);
 		const pool = poolFor(data?.pools?.pools ?? [], model, TOKEN_PLAN);
 		const w5 = pool?.window5h ?? null;
 		const w7 = pool?.window7d ?? null;
@@ -4378,11 +4454,18 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const title = [
 			tt("composer.pillTitle"),
 			pool?.name ? String(pool.name) : loadedOnce ? tt("composer.noPool") : null,
-			resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime).toLocaleString()}` : null,
+			resetTime ? `${tt("composer.resetAt")} ${(/* @__PURE__ */ new Date(resetTime * 1e3)).toLocaleString()}` : null,
 			stale ? tt("composer.stale") : null
 		].filter(Boolean).join(" · ");
 		const matched = model !== void 0 && pool !== void 0 ? Array.isArray(pool.modelIds) && pool.modelIds.includes(model) : false;
-		const poolLine = pool === void 0 ? null : `${String(pool.name ?? "")} · ${matched ? tt("composer.poolHit") : tt("composer.poolShared")}`;
+		const poolKind = pool !== void 0 && pool.poolType === "dedicated" ? tt("pool.dedicated") : tt("pool.default");
+		const poolLine = pool === void 0 ? null : `${String(pool.name ?? "")} · ${poolKind} · ${matched ? tt("composer.poolHit") : tt("composer.poolShared")}`;
+		const grant = pool === void 0 ? 0 : pool.grantBalance ?? 0;
+		const grantExpiry = pool?.nearestGrantExpiry ?? null;
+		const footnote = grant > 0 ? [format(tt("pool.grant"), { balance: count(grant) }), grantExpiry !== null && resetFor(grantExpiry, now) !== null ? format(tt("pool.grantExpiry"), {
+			time: when(grantExpiry),
+			balance: count(pool?.nearestGrantExpiringBalance ?? 0)
+		}) : null].filter((part) => part !== null).join(" · ") : null;
 		const panel = pool === void 0 ? h(QuotaPopover, {
 			tt,
 			title: tt("composer.pillTitle"),
@@ -4396,6 +4479,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			stale,
 			poolLine,
 			note: null,
+			footnote,
 			children: [h(QuotaRow, {
 				label: tt("pool.window5h"),
 				window: w5,
@@ -4414,6 +4498,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			title,
 			open,
 			onToggle: toggle,
+			onClose: close,
 			panel,
 			children: [
 				h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
@@ -4436,6 +4521,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const { state, error, loadedOnce, updatedAt } = useRaccoonBalance();
 		const [open, setOpen] = useState(false);
 		const toggle = useCallback(() => setOpen((wasOpen) => !wasOpen), []);
+		const close = useCallback(() => setOpen(false), []);
 		const balance = balanceOf(state);
 		const stale = error !== null || updatedAt > 0 && Date.now() - updatedAt > 9e4;
 		const signedOut = state !== null && state.loggedIn !== true;
@@ -4447,13 +4533,36 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			stale ? tt("composer.stale") : null
 		].filter(Boolean).join(" · ");
 		const pending = !loadedOnce && balance === null;
+		const breakdown = state?.balanceBreakdown;
+		const partRows = [
+			breakdown?.daily === void 0 ? null : h(RaccoonPartRow, {
+				label: tt("raccoon.partNameDaily"),
+				value: breakdown.daily,
+				tt
+			}),
+			breakdown?.reward === void 0 ? null : h(RaccoonPartRow, {
+				label: tt("raccoon.partNameReward"),
+				value: breakdown.reward,
+				tt
+			}),
+			breakdown?.monthly === void 0 ? null : h(RaccoonPartRow, {
+				label: tt("raccoon.partNameMonthly"),
+				value: breakdown.monthly,
+				tt
+			}),
+			breakdown?.topup === void 0 ? null : h(RaccoonPartRow, {
+				label: tt("raccoon.partNameTopup"),
+				value: breakdown.topup,
+				tt
+			})
+		].filter((row) => row !== null);
 		const panel = h(QuotaPopover, {
 			tt,
 			title: tt("composer.raccoonTitle"),
 			stale: stale && loadedOnce,
 			poolLine: null,
 			note: signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
-			children: h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")), h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`)))
+			children: [h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")), h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`))), partRows.length === 0 ? null : h("div", { style: S.pillPopoverParts }, h("div", { style: S.pillPopoverPartsLabel }, tt("composer.balanceParts")), partRows)]
 		});
 		return h(PillBody, {
 			tt,
@@ -4463,6 +4572,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			title,
 			open,
 			onToggle: toggle,
+			onClose: close,
 			panel,
 			children: h("span", { style: S.pillReading }, pending ? "…" : reading)
 		});

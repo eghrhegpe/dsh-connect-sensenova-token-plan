@@ -337,6 +337,11 @@ export const S = {
   pillPopoverFill: { height: "100%", borderRadius: 2 },
   pillPopoverFoot: { display: "flex", alignItems: "baseline", gap: 8, color: "var(--dsw-alias-label-tertiary)" },
   pillPopoverReset: { marginLeft: "auto", fontVariantNumeric: "tabular-nums" },
+  // The Raccoon branch's split of its balance: a quiet deck under the total,
+  // one label+figure per line. Its own border-top separates "the total" from
+  // "what the total is made of" without spending a row on the distinction.
+  pillPopoverParts: { borderTop: "1px solid var(--dsw-alias-border-l1)", marginTop: 6, paddingTop: 6 },
+  pillPopoverPartsLabel: { color: "var(--dsw-alias-label-tertiary)", marginBottom: 2 },
   // The Raccoon branch's single "window" is a stock, not a window: one figure,
   // no bar, and the signed-in/signed-out fact beside it. Drawn as a row anyway
   // so the two branches share one panel frame and one set of metrics.

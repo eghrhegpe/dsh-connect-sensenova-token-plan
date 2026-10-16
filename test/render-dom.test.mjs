@@ -147,6 +147,12 @@ const tt = (key) => key;
 
 /** One inline style property as react-dom actually wrote it ("" when absent). */
 const css = (el, prop) => (el?.style?.[prop] ?? "");
+// Epoch SECONDS, `hours` from now — the unit `parsers.ts`' `epochSeconds()`
+// delivers `reset_at` in and the unit every client formatter (`when`,
+// `clockLong`, the `Date` constructor) takes. Fixtures that hand a window a
+// millisecond `resetAt` read as "already reset" and silently drop the clock, so
+// the unit is built here rather than written inline at each call site.
+const inHours = (hours) => Math.floor(Date.now() / 1000) + hours * 3600;
 
 /** Mount `element` into a fresh jsdom container under a real react-dom root. */
 function mount(element) {
@@ -472,7 +478,7 @@ function typeInto(input, value) {
         id: "p1",
         name: "通用池",
         poolType: "default",
-        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: Date.now() + 2 * 3_600_000 },
+        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: inHours(2) },
         window7d: { limit: 10000, used: 100, remaining: 9900 }
       }]
     },
@@ -650,7 +656,7 @@ function typeInto(input, value) {
     pools: {
       pools: [{
         id: "p1", name: "通用池", poolType: "default",
-        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: Date.now() + 3_600_000 },
+        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: inHours(1) },
         window7d: { limit: 10000, used: 100, remaining: 9900 }
       }]
     },
@@ -722,7 +728,7 @@ function typeInto(input, value) {
       pools: {
         pools: [{
           id: "p1", name: "通用池", poolType: "default",
-          window5h: { limit: 1000, used: 1000, remaining: 0, resetAt: Date.now() + 3_600_000 },
+          window5h: { limit: 1000, used: 1000, remaining: 0, resetAt: inHours(1) },
           window7d: { limit: 10000, used: 100, remaining: 9900 }
         }]
       },
@@ -775,7 +781,7 @@ function typeInto(input, value) {
     pools: {
       pools: [{
         id: "p1", name: "通用池", poolType: "default",
-        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: Date.now() + 3_600_000 },
+        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: inHours(1) },
         window7d: { limit: 10000, used: 100, remaining: 9900 }
       }]
     },
@@ -885,7 +891,7 @@ function typeInto(input, value) {
         // `used`/`limit` chosen so `count()` shows the separator rule on BOTH
         // sides of the ratio — the panel is where raw figures live, so this is
         // exactly where a comma-less 1.25M would ship wrong.
-        window5h: { limit: 1_250_000, used: 12_500, remaining: 1_237_500, resetAt: Date.now() + 2 * 3_600_000 },
+        window5h: { limit: 1_250_000, used: 12_500, remaining: 1_237_500, resetAt: inHours(2) },
         window7d: { limit: 60_000_000, used: 1_200_000, remaining: 58_800_000 }
       }]
     },
@@ -959,11 +965,14 @@ function typeInto(input, value) {
     (panelText().match(/pool\.reset/g) ?? []).length === 1,
     `reset lines=${(panelText().match(/pool\.reset/g) ?? []).length} text=${panelText().slice(0, 320)}`);
 
-  // Pool attribution: this model names no pool, so the panel must SAY it is
-  // billed from the general pool rather than let the reader assume a dedicated
-  // one. The name rides beside that fact, not instead of it.
-  check("the panel names the pool and how the model was attributed to it",
-    panelText().includes("通用池 · composer.poolShared") && !panelText().includes("composer.poolHit"),
+  // Pool attribution: this model names no pool, so the panel must SAY it was
+  // attributed to a pool it does not own — the name rides beside that fact, not
+  // instead of it. The pool's TYPE is asserted from the wire rather than assumed:
+  // the fallback lands on `pools[0]`, which the console does not promise is the
+  // general pool, so a panel that hard-wrote 「通用池」 would state a fact this
+  // client cannot support.
+  check("the panel names the pool, its declared type, and how the model reached it",
+    panelText().includes("通用池 · pool.default · composer.poolShared") && !panelText().includes("composer.poolHit"),
     `panel text=${panelText().slice(0, 200)}`);
 
   // The bar carries the SAME tier ink the pill's dot does — one threshold for
@@ -999,13 +1008,70 @@ function typeInto(input, value) {
     css(button(), "cursor") === "pointer",
     `cursor=${css(button(), "cursor")}`);
 
-  // Re-clicking closes it — the ONLY dismissal this plugin can express (no
-  // stylesheet, no document-level listener, so no outside-click and no Escape).
+  // The three dismissals, in the order a user reaches them. The first is the
+  // re-click (the MVP's only path); the other two are document listeners this
+  // plugin already owns one of (visibilitychange), so "we cannot express
+  // outside-click" was never true — what matters is that both listeners exist
+  // only while the panel is open.
   await click(button());
-  check("a second click closes the panel and leaves no node behind",
+  check("re-clicking closes the panel and leaves no node behind",
     panelNode() === null && button()?.getAttribute("aria-expanded") === "false"
       && button()?.getAttribute("aria-controls") === null,
     `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")} controls=${button()?.getAttribute("aria-controls")}`);
+
+  // `pointerdown` on a node outside the anchor. `document.body` is never inside
+  // the pill's own anchor, so it stands in for the chat surface a user actually
+  // clicks away to.
+  await click(button());
+  await act(async () => {
+    win.document.body.dispatchEvent(new win.Event("pointerdown", { bubbles: true }));
+  });
+  check("a pointerdown outside the pill closes the panel",
+    panelNode() === null && button()?.getAttribute("aria-expanded") === "false",
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")}`);
+
+  // A press INSIDE the anchor must NOT close it. This is the case that decides
+  // the event type: `pointerdown` is what keeps the trigger's own toggle from
+  // racing the dismissal — a `click` listener would already have seen the
+  // button's toggle by the time it ran, so "click away" and "click the pill to
+  // close" would fight over one click.
+  await click(button());
+  const innerPress = openPanel.querySelector(".dsh-sensenova-composer-pill-popover-head") ?? button();
+  await act(async () => {
+    innerPress.dispatchEvent(new win.Event("pointerdown", { bubbles: true }));
+  });
+  check("a press inside the panel leaves it open (the trigger's toggle cannot race the dismissal)",
+    panelNode() !== null && button()?.getAttribute("aria-expanded") === "true",
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")}`);
+
+  await act(async () => {
+    win.document.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  check("Escape closes the panel without touching the trigger",
+    panelNode() === null && button()?.getAttribute("aria-expanded") === "false",
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")}`);
+
+  // Any OTHER key must leave it alone — an unconditional keydown close would
+  // make typing in the composer shut the panel.
+  await click(button());
+  await act(async () => {
+    win.document.dispatchEvent(new win.KeyboardEvent("keydown", { key: "a", bubbles: true }));
+  });
+  check("an unrelated keystroke leaves the panel open (typing in the composer must not close it)",
+    panelNode() !== null && button()?.getAttribute("aria-expanded") === "true",
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")}`);
+
+  // A closed panel must leave no listener behind: a live click-away whose
+  // subject is already unmounted is a handler on the document that outlived the
+  // thing it existed to close. Nothing here can reopen the panel, which IS the
+  // proof the listener is gone — a stray press on the body changes nothing.
+  await click(button());
+  await act(async () => {
+    win.document.body.dispatchEvent(new win.Event("pointerdown", { bubbles: true }));
+  });
+  check("a closed panel owns no listener: a stray press outside changes nothing",
+    panelNode() === null && button()?.getAttribute("aria-expanded") === "false",
+    `panel=${panelNode() !== null} expanded=${button()?.getAttribute("aria-expanded")}`);
 
   // Toggling is pure UI state: opening must not fetch. The request log is the
   // proof, because "no extra fetch" is otherwise invisible — the panel reads the
@@ -1041,6 +1107,30 @@ function typeInto(input, value) {
   check("the Raccoon panel borrows no Token Plan pool line",
     !raccoonText.includes("通用池") && raccoonText.includes("composer.raccoonTitle"),
     `text=${raccoonText.slice(0, 240)}`);
+
+  // The gateway's OWN split of the total. A single total answers "how much";
+  // the split answers "how much of it expires tonight", which is what decides
+  // whether to spend now — so the parts belong in the panel even though the pill
+  // (one figure wide) keeps the total alone. No bar: no limit was published to
+  // scale one against.
+  raccoonState = { ok: true, loggedIn: true, balance: 42150, balanceBreakdown: { daily: 600, reward: 8344, monthly: 30000, topup: 3206 } };
+  pill.unmount();
+  pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  await click(button());
+  const breakdownText = panelNode()?.textContent ?? "";
+  check("the Raccoon panel breaks the balance into the parts the gateway declared",
+    panelNode() !== null
+      && breakdownText.includes("composer.balanceParts")
+      // `count()` only groups at and above 10000, so 8344 and 3206 stay bare —
+      // the assertion spells out the formatter's own rule rather than a
+      // house style it does not have.
+      && breakdownText.includes("raccoon.partNameDaily600 composer.balanceUnit")
+      && breakdownText.includes("raccoon.partNameReward8344 composer.balanceUnit")
+      && breakdownText.includes("raccoon.partNameMonthly30,000 composer.balanceUnit")
+      && breakdownText.includes("raccoon.partNameTopup3206 composer.balanceUnit")
+      && panelNode()?.querySelectorAll("[role='progressbar']").length === 0,
+    `panel text=${breakdownText.slice(0, 320)}`);
   await click(button());
   check("the Raccoon panel closes on a second click too",
     panelNode() === null && button()?.getAttribute("aria-expanded") === "false",
@@ -1078,6 +1168,90 @@ function typeInto(input, value) {
     panelNode() !== null && panelNode()?.querySelector("[role='progressbar']") === null
       && emptyPanelText.includes("composer.noPool"),
     `panel text=${emptyPanelText.slice(0, 200)}`);
+  pill.unmount();
+
+  // The grant footnote. `grantBalance` is a SEPARATE quota universe — 30 days,
+  // it does not consume the rolling windows — so it can only ever be a footnote
+  // here: never a percentage, never a window row. Three cases, and the third is
+  // the one that matters: a zero grant is normalized by `credits()` whether the
+  // platform declared one or not, so drawing 「返赠余额 0」 would claim the grant
+  // was spent instead of saying there is none.
+  selection.next = { provider: "sensenova-token-plan", model: "deepseek-v4-flash" };
+  const grantedSnapshot = (grant) => ({
+    ok: true,
+    pools: {
+      pools: [{
+        id: "p1", name: "通用池", poolType: "default",
+        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: inHours(1) },
+        window7d: { limit: 10000, used: 100, remaining: 9900, resetAt: inHours(48) },
+        grantBalance: grant,
+        nearestGrantExpiry: grant > 0 ? inHours(24 * 12) : null,
+        nearestGrantExpiringBalance: grant > 0 ? 120 : 0
+      }]
+    },
+    trend: { hours: 24, models: [] }
+  });
+  const grantTextFor = async (grant) => {
+    win.fetch = (path) => Promise.resolve({
+      ok: true, status: 200,
+      json: async () => path === RACCOON_PATH ? raccoonState : grantedSnapshot(grant)
+    });
+    pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+    await act(async () => { await sleep(0); });
+    await click(button());
+    return panelNode()?.textContent ?? "";
+  };
+  const grantText = await grantTextFor(500);
+  // The KEYS, not the substituted words: `tt` here echoes the key, and a key has
+  // no `{balance}` in it, so `format` has nothing to fill. What matters is that
+  // both fragments are drawn, and that the grant cost no third window bar.
+  check("a live grant appears as a footnote with its expiry, not as a third window",
+    grantText.includes("pool.grant") && grantText.includes("pool.grantExpiry")
+      && panelNode()?.querySelectorAll("[role='progressbar']").length === 2,
+    `panel text=${grantText.slice(0, 320)}`);
+  pill.unmount();
+  const noGrantText = await grantTextFor(0);
+  check("a zero grant draws no footnote at all (an absent grant is not a spent one)",
+    !noGrantText.includes("pool.grant") && !noGrantText.includes("pool.grantExpiry"),
+    `panel text=${noGrantText.slice(0, 320)}`);
+  pill.unmount();
+
+  // The reset clock is stated in the unit the wire carries. `epochSeconds()`
+  // hands `reset_at` over in SECONDS, and the first version of `resetFor`
+  // compared that against `Date.now()`'s milliseconds — so every real reading
+  // looked already-reset and the clock silently vanished. The fixtures above are
+  // in seconds, so this assertion is the one that would catch a regression back
+  // to milliseconds: the 48h clock is on ANOTHER DAY, and a bare `HH:MM` would
+  // read as later today.
+  // Two clocks, not one: the 5h window resets today and the weekly one lands
+  // another day out. Under the millisecond bug `resetFor` dropped BOTH, so the
+  // count is the assertion that catches it — a unit regression here shows up as
+  // zero reset lines rather than as a mis-formatted clock.
+  const twoClockText = await grantTextFor(0);
+  check("both declared resets are worded, in the unit the wire sends them (seconds)",
+    (twoClockText.match(/pool\.reset/g) ?? []).length === 2,
+    `reset lines=${(twoClockText.match(/pool\.reset/g) ?? []).length} panel text=${twoClockText.slice(0, 320)}`);
+  pill.unmount();
+  // And with a REAL translator the 48-hour clock must carry its date, not read as
+  // a time later today — the bug `when()` was written for, now pinned through the
+  // shipped dictionary rather than through a key-echoing `tt`.
+  check("the date-aware clock formats a cross-day reset as MM-DD HH:mm",
+    /^\d{2}-\d{2} \d{2}:\d{2}$/.test(panel.helpers.when(inHours(48)))
+      && /^\d{2}:\d{2}$/.test(panel.helpers.when(inHours(1))),
+    `48h=${panel.helpers.when(inHours(48))} 1h=${panel.helpers.when(inHours(1))}`);
+  pill.unmount();
+
+  // One word for one window: the pill said 「本周」 while its own panel said
+  // 「每周」 about the same rolling 7-day window. Read off the SHIPPED dictionary,
+  // because `tt` here echoes the key and cannot see the words at all. Compared
+  // case-insensitively and with the space stripped: the pill carries its word
+  // inside a sentence and the panel as a row heading, so capitalization is a
+  // deliberate difference at each surface — but the WORD may not be.
+  const weeklyWord = (dict, key) => dict[key].toLowerCase().replace(/\s+/g, "");
+  check("the pill and its panel name the weekly window with the same word",
+    weeklyWord(panel.dictionaries.zh, "composer.pool7d") === weeklyWord(panel.dictionaries.zh, "pool.window7d")
+      && weeklyWord(panel.dictionaries.en, "composer.pool7d") === weeklyWord(panel.dictionaries.en, "pool.window7d"),
+    `zh pill=${panel.dictionaries.zh["composer.pool7d"]} panel=${panel.dictionaries.zh["pool.window7d"]} / en pill=${panel.dictionaries.en["composer.pool7d"]} panel=${panel.dictionaries.en["pool.window7d"]}`);
 
   pill.unmount();
   check("unmounting the pill with its panel open leaves nothing behind", pill.host.childNodes.length === 0);

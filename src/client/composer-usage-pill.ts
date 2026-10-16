@@ -51,11 +51,21 @@
  * 挂载 —— 不跑任何 fetch 循环。
  *
  * 池归组：额度是**池级**的（通用池 / Flash-Lite 专属池，每个 pool 带 `modelIds`），
- * 按当前模型 id 匹配所属池；Token Plan 模型匹配不到就回落到第一个池（通用池），
- * 不发明「余额」。
+ * 按当前模型 id 匹配所属池；Token Plan 模型匹配不到就回落到第一个池，不发明
+ * 「余额」。回落池**不保证**是通用池——控制台把通用池与专属池作兄弟返回、顺序由
+ * 平台定，所以面板写池的类型（`poolType`）而不写死「通用池」。
  *
- * 返赠余额（`grantBalance`）不进胶囊：它是独立口径（30 天有效、不占滚动窗口），
- * 塞进百分比会混淆「窗口消耗」与「可用余额」——它属于插件卡「积分额度」tab。
+ * 返赠余额（`grantBalance`）不进**胶囊**：它是独立口径（30 天有效、不占滚动窗口），
+ * 塞进百分比会混淆「窗口消耗」与「可用余额」。但面板有地方放，而读者在面板里正
+ * 问「这 5 小时用完了我还能不能跑」，返赠余额就是那个答案，所以它作为**面板脚注**
+ * 出现（≥1 分才画；0 分画出来只是噪声）。早前把它完全排除的裁定，是在没有面板、
+ * 没有地方陈述这个事实时做的。
+ *
+ * **秒，不是毫秒**（2026-10-16 修）：`window_5h.reset_at` 经 `epochSeconds()` 落在
+ * **秒**上，而旧 `resetFor()` 拿它跟 `Date.now()`（毫秒）比——任何真实读数都判定为
+ * 「已过期」，于是面板的重置时刻与 tooltip 的「重置于」在真机上从未出现过（§H 的
+ * fixture 喂的是毫秒，正好把这个洞盖住）。现在比较时换算、返回值仍是秒，
+ * `when()` / `new Date(x * 1000)` 都吃秒，调用点不必记住单位。
  *
  * **展开面板**（2026-10-16 落地）：胶囊点一下展开额度卡，画的是胶囊**装不下**的
  * 东西——每个窗口的原始 used/limit、精确重置时刻（`when`，跨日带日期）、以及
@@ -64,11 +74,24 @@
  * 那个问题只有原始数字答得了。分级阈值与胶囊同一个 `tierOf`（80 黄 / 100 红），
  * **不**抄 `cards.ts` 的 70/90——同一屏里两套阈值互相打脸比任何一套都糟。
  *
- * 关闭方式只有「再点一次胶囊」，这是约束不是省略：本插件不注入样式表、不持有
- * document 级监听（点外部关闭与 Esc 都要监听器 + 焦点管理）。开合状态放在**内层**
- * 组件里，所以切模型会连面板一起卸载——面板永远不可能显示上一个模型的额度。
+ * 关闭方式：再点一次胶囊、点面板外部、按 Esc。三者共用**内层**组件里的一对
+ * document 监听（`pointerdown` + `keydown`，只在 open 时挂，卸载/收起即摘），
+ * 守卫与 cleanup 照抄 `use-polling-interval.ts` 的 visibilitychange 那一套
+ * （`typeof document !== "undefined" && "addEventListener" in document`）——本
+ * 插件本来就持有 document 级监听（那个 visibilitychange），所以这不是新开的
+ * 口子，是把已经有的那一个用在第二个地方。
+ *
+ * 监听器挂在**内层**组件：外层 `ComposerUsagePill` 仍只决定挂哪个内层，三层结构
+ * （见上）不破；而切模型会卸载内层，连监听器与面板一起消失——面板永远不可能显示
+ * 上一个模型的额度，监听器也不会跨模型留下。
+ *
+ * 点外部用 `pointerdown` 而不是 `click`：触发器自己的 `click` 会在同一轮事件里
+ * 冒泡到 document，若用 `click` 关闭，「点胶囊关闭」会先关掉面板再被触发器的
+ * toggle 重新打开（净效果 = 关不掉）。`pointerdown` 在 click 之前落下，且不冒泡
+ * 到触发的按钮，顺序上就没有这个反转。代价是「在别处按下鼠标、拖回胶囊再松手」
+ * 会关掉面板——这是所有 pointerdown 关闭方案的通病，付得起。
  */
-import { h, useCallback, useState } from "./runtime.ts";
+import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
 import { S } from "./styles.ts";
 import { count, format, when } from "./format.ts";
 import { RACCOON_PATH } from "./const.ts";
@@ -229,16 +252,27 @@ const TIER_INK: Record<Tier, string> = {
 };
 
 /**
- * The reset instant for the tooltip, or `null` when none should be worded:
- * a reset that has already passed (the window is mid-reset or the snapshot
+ * The reset instant to WORD, in the same epoch SECONDS the wire uses — or `null`
+ * when none should be worded.
+ *
+ * The units are the whole point of this helper. `window_5h.reset_at` arrives as
+ * decimal epoch seconds (`epochSeconds()` in `parsers.ts`), so a seconds value
+ * compared against `Date.now()`'s milliseconds is ALWAYS in the past — which
+ * silently deleted the reset clock from the panel and the tooltip for every real
+ * reading, while `cards.ts` (which skips this helper and formats straight)
+ * kept showing it. So the comparison converts, and the return value stays in
+ * SECONDS: both `when()` and `new Date(x * 1000)` take seconds, so no caller has
+ * to remember which unit a "resetAt" is in.
+ *
+ * A reset that has already passed (the window is mid-reset, or the snapshot
  * lagged it) is dropped rather than worded "重置中" — the stale mark, when
  * present, carries that reading instead.
- * @param resetAt - epoch ms.
- * @param now - epoch ms (injectable for tests).
+ * @param resetAtSeconds - epoch seconds, exactly as the wire carries it.
+ * @param nowMs - epoch ms (injectable for tests).
  */
-export function resetFor(resetAt: number | null | undefined, now: number): number | null {
-  if (typeof resetAt !== "number" || !Number.isFinite(resetAt)) return null;
-  return resetAt > now ? resetAt : null;
+export function resetFor(resetAtSeconds: number | null | undefined, nowMs: number): number | null {
+  if (typeof resetAtSeconds !== "number" || !Number.isFinite(resetAtSeconds)) return null;
+  return resetAtSeconds * 1000 > nowMs ? resetAtSeconds : null;
 }
 
 /** How long a read may age before the pill calls it "上次数据" (90 s, a bit past the stated cadence). */
@@ -352,25 +386,71 @@ function useRaccoonBalance(defaultCadenceMs = RACCOON_POLL_MS) {
 }
 
 /**
- * The panel itself: a popover anchored to the pill, carrying the figures the
- * pill cannot fit.
+ * The dismissal listeners for an open panel: click-away and Escape.
  *
- * It is a `<div role="dialog">` sibling of the trigger rather than its child: a
- * dialog inside a `<button>` is invalid nesting (a button's content model is
- * phrasing content, and interactive content inside it is worse), and the panel
- * has its own rows. The anchor wrapper is a plain `<span>` for the same reason.
+ * Both are ordinary document listeners guarded the way `use-polling-interval.ts`
+ * guards its `visibilitychange` one, and both are torn down the moment the panel
+ * closes — a closed panel must not keep the document on a listener that exists
+ * only to close it.
  *
- * No outside-click listener and no Escape handling, deliberately: this plugin
- * injects no stylesheet and owns no document-level listener, so the only
- * dismissal it can express is the trigger's own toggle. That is a constraint
- * written down rather than an omission — see `styles.ts`'s popover note.
+ * The containment test reads the anchor's DOM node rather than the panel's: a
+ * click on the trigger itself is a TOGGLE (the button's own `click` handler), so
+ * treating it as "inside" is what keeps the outside-click path from racing it.
+ * `anchorRef` is a ref, not state, so attaching it costs no render and no hook
+ * order risk.
+ *
+ * `pointerdown` and not `click`: by `click` time the trigger's own handler has
+ * already run, so a `click` listener that treated the trigger as "inside" would
+ * close and the toggle would immediately reopen — a panel that cannot be closed
+ * by clicking away. See the module doc for the drag-back caveat.
+ */
+function useDismissOn(open: boolean, close: () => void, anchorRef: { current: unknown }) {
+  useEffect(() => {
+    if (!open) return;
+    // A host that gives the client no `document` (a bare Node mount) simply has
+    // no dismissal beyond the trigger's own toggle, which is the fallback the
+    // MVP shipped with — the panel must not throw here.
+    if (typeof document === "undefined" || !("addEventListener" in document)) return;
+    // Duck-typed rather than `target instanceof Node`: `Node` is a browser
+    // global, and this module is also mounted under jsdom in the render suite,
+    // where only `document` is mirrored into the Node realm — naming the
+    // constructor would ReferenceError there. `nodeType` is the same test
+    // without the global.
+    const nodeLike = (value: unknown): value is { nodeType: number } =>
+      typeof value === "object" && value !== null && typeof (value as { nodeType?: unknown }).nodeType === "number";
+    const anchorLike = anchorRef.current as { contains?: (node: unknown) => boolean } | null;
+    const insideAnchor = (target: unknown) =>
+      nodeLike(target) && typeof anchorLike?.contains === "function" && anchorLike.contains(target);
+    const onPointerDown = (event: Event) => {
+      if (insideAnchor((event.target as EventTarget | null))) return;
+      close();
+    };
+    const onKeyDown = (event: Event) => {
+      if ((event as KeyboardEvent).key !== "Escape") return;
+      close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, close, anchorRef]);
+}
+
+/**
+ * The popover itself: a `<div role="dialog">` sibling of the trigger rather than
+ * its child: a dialog inside a `<button>` is invalid nesting (a button's content
+ * model is phrasing content, and interactive content inside it is worse), and the
+ * panel has its own rows. The anchor wrapper is a plain `<span>` for the same
+ * reason.
  *
  * The `id` lives HERE rather than on an extra wrapper: `aria-controls` has to
  * resolve to the node that actually carries the panel, and one wrapper between
  * the id and the panel would make the reference point at a bare wrapper.
  */
-function QuotaPopover(props: { tt: Tt; title: string; stale: boolean; poolLine: string | null; note: string | null; children?: unknown }) {
-  const { tt, title, stale, poolLine, note, children } = props;
+function QuotaPopover(props: { tt: Tt; title: string; stale: boolean; poolLine: string | null; note: string | null; footnote?: string | null; children?: unknown }) {
+  const { tt, title, stale, poolLine, note, footnote = null, children } = props;
   return h(
     "div",
     {
@@ -388,7 +468,29 @@ function QuotaPopover(props: { tt: Tt; title: string; stale: boolean; poolLine: 
       stale ? h("span", { style: S.pillPopoverStale }, tt("composer.stale")) : null
     ),
     children,
-    note === null ? null : h("div", { style: S.pillPopoverNote }, note)
+    note === null ? null : h("div", { style: S.pillPopoverNote }, note),
+    // The footnote is a SECOND quiet line, kept separate from `note`: `note`
+    // speaks for a state the reader must act on (signed out, outside the pools),
+    // while the footnote carries a figure that is merely worth knowing. Merging
+    // them would make a grant balance read as a warning.
+    footnote === null ? null : h("div", { style: S.pillPopoverNote }, footnote)
+  );
+}
+
+/**
+ * One declared part of the Raccoon balance: a label and its figure, no bar.
+ *
+ * A bar needs a limit to be a share of, and the gateway publishes none here —
+ * so a bar would be a fraction of an invented denominator. The figure is drawn
+ * in the panel's own `count` unit so it adds up in the reader's head against
+ * the total above it.
+ */
+function RaccoonPartRow({ label, value, tt }: { label: string; value: number; tt: Tt }) {
+  return h(
+    "div",
+    { style: S.pillPopoverRowLine },
+    h("span", { style: S.pillPopoverLabel }, label),
+    h("span", { style: S.pillPopoverFigure }, `${count(value)} ${tt("composer.balanceUnit")}`)
   );
 }
 
@@ -402,12 +504,22 @@ function PillBody(props: {
   title: string;
   open?: boolean;
   onToggle: () => void;
+  onClose: () => void;
   panel?: unknown;
 }) {
-  const { tt, planLabel, tier, children, stale = false, title, open = false, onToggle, panel = null } = props;
+  const { tt, planLabel, tier, children, stale = false, title, open = false, onToggle, onClose, panel = null } = props;
+  // The anchor node, for the dismissal listeners' containment test. `useRef`
+  // rather than state: it is read inside a listener and must not re-render the
+  // pill when it is attached.
+  const anchorRef = useRef<unknown>(null);
+  useDismissOn(open, onClose, anchorRef);
   return h(
     "span",
-    { className: "dsh-sensenova-composer-pill-anchor", style: S.pillPopoverAnchor },
+    {
+      className: "dsh-sensenova-composer-pill-anchor",
+      style: S.pillPopoverAnchor,
+      ref: anchorRef
+    },
     h(
       "button",
       {
@@ -498,6 +610,10 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
   // default and needs no listener to enforce it.
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen((wasOpen) => !wasOpen), []);
+  // An idempotent close for the dismissal path: a toggle there would be undone by
+  // the second arrival (a click-away that toggles, then the anchor's own handler
+  // toggles back = a panel that cannot be dismissed).
+  const close = useCallback(() => setOpen(false), []);
   const pools = data?.pools?.pools ?? [];
   const pool = poolFor(pools, model, TOKEN_PLAN);
   const w5 = pool?.window5h ?? null;
@@ -513,26 +629,57 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
   const title = [
     tt("composer.pillTitle"),
     pool?.name ? String(pool.name) : loadedOnce ? tt("composer.noPool") : null,
-    resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime).toLocaleString()}` : null,
+    resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime * 1000).toLocaleString()}` : null,
     stale ? tt("composer.stale") : null
   ]
     .filter(Boolean)
     .join(" · ");
 
   // Which pool's windows the model draws from, and HOW it got there — a model
-  // that names its pool and one that falls back to the general pool are billing
+  // that names its pool and one that falls back to another pool are billing
   // differently even when the numbers match, and the panel is where that
   // distinction has room to be said out loud.
+  //
+  // The fallback wording names the pool's OWN type rather than asserting
+  // "general": `poolFor` falls back to `pools[0]`, and the console returns
+  // sibling pools (the 通用池 next to a Flash-Lite 专属池) in the platform's own
+  // order. So the pool a fallback landed on can be a dedicated pool, and calling
+  // it 通用池 would be a fact this client cannot support. Same branch `cards.ts`
+  // takes on `poolType` — `dedicated` says so, anything else says default, which
+  // is also what `parsers.ts` normalizes an absent `pool_type` to.
   const matched =
     model !== undefined && pool !== undefined
       ? Array.isArray(pool.modelIds) && pool.modelIds.includes(model)
       : false;
+  const poolKind = pool !== undefined && pool.poolType === "dedicated"
+    ? tt("pool.dedicated")
+    : tt("pool.default");
   const poolLine = pool === undefined
     ? null
-    : `${String(pool.name ?? "")} · ${matched ? tt("composer.poolHit") : tt("composer.poolShared")}`;
+    : `${String(pool.name ?? "")} · ${poolKind} · ${matched ? tt("composer.poolHit") : tt("composer.poolShared")}`;
   // The pool-less case still gets the FRAME, not a bare note: a panel that
   // changes shape when the model has no pool teaches the reader two layouts, and
   // `role="dialog"` / `aria-controls` must describe the same node in both.
+  // The grant footnote: a separate quota universe (30 days, it does not consume
+  // the rolling windows), so it can only ever be a footnote here — never a
+  // percentage, never a window row. Drawn only when the platform declared money
+  // to draw: `credits()` normalizes an absent `grant_balance` to `0`, and a
+  // "返赠余额 0" line would read as a claim that the grant was spent rather than
+  // that there is none.
+  const grant = pool === undefined ? 0 : pool.grantBalance ?? 0;
+  const grantExpiry = pool?.nearestGrantExpiry ?? null;
+  const footnote = grant > 0
+    ? [
+      format(tt("pool.grant"), { balance: count(grant) }),
+      // `when`, and only while the expiry is still ahead: an elapsed deadline is
+      // `resetFor`'s case, and a stale date beside a live balance reads as a
+      // warning the platform never raised.
+      grantExpiry !== null && resetFor(grantExpiry, now) !== null
+        ? format(tt("pool.grantExpiry"), { time: when(grantExpiry), balance: count(pool?.nearestGrantExpiringBalance ?? 0) })
+        : null
+    ].filter((part) => part !== null).join(" · ")
+    : null;
+
   const panel =
     pool === undefined
       ? h(QuotaPopover, {
@@ -549,6 +696,7 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
           stale,
           poolLine,
           note: null,
+          footnote,
           children: [
             h(QuotaRow, { label: tt("pool.window5h"), window: w5, tt }),
             h(QuotaRow, { label: tt("pool.window7d"), window: w7, tt })
@@ -563,6 +711,7 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
     title,
     open,
     onToggle: toggle,
+    onClose: close,
     panel,
     children: [
       h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
@@ -586,6 +735,7 @@ function RaccoonPill({ tt }: { tt: Tt }) {
   const { state, error, loadedOnce, updatedAt } = useRaccoonBalance();
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen((wasOpen) => !wasOpen), []);
+  const close = useCallback(() => setOpen(false), []);
   const balance = balanceOf(state);
   const now = Date.now();
   const stale = error !== null || (updatedAt > 0 && now - updatedAt > STALE_AFTER_MS);
@@ -606,6 +756,24 @@ function RaccoonPill({ tt }: { tt: Tt }) {
   // missing (signed out vs unreadable), or the reader is back to guessing.
   const pending = !loadedOnce && balance === null;
 
+  // The gateway's own split of the total, when it declares one. A single total
+  // answers "how much"; the split answers "how much of it expires tonight",
+  // which is the question that decides whether to spend now — so the parts are
+  // the reason the panel is worth opening, while the pill keeps the total alone
+  // (a toolbar has room for one number, not five).
+  //
+  // Only the parts the gateway DECLARED: an absent part is not a zero, and
+  // drawing a zero for it would publish a figure nobody sent. Four literal
+  // `tt()` calls, not a table lookup, because the keys are fixed — the same
+  // reasoning `raccoon-card.ts` records.
+  const breakdown = state?.balanceBreakdown;
+  const partRows = [
+    breakdown?.daily === undefined ? null : h(RaccoonPartRow, { label: tt("raccoon.partNameDaily"), value: breakdown.daily, tt }),
+    breakdown?.reward === undefined ? null : h(RaccoonPartRow, { label: tt("raccoon.partNameReward"), value: breakdown.reward, tt }),
+    breakdown?.monthly === undefined ? null : h(RaccoonPartRow, { label: tt("raccoon.partNameMonthly"), value: breakdown.monthly, tt }),
+    breakdown?.topup === undefined ? null : h(RaccoonPartRow, { label: tt("raccoon.partNameTopup"), value: breakdown.topup, tt })
+  ].filter((row) => row !== null);
+
   const panel = h(QuotaPopover, {
     tt,
     title: tt("composer.raccoonTitle"),
@@ -615,16 +783,28 @@ function RaccoonPill({ tt }: { tt: Tt }) {
     // filled with a borrowed Token Plan pool.
     poolLine: null,
     note: signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
-    children: h(
-      "div",
-      { style: S.pillPopoverRow },
+    children: [
       h(
         "div",
-        { style: S.pillPopoverRowLine },
-        h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")),
-        h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`)
-      )
-    )
+        { style: S.pillPopoverRow },
+        h(
+          "div",
+          { style: S.pillPopoverRowLine },
+          h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")),
+          h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`)
+        )
+      ),
+      // Declared parts ride as a compact deck under the total, each on its own
+      // line — no bar, because no limit was published to scale one against.
+      partRows.length === 0
+        ? null
+        : h(
+            "div",
+            { style: S.pillPopoverParts },
+            h("div", { style: S.pillPopoverPartsLabel }, tt("composer.balanceParts")),
+            partRows
+          )
+    ]
   });
 
   return h(PillBody, {
@@ -635,6 +815,7 @@ function RaccoonPill({ tt }: { tt: Tt }) {
     title,
     open,
     onToggle: toggle,
+    onClose: close,
     panel,
     children: h("span", { style: S.pillReading }, pending ? "…" : reading)
   });
