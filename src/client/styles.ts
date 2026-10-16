@@ -260,6 +260,14 @@ export const S = {
   // Tabular figures: the snapshot polls on a cadence, and proportional digits
   // make the whole toolbar twitch every few seconds as `9%` becomes `10%`.
   pillReading: { fontVariantNumeric: "tabular-nums" },
+  // The plan name — 「商汤 · 」/「浣熊 · 」— is a LABEL, so it takes the host's
+  // secondary ink while the reading keeps the primary: the row reads
+  // "which plan, at what cost", and the eye should land on the number first.
+  // opencode-go tints its `Go · ` the same way, and its `.brand` is the first
+  // thing its narrow-row tier drops — this one has no container query to do
+  // that, so the prefix stays at every width (it is the pill's shortest and
+  // most load-bearing fragment).
+  pillPlan: { color: "var(--dsw-alias-label-secondary)", flexShrink: 0 },
   // The stale mark is a footnote, not a reading — the dot and the numbers
   // already say the data is old; this only says WHY the numbers may lag.
   pillStale: { color: "var(--dsw-alias-label-tertiary)" },

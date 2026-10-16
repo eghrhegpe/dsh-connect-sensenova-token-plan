@@ -392,29 +392,39 @@ const healthy = {
 // in `PanelPage`, whose cadence the Host states in every snapshot. The form's
 // 1-second countdown timer is unrelated to polling and may stay a literal.
 {
-  // The cadence machinery now lives in the extracted `useSnapshotPolling` hook
-  // (panel-page.ts owns only JSX + the non-polling state), and since the
-  // visibility/back-off loop was hoisted into the shared
-  // `use-polling-interval.ts` (the Raccoon tab drives the same loop), the
-  // literal-free cadence assertion follows it there. Same rule, new home: the
-  // check is about "the timer takes a STATED cadence", wherever that timer is
-  // written — and it must stay a single occurrence, because two would mean two
-  // loops that could drift apart again.
+  // The cadence machinery now lives in `use-remote-read.ts`, the polling core
+  // BOTH readers drive (`useSnapshotPolling` for the quota panel,
+  // `useRaccoonBalance` in the composer pill), and the visibility/back-off loop
+  // is the shared `use-polling-interval.ts` (the Raccoon tab drives it too), so
+  // the literal-free cadence assertion follows the loop and the "one loop" check
+  // follows the core. Same rules, new homes: the checks are about "the timer
+  // takes a STATED cadence" and "no surface grows a private timer", wherever
+  // those are written.
+  //
+  // The hook file is still read for its INITIAL cadence: `30_000` is the hook's
+  // default parameter, and it is the one number here that names the quota
+  // surface rather than the loop.
   const hookSource = await readFile(new URL("../src/client/use-snapshot-polling.ts", import.meta.url), "utf8");
   const pageSource = await readFile(new URL("../src/client/panel-page.ts", import.meta.url), "utf8");
   const loopSource = await readFile(new URL("../src/client/use-polling-interval.ts", import.meta.url), "utf8");
+  const coreSource = await readFile(new URL("../src/client/use-remote-read.ts", import.meta.url), "utf8");
   const pollTimers = loopSource.match(/setInterval\(\w+,\s*[^)]*\)/g) ?? [];
   check("the poll timer takes a stated cadence, not a literal",
     pollTimers.length === 1 && /\d/.test(pollTimers[0]) === false,
     pollTimers.join(" | "));
   // The loop the quota hook shares with the Raccoon tab: the two tabs must not
   // grow separate intervals again (the visibility pause and the back-off are
-  // exactly what drifted), so both are pinned to the one hook.
+  // exactly what drifted), so both are pinned to the one hook. The composer
+  // pill's Raccoon reader is a THIRD caller now, and it goes through the same
+  // core rather than the loop directly — the check reads all three so a fourth
+  // private interval cannot slip in beside them.
   const raccoonSource = await readFile(new URL("../src/client/raccoon-tab.ts", import.meta.url), "utf8");
+  const pillSource = await readFile(new URL("../src/client/composer-usage-pill.ts", import.meta.url), "utf8");
   check("both tabs drive the one shared polling loop",
-    /usePollingInterval\(/.test(hookSource) && /usePollingInterval\(/.test(raccoonSource)
-      && !/setInterval\(/.test(hookSource) && !/setInterval\(/.test(raccoonSource),
-    "a tab grew its own setInterval");
+    /usePollingInterval\(/.test(coreSource) && /usePollingInterval\(/.test(raccoonSource)
+      && !/setInterval\(/.test(coreSource) && !/setInterval\(/.test(raccoonSource)
+      && !/usePollingInterval\(|setInterval\(/.test(hookSource) && !/setInterval\(/.test(pillSource),
+    "a surface grew its own timer instead of driving the shared loop or core");
   // The back-off is a real number, so pin it: a "60_000" that silently becomes
   // 6 s would be faster than the cadence it is backing off from.
   const backoff = loopSource.match(/ERROR_BACKOFF_MS\s*=\s*(\d+_\d+|\d+)/) ?? [];

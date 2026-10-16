@@ -110,6 +110,7 @@ const CLIENT_ID = "dsh-connect-sensenova-token-plan";
 const ACCOUNT_PATH = `/api/${CLIENT_ID}/account`;
 const MODELS_PATH = `/api/${CLIENT_ID}/models`;
 const SNAPSHOT_PATH = `/api/${CLIENT_ID}/snapshot`;
+const RACCOON_PATH = `/api/${CLIENT_ID}/raccoon`;
 
 const registrations = [];
 win.__ModuleLoader__ = { load: (registration) => registrations.push(registration) };
@@ -143,6 +144,9 @@ check("the materialized artifact exposes the same panel test surface",
   Object.keys(panel?.components ?? {}).join(","));
 
 const tt = (key) => key;
+
+/** One inline style property as react-dom actually wrote it ("" when absent). */
+const css = (el, prop) => (el?.style?.[prop] ?? "");
 
 /** Mount `element` into a fresh jsdom container under a real react-dom root. */
 function mount(element) {
@@ -475,21 +479,38 @@ function typeInto(input, value) {
     trend: { hours: 24, models: [] }
   };
   let pillFetches = 0;
-  win.fetch = (path) => {
-    pillFetches += 1;
-    return Promise.resolve({ ok: true, status: 200, json: async () => pillSnapshot });
-  };
-  // The keyed hook the slot system materializes in the real host. The fake
-  // must register a REAL hook (useState) in the component's hook list, the way
-  // the host's materialized one does: only then does a conditional early-return
-  // that skips the poller's hooks actually violate the Rules of Hooks. A plain
+  // The keyed hook the slot system materializes in the real host. The fake must
+  // register a REAL hook (useState) in the component's hook list, the way the
+  // host's materialized one does: only then does a conditional early-return that
+  // skips the poller's hooks actually violate the Rules of Hooks. A plain
   // function would let the old shape limp through this section.
   const selection = { next: { provider: "sensenova-token-plan", model: "deepseek-v4-flash" } };
   const useProjection = () => {
     React.useState(selection);
     return selection;
   };
-  const pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  // Every request is attributed to its route: the two providers' readings come
+  // from two different endpoints, and "which one did the pill actually ask" is
+  // the whole isolation claim — a bar count alone would pass a pill that read
+  // the snapshot AND the balance.
+  const routes = [];
+  // Swappable so the Raccoon frames below can change the gateway's answer.
+  // 42 150 and not 4 215: `count()` only reaches for a thousands separator at
+  // or above 10 000, and a balance figure is exactly where that rule must
+  // hold — a comma-less five-digit balance is the reading we would ship wrong.
+  let raccoonState = { ok: true, loggedIn: true, balance: 42150 };
+  win.fetch = (path) => {
+    pillFetches += 1;
+    routes.push(path);
+    const body = path === RACCOON_PATH ? raccoonState : pillSnapshot;
+    // The stall stands in for a real `reset()`: the gateway's answer is served
+    // immediately instead of after the hook's own network latency.
+    return new Promise((resolve) => setTimeout(
+      () => resolve({ ok: true, status: 200, json: async () => body }), 0));
+  };
+  // `let`: the Raccoon frames below remount the pill through the unmount →
+  // mount path a real provider switch takes.
+  let pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
   const button = () => pill.host.querySelector("button.dsh-sensenova-composer-pill");
   const text = () => pill.host.textContent;
 
@@ -541,14 +562,69 @@ function typeInto(input, value) {
     button() !== null && text().includes("composer.pool5h 20%"),
     `button=${button() !== null} text=${text().slice(0, 120)}`);
 
-  // A Raccoon model stays owned but borrows no Token Plan pool: grey "—"
-  // readings and the explanatory note, never a foreign pool's numbers.
+  // A Raccoon model is a DIFFERENT quota universe, so it must read its own
+  // gateway's balance — never a Token Plan pool, and never a percentage: the
+  // gateway declares no daily/monthly cap, so any share drawn here would be
+  // invented. The request log is what proves the isolation; the reading itself
+  // proves it stopped borrowing.
+  routes.length = 0;
   selection.next = { provider: "sensenova-raccoon", model: "sn-sensenova-6-8-flash" };
   pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
-  check("a Raccoon model shows grey placeholders, not the Token Plan pool",
-    button() !== null && text().includes("composer.pool5h —") && text().includes("composer.pool7d —")
-      && button()?.getAttribute("title")?.includes("composer.noPool") === true,
+  await act(async () => { await sleep(0); });
+  check("a Raccoon model reads the Raccoon route and never the Token Plan snapshot",
+    routes.length > 0 && routes.every((path) => path === RACCOON_PATH),
+    `routes=${JSON.stringify(routes)}`);
+  check("a Raccoon model paints its own credit balance, not Token Plan percentages",
+    button() !== null && text().includes("composer.raccoonPrefix · 42,150 composer.balanceUnit")
+      && !text().includes("composer.pool5h") && !text().includes("composer.pool7d"),
     `text=${text().slice(0, 160)} title=${button()?.getAttribute("title")}`);
+
+  // `0` is a reading, not a gap: a drained balance must not wear the grey "—"
+  // that means "we could not find out" — it is the alarm.
+  raccoonState = { ok: true, loggedIn: true, balance: 0 };
+  routes.length = 0;
+  selection.next = { provider: "sensenova-token-plan", model: "deepseek-v4-flash" };
+  pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  routes.length = 0;
+  selection.next = { provider: "sensenova-raccoon", model: "sn-sensenova-6-8-flash" };
+  pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  const drainedDot = pill.host.querySelector(".dsh-sensenova-composer-pill-dot");
+  check("a drained Raccoon balance reads 0 and takes the error tier, never a grey dash",
+    text().includes("0 composer.balanceUnit") && !text().includes("—")
+      && css(drainedDot, "background").startsWith("var(--dsw-alias-state-error-primary"),
+    `text=${text().slice(0, 160)} dot=${css(drainedDot, "background")}`);
+
+  // Signed out is a DIFFERENT fact from unreadable, and the pill has to say
+  // which one it is — a grey dash beside a pool percentage was the old answer,
+  // and it left the reader guessing. Reaching the new answer takes a REMOUNT:
+  // polling reloads on a cadence, not on every render, so a same-branch rerender
+  // legitimately keeps the previous reading. Driving it through the unmount →
+  // mount path (what a real provider switch does) also checks that nothing
+  // caches the old session's balance across the switch.
+  raccoonState = { ok: true, loggedIn: false };
+  pill.unmount();
+  routes.length = 0;
+  pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  check("a signed-out Raccoon session says so in the tooltip instead of guessing",
+    routes.length > 0 && routes.every((path) => path === RACCOON_PATH)
+      && button()?.getAttribute("title")?.includes("composer.raccoonSignedOut") === true
+      && text().includes("—"),
+    `routes=${JSON.stringify(routes)} title=${button()?.getAttribute("title")} text=${text().slice(0, 120)}`);
+
+  // Back to Token Plan: the snapshot branch takes over and stops asking the
+  // Raccoon route — the reverse of the isolation above.
+  raccoonState = { ok: true, loggedIn: true, balance: 42150 };
+  routes.length = 0;
+  selection.next = { provider: "sensenova-token-plan", model: "deepseek-v4-flash" };
+  pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  check("switching back to Token Plan reads only the snapshot again",
+    routes.length > 0 && routes.every((path) => path === SNAPSHOT_PATH)
+      && text().includes("composer.planPrefix") && text().includes("composer.pool5h 20%"),
+    `routes=${JSON.stringify(routes)} text=${text().slice(0, 160)}`);
 
   pill.unmount();
   check("unmounting the pill leaves no poller alive", pill.host.childNodes.length === 0);
@@ -587,7 +663,6 @@ function typeInto(input, value) {
   await act(async () => { await sleep(0); });
 
   const button = pill.host.querySelector("button.dsh-sensenova-composer-pill");
-  const css = (el, prop) => (el?.style?.[prop] ?? "");
   check("the pill reaches the DOM as a styled element, not a bare className",
     button !== null && typeof button.getAttribute("style") === "string"
       && button.getAttribute("style").length > 0,
@@ -678,6 +753,102 @@ function typeInto(input, value) {
     staleMark !== undefined && css(staleMark, "color").startsWith("var(--dsw-alias-label-tertiary"),
     `stale span style=${staleMark?.getAttribute("style") ?? "(absent)"} text=${stalePill.host.textContent.slice(0, 120)}`);
   stalePill.unmount();
+
+  pill.unmount();
+}
+
+// === G. the reading says WHICH plan it is (2026-10-16) ========================
+// The reported gap: "plan、raccoon 前缀" — with both providers on offer in one
+// workspace, 「5 小时 1% · 本周 2%」 does not say whose quota is draining. The
+// reference plugin answers it with `Go · ` (its plan name) before the figures,
+// and that prefix is the reason its pill is readable at a glance. Here the plan
+// name comes from the SELECTED PROVIDER, because that is what decides where the
+// numbers came from — the prefix is the data decision, not a label.
+//
+// These read the real inline style react-dom writes, same discipline as §F: the
+// prefix's own class is asserted, and its ink is a HOST TOKEN, so a retheme or
+// a swapped literal fails here rather than in a screenshot.
+{
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const okSnapshot = {
+    ok: true,
+    pools: {
+      pools: [{
+        id: "p1", name: "通用池", poolType: "default",
+        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: Date.now() + 3_600_000 },
+        window7d: { limit: 10000, used: 100, remaining: 9900 }
+      }]
+    },
+    trend: { hours: 24, models: [] }
+  };
+  let raccoonState = { ok: true, loggedIn: true, balance: 42150 };
+  win.fetch = (path) => {
+    const body = path === RACCOON_PATH ? raccoonState : okSnapshot;
+    return new Promise((resolve) => setTimeout(
+      () => resolve({ ok: true, status: 200, json: async () => body }), 0));
+  };
+  const selection = { next: { provider: "sensenova-token-plan", model: "deepseek-v4-flash" } };
+  const useProjection = () => { React.useState(selection); return selection; };
+  let pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+
+  // These look the node up per call on purpose: the Raccoon frames below remount
+  // through the unmount → mount path, and `mount` appends a FRESH container —
+  // a captured `host` would still point at the detached one and every later
+  // assertion would silently read a dead tree.
+  const plan = () => pill.host.querySelector(".dsh-sensenova-composer-pill-plan");
+  const body = () => pill.host.textContent;
+  check("the Token Plan reading leads with its plan name",
+    plan()?.textContent === "composer.planPrefix · ",
+    `plan span=${JSON.stringify(plan()?.textContent)} text=${body().slice(0, 120)}`);
+  // The prefix is a label, so it takes the shell's SECONDARY ink while the
+  // figures keep the primary — the eye should land on the number, then read
+  // whose plan it is. A primary-ink prefix would compete with the reading.
+  check("the plan name is a label: secondary ink, never a tier colour",
+    css(plan(), "color").startsWith("var(--dsw-alias-label-secondary")
+      && !css(plan(), "color").includes("state-"),
+    `plan color=${css(plan(), "color")}`);
+  // The prefix must not shrink away when the row gets narrow: it is the pill's
+  // shortest fragment and the one that survives every truncation.
+  check("the plan name does not collapse when the toolbar narrows",
+    css(plan(), "flexShrink") === "0",
+    `flex-shrink=${css(plan(), "flexShrink")}`);
+  // Position, not just presence: the plan name has to come BEFORE the figures,
+  // which is the whole point of the reference's `Go · `.
+  const order = [...pill.host.querySelectorAll("span")].findIndex((el) => el === plan());
+  const readingAt = [...pill.host.querySelectorAll("span")].findIndex((el) => el.textContent?.includes("composer.pool5h"));
+  check("the plan name precedes the figures, not trails them",
+    order !== -1 && readingAt !== -1 && order < readingAt,
+    `plan at ${order}, reading at ${readingAt}`);
+
+  // Switching provider swaps the prefix with it — the reading and the plan name
+  // are one fact, not a label someone forgot to update.
+  selection.next = { provider: "sensenova-raccoon", model: "sn-sensenova-6-8-flash" };
+  pill.rerender(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  check("switching provider swaps the plan name with the reading",
+    plan()?.textContent === "composer.raccoonPrefix · "
+      && body().includes("42,150 composer.balanceUnit"),
+    `plan=${JSON.stringify(plan()?.textContent)} text=${body().slice(0, 120)}`);
+  // The dot on a live balance is the success token, the same reading as a
+  // healthy window — "there is credit left" is a state, not a percentage.
+  const raccoonDot = pill.host.querySelector(".dsh-sensenova-composer-pill-dot");
+  check("a funded Raccoon balance wears the host's success token",
+    css(raccoonDot, "background").startsWith("var(--dsw-alias-state-success-primary"),
+    `dot=${css(raccoonDot, "background")}`);
+
+  // Signed out is its own reading: absence of a balance, stated as such, in the
+  // unknown ink — never a fabricated number. It takes the unmount → mount path
+  // for the same reason as §E: polling reloads on a cadence, not per render.
+  raccoonState = { ok: true, loggedIn: false };
+  pill.unmount();
+  pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  const signedOutDot = pill.host.querySelector(".dsh-sensenova-composer-pill-dot");
+  check("a signed-out Raccoon session shows a dash in the unknown ink, not a figure",
+    body().includes("composer.raccoonPrefix · —") && !/\d/.test(body())
+      && css(signedOutDot, "background").startsWith("var(--dsw-alias-label-tertiary"),
+    `text=${body().slice(0, 120)} dot=${css(signedOutDot, "background")}`);
 
   pill.unmount();
 }

@@ -50,6 +50,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.stale": "上次数据",
 			"composer.noPool": "该模型不在 Token Plan 额度池内（余额见小浣熊 tab）",
 			"composer.resetAt": "重置于",
+			"composer.planPrefix": "商汤",
+			"composer.raccoonPrefix": "浣熊",
+			"composer.raccoonTitle": "小浣熊积分余额",
+			"composer.balanceUnit": "分",
+			"composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
+			"composer.raccoonUnknown": "积分余额未知（见小浣熊 tab）",
 			"auth.title": "连接商汤控制台",
 			"auth.registerHint": "还没有账号？前往官网注册，免费开通 Token Plan 额度 →",
 			"auth.portalHint": "前往官网管理额度 / 获取 API Key →",
@@ -247,6 +253,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.stale": "stale data",
 			"composer.noPool": "not in a Token Plan quota pool (balance in the Raccoon tab)",
 			"composer.resetAt": "resets at",
+			"composer.planPrefix": "SenseNova",
+			"composer.raccoonPrefix": "Raccoon",
+			"composer.raccoonTitle": "Raccoon credit balance",
+			"composer.balanceUnit": "cr",
+			"composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
+			"composer.raccoonUnknown": "balance unknown (see the Raccoon tab)",
 			"auth.title": "Connect the SenseNova console",
 			"auth.registerHint": "No account yet? Register on the official site for a free Token Plan quota →",
 			"auth.portalHint": "Manage quota / get API keys on the official site →",
@@ -1230,6 +1242,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				flexShrink: 0
 			},
 			pillReading: { fontVariantNumeric: "tabular-nums" },
+			pillPlan: {
+				color: "var(--dsw-alias-label-secondary)",
+				flexShrink: 0
+			},
 			pillStale: { color: "var(--dsw-alias-label-tertiary)" },
 			pillTierOk: "var(--dsw-alias-state-success-primary, #22c55e)",
 			pillTierWarn: "var(--dsw-alias-state-warn-primary, #eab308)",
@@ -2363,17 +2379,16 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	}));
 
 //#endregion
-//#region src/client/use-snapshot-polling.ts
+//#region src/client/use-remote-read.ts
 /**
-	* Poll the Host snapshot, following its stated cadence and pausing when hidden.
-	* @param {number} [defaultCadenceMs] - poll interval before the first answer arrives.
-	* @returns {{ data: SnapshotData | null, error: SnapshotFailure | string | null, loadedOnce: boolean, updatedAt: number, cadenceMs: number, load: () => Promise<void> }}
-	*   `data`/`error` are the latest interpreted snapshot; `loadedOnce` gates the
-	*   first-frame "loading" vs "needs setup" decision; `updatedAt` stamps the
-	*   last successful read; `cadenceMs` is the live poll interval; `load` is the
-	*   manual refresher (also wired to the header's 刷新 button).
+	* Poll one Host route on the cadence its own answers state.
+	*
+	* @param route - The route to read and how to read it. MUST be stable across
+	*   renders — module scope or a `useMemo`, never a fresh literal, because the
+	*   loop is built from `load` and a rebuilt `load` restarts the interval.
+	* @param defaultCadenceMs - The interval before any body has stated one.
 	*/
-	function useSnapshotPolling(defaultCadenceMs = 3e4) {
+	function useRemoteRead(route, defaultCadenceMs) {
 		const [data, setData] = useState(null);
 		const [error, setError] = useState(null);
 		const [loadedOnce, setLoadedOnce] = useState(false);
@@ -2389,29 +2404,19 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			const controller = typeof AbortController === "function" ? new AbortController() : null;
 			inFlight.current = controller;
 			try {
-				const response = await fetch(SNAPSHOT_PATH, {
+				const response = await fetch(route.path, {
 					headers: { accept: "application/json" },
 					cache: "no-store",
-					...controller ? { signal: controller.signal } : {}
+					...controller ? { signal: controller.signal } : null
 				});
 				if (!isCurrent()) return;
-				if (!response.ok) {
-					setError(errorOfStatus(response.status));
-					return;
-				}
-				const body = await response.json();
+				const body = response.ok ? await response.json().catch(() => null) : null;
 				if (!isCurrent()) return;
-				const read = interpretSnapshot(body);
-				if (read.data === null) {
-					setData(null);
-					setError(read.error);
-					return;
-				}
-				setData(read.data);
-				setError(null);
-				setUpdatedAt(Date.now());
-				const stated = read.data?.pollSeconds;
-				if (typeof stated === "number" && Number.isFinite(stated)) setCadenceMs(statedCadenceMs(stated, cadenceMs));
+				const outcome = route.parse(body, response.status);
+				if (outcome.value !== null) setData(outcome.value);
+				setError(outcome.failure);
+				if (outcome.failure === null && outcome.value !== null) setUpdatedAt(Date.now());
+				if (typeof outcome.cadenceSeconds === "number" && Number.isFinite(outcome.cadenceSeconds)) setCadenceMs(statedCadenceMs(outcome.cadenceSeconds, cadenceMs));
 			} catch (reason) {
 				if (!isCurrent()) return;
 				setError(errorText(reason));
@@ -2419,7 +2424,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				if (isCurrent()) setLoadedOnce(true);
 				if (inFlight.current === controller) inFlight.current = null;
 			}
-		}, [cadenceMs]);
+		}, [route, cadenceMs]);
 		usePollingInterval(load, cadenceMs, { failed: error !== null });
 		useEffect(() => () => {
 			generation.current += 1;
@@ -2434,12 +2439,58 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			load
 		};
 	}
-	var init_use_snapshot_polling = __esmMin((() => {
+	var init_use_remote_read = __esmMin((() => {
 		init_runtime();
-		init_snapshot();
-		init_format();
 		init_use_polling_interval();
+		init_format();
+	}));
+
+//#endregion
+//#region src/client/use-snapshot-polling.ts
+/**
+	* Poll the Host snapshot, following its stated cadence and pausing when hidden.
+	* @param {number} [defaultCadenceMs] - poll interval before the first answer arrives.
+	* @returns {{ data: SnapshotData | null, error: SnapshotFailure | string | null, loadedOnce: boolean, updatedAt: number, cadenceMs: number, load: () => Promise<void> }}
+	*   `data`/`error` are the latest interpreted snapshot; `loadedOnce` gates the
+	*   first-frame "loading" vs "needs setup" decision; `updatedAt` stamps the
+	*   last successful read; `cadenceMs` is the live poll interval; `load` is the
+	*   manual refresher (also wired to the header's 刷新 button).
+	*/
+	function useSnapshotPolling(defaultCadenceMs = 3e4) {
+		const { data, error, loadedOnce, updatedAt, cadenceMs, load } = useRemoteRead(SNAPSHOT_ROUTE, defaultCadenceMs);
+		return {
+			data,
+			error,
+			loadedOnce,
+			updatedAt,
+			cadenceMs,
+			load
+		};
+	}
+	var SNAPSHOT_ROUTE;
+	var init_use_snapshot_polling = __esmMin((() => {
+		init_snapshot();
+		init_use_remote_read();
 		init_const();
+		SNAPSHOT_ROUTE = {
+			path: SNAPSHOT_PATH,
+			parse: (body, status) => {
+				if (status < 200 || status >= 300) return {
+					value: null,
+					failure: errorOfStatus(status)
+				};
+				const read = interpretSnapshot(body);
+				if (read.data === null) return {
+					value: null,
+					failure: read.error
+				};
+				return {
+					value: read.data,
+					failure: null,
+					cadenceSeconds: read.data.pollSeconds
+				};
+			}
+		};
 	}));
 
 //#endregion
@@ -3593,7 +3644,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		}, [report, tt]);
 		loadRef.current = () => void load();
 		const scanning = state?.loginStatus === "scanning";
-		const pollMs = statedCadenceMs(state?.pollSeconds, RACCOON_POLL_MS);
+		const pollMs = statedCadenceMs(state?.pollSeconds, RACCOON_POLL_MS$1);
 		const scanPollMs = statedCadenceMs(state?.scanPollSeconds, RACCOON_SCAN_POLL_MS);
 		const failed = readFailure !== null;
 		const fire = useCallback(() => {
@@ -3719,7 +3770,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			onWebSearch: (enabled) => void toggleWebSearch(enabled)
 		});
 	}
-	var RACCOON_POLL_MS, RACCOON_SCAN_POLL_MS;
+	var RACCOON_POLL_MS$1, RACCOON_SCAN_POLL_MS;
 	var init_raccoon_tab = __esmMin((() => {
 		init_const();
 		init_format();
@@ -3727,7 +3778,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_runtime();
 		init_use_polling_interval();
 		init_raccoon_card();
-		RACCOON_POLL_MS = 6e4;
+		RACCOON_POLL_MS$1 = 6e4;
 		RACCOON_SCAN_POLL_MS = 2e3;
 	}));
 
@@ -4028,9 +4079,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	* A pool is model-scoped when it declares `modelIds`; a Token Plan model that
 	* names no pool falls back to the first (general) pool — never to an invented
 	* aggregate. The fallback is Token Plan only: a Raccoon model belongs to the
-	* Raccoon gateway's own credit universe (its balance is read in the Raccoon
-	* tab), so it never borrows a Token Plan pool — it yields `undefined` and the
-	* pill shows grey "—" instead of a foreign number.
+	* Raccoon gateway's own credit universe, so it never borrows a Token Plan pool —
+	* it renders through {@link RaccoonPill}, which reads that gateway's balance.
 	*/
 	function poolFor(pools, modelId, provider) {
 		const hit = modelId !== void 0 ? pools?.find((p) => Array.isArray(p.modelIds) && p.modelIds.includes(modelId)) : void 0;
@@ -4065,6 +4115,17 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		return Math.round(used / limit * 100);
 	}
 	/**
+	* A balance as the pill's number, or `null` when the gateway declared none.
+	*
+	* `0` is a reading, not a gap: an exhausted balance must read `0 分` in the
+	* alarm tier, never the grey "—" that means "we could not find out". Only
+	* `null` / `undefined` / a non-finite value is absence.
+	*/
+	function balanceOf(state) {
+		const balance = state?.balance;
+		return typeof balance === "number" && Number.isFinite(balance) ? balance : null;
+	}
+	/**
 	* The reset instant for the tooltip, or `null` when none should be worded:
 	* a reset that has already passed (the window is mid-reset or the snapshot
 	* lagged it) is dropped rather than worded "重置中" — the stale mark, when
@@ -4077,44 +4138,33 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		return resetAt > now ? resetAt : null;
 	}
 	/**
-	* The composer pill. Renders nothing unless the session's model belongs to this
-	* plugin — so no other provider's conversations carry a foreign credit readout,
-	* and no fetch loop runs while it is absent (the inner poller is not mounted).
+	* The Raccoon gateway's balance reader: the same polling core the panel's
+	* snapshot reader uses, pointed at the plugin's OWN `/raccoon` route — which the
+	* Host already answers from a 5-minute cache, so a composer pill adds no gateway
+	* traffic. It reads the whole `RaccoonState` rather than a balance field, so
+	* `loggedIn` and the failure wording come from the same answer instead of a
+	* second request.
+	*
+	* Why the pill cannot simply borrow the Raccoon tab's reader: the tab is a
+	* plugin-card surface that mounts on demand and may never be opened in a given
+	* session; the pill is in the composer of every conversation whose model is a
+	* Raccoon one. A shared hook would mean either the pill polls for tabs nobody
+	* opened, or the tab reads a balance the pill already paid for. What they DO
+	* share is the lifecycle — which is why this is a route over `useRemoteRead`
+	* rather than a hand-kept copy of the snapshot reader's body.
 	*/
-	function ComposerUsagePill(props) {
-		const { tt, useProjection } = props;
-		const projection = (useProjection ?? (() => void 0))("modelSelection");
-		const provider = selectedProviderOf(projection);
-		return provider !== void 0 && PROVIDER_IDS.has(provider) ? h(ActiveComposerPill, {
-			tt,
-			provider,
-			model: selectedModelOf(projection)
-		}) : null;
+	function useRaccoonBalance(defaultCadenceMs = RACCOON_POLL_MS) {
+		const { data, error, loadedOnce, updatedAt } = useRemoteRead(RACCOON_ROUTE, defaultCadenceMs);
+		return {
+			state: data,
+			error,
+			loadedOnce,
+			updatedAt
+		};
 	}
-	/**
-	* The mounted pill: owns the snapshot poller (unconditionally, first hook) and
-	* draws the reading. Unmounted wholesale when the session leaves an owned
-	* provider, which is also what stops its fetch loop.
-	*/
-	function ActiveComposerPill({ tt, provider, model }) {
-		const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
-		const pool = poolFor(data?.pools?.pools ?? [], model, provider);
-		const w5 = pool?.window5h ?? null;
-		const w7 = pool?.window7d ?? null;
-		const tier = worseTier(tierOf(w5), tierOf(w7));
-		const p5 = percentOf(w5);
-		const p7 = percentOf(w7);
-		const now = Date.now();
-		const stale = error !== null || updatedAt > 0 && now - updatedAt > 9e4;
-		const noPool = loadedOnce && pool === void 0 && provider !== TOKEN_PLAN;
-		const resetTime = resetFor(w5?.resetAt ?? w7?.resetAt ?? null, now);
-		const label = (prefix, pct) => `${prefix} ${pct === null ? "—" : `${pct}%`}`;
-		const title = [
-			tt("composer.pillTitle"),
-			pool?.name ? String(pool.name) : noPool ? tt("composer.noPool") : null,
-			resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime).toLocaleString()}` : null,
-			stale ? tt("composer.stale") : null
-		].filter(Boolean).join(" · ");
+	/** The shared shell: the tier dot, the reading, the plan prefix. */
+	function PillBody(props) {
+		const { tt, planLabel, tier, children, stale = false, title } = props;
 		return h("button", {
 			type: "button",
 			className: "dsh-sensenova-composer-pill",
@@ -4129,17 +4179,112 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				background: TIER_INK[tier]
 			}
 		}), h("span", {
+			className: "dsh-sensenova-composer-pill-plan",
+			style: S.pillPlan
+		}, `${planLabel} · `), h("span", {
 			className: "dsh-sensenova-composer-pill-text",
 			style: tier === "exhausted" ? S.pillTierExhaustedText : void 0
-		}, h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)), " · ", h("span", { style: S.pillReading }, label(tt("composer.pool7d"), p7)), stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null));
+		}, children, stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null));
 	}
-	var PROVIDER_IDS, TOKEN_PLAN, TIER_INK, STALE_AFTER_MS;
+	/**
+	* The composer pill. Renders nothing unless the session's model belongs to this
+	* plugin — so no other provider's conversations carry a foreign credit readout,
+	* and no fetch loop runs while it is absent (the inner poller is not mounted).
+	* Which inner pill mounts is the same decision as whether one does: Token Plan
+	* reads the snapshot, Raccoon reads its own balance, and neither is mounted for
+	* the other's provider.
+	*/
+	function ComposerUsagePill(props) {
+		const { tt, useProjection } = props;
+		const projection = (useProjection ?? (() => void 0))("modelSelection");
+		const provider = selectedProviderOf(projection);
+		const model = selectedModelOf(projection);
+		if (provider === TOKEN_PLAN) return h(TokenPlanPill, {
+			tt,
+			model
+		});
+		if (provider === RACCOON) return h(RaccoonPill, { tt });
+		return null;
+	}
+	/**
+	* The Token Plan reading: the snapshot poller (unconditionally, first hook) and
+	* the two-window percentage pair. Unmounted wholesale when the session leaves
+	* the Token Plan provider, which is also what stops its fetch loop.
+	*/
+	function TokenPlanPill({ tt, model }) {
+		const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
+		const pool = poolFor(data?.pools?.pools ?? [], model, TOKEN_PLAN);
+		const w5 = pool?.window5h ?? null;
+		const w7 = pool?.window7d ?? null;
+		const tier = worseTier(tierOf(w5), tierOf(w7));
+		const p5 = percentOf(w5);
+		const p7 = percentOf(w7);
+		const now = Date.now();
+		const stale = error !== null || updatedAt > 0 && now - updatedAt > 9e4;
+		const resetTime = resetFor(w5?.resetAt ?? w7?.resetAt ?? null, now);
+		const label = (prefix, pct) => `${prefix} ${pct === null ? "—" : `${pct}%`}`;
+		const title = [
+			tt("composer.pillTitle"),
+			pool?.name ? String(pool.name) : loadedOnce ? tt("composer.noPool") : null,
+			resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime).toLocaleString()}` : null,
+			stale ? tt("composer.stale") : null
+		].filter(Boolean).join(" · ");
+		return h(PillBody, {
+			tt,
+			planLabel: tt("composer.planPrefix"),
+			tier,
+			stale,
+			title,
+			children: [
+				h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
+				" · ",
+				h("span", { style: S.pillReading }, label(tt("composer.pool7d"), p7))
+			]
+		});
+	}
+	/**
+	* The Raccoon reading: the gateway's own credit balance, in its own unit.
+	*
+	* It is a STOCK, not a meter — the Raccoon gateway declares no daily or monthly
+	* cap, so there is no honest percentage to draw here. Turning a balance into a
+	* percentage would require inventing the limit it is a share of, and the pill
+	* would then show a number nobody published. So: the balance, the plan prefix,
+	* and a tier that follows the FACT rather than a threshold — drained reads
+	* exhausted, a positive balance reads ok, an unreadable one reads unknown.
+	*/
+	function RaccoonPill({ tt }) {
+		const { state, error, loadedOnce, updatedAt } = useRaccoonBalance();
+		const balance = balanceOf(state);
+		const stale = error !== null || updatedAt > 0 && Date.now() - updatedAt > 9e4;
+		const signedOut = state !== null && state.loggedIn !== true;
+		const tier = balance === null ? "unknown" : balance <= 0 ? "exhausted" : "ok";
+		const reading = balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`;
+		const title = [
+			tt("composer.raccoonTitle"),
+			signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
+			stale ? tt("composer.stale") : null
+		].filter(Boolean).join(" · ");
+		const pending = !loadedOnce && balance === null;
+		return h(PillBody, {
+			tt,
+			planLabel: tt("composer.raccoonPrefix"),
+			tier,
+			stale: stale && loadedOnce,
+			title,
+			children: h("span", { style: S.pillReading }, pending ? "…" : reading)
+		});
+	}
+	var TOKEN_PLAN, RACCOON, RACCOON_POLL_MS, TIER_INK, STALE_AFTER_MS, RACCOON_ROUTE;
 	var init_composer_usage_pill = __esmMin((() => {
 		init_runtime();
 		init_styles();
+		init_format();
+		init_const();
+		init_use_remote_read();
 		init_use_snapshot_polling();
-		PROVIDER_IDS = /* @__PURE__ */ new Set(["sensenova-token-plan", "sensenova-raccoon"]);
 		TOKEN_PLAN = "sensenova-token-plan";
+		RACCOON = "sensenova-raccoon";
+		RACCOON_POLL_MS = 6e4;
 		TIER_INK = {
 			ok: S.pillTierOk,
 			warn: S.pillTierWarn,
@@ -4147,6 +4292,28 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			unknown: S.pillTierUnknown
 		};
 		STALE_AFTER_MS = 9e4;
+		RACCOON_ROUTE = {
+			path: RACCOON_PATH,
+			parse: (body, status) => {
+				if (status < 200 || status >= 300) return {
+					value: null,
+					failure: `HTTP ${status}`
+				};
+				const envelope = body;
+				if (envelope === null || typeof envelope !== "object" || envelope.ok === false) {
+					const detail = envelope && typeof envelope.error === "string" ? envelope.error : "";
+					return {
+						value: null,
+						failure: detail !== "" ? detail : "read failed"
+					};
+				}
+				return {
+					value: envelope,
+					failure: null,
+					cadenceSeconds: envelope.pollSeconds
+				};
+			}
+		};
 	}));
 
 //#endregion
@@ -4276,7 +4443,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 					format,
 					tokenSize,
 					statedCadenceMs,
-					RACCOON_POLL_MS,
+					RACCOON_POLL_MS: RACCOON_POLL_MS$1,
 					RACCOON_SCAN_POLL_MS,
 					HIDE_ALL_MODELS,
 					modelIsOn,

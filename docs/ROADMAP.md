@@ -570,7 +570,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 1. **门控放组件边界**：归属判定只决定内层组件的挂/摘，轮询 hook（`useSnapshotPolling`）全在内层调用。同一组件内「先调 hook、再按门控早退」会踩 React 的 hook 顺序红线（`Rendered fewer hooks than expected`）——切模型即把胶囊甩出组件树且切回也起不来，正是用户报告的症状；opencode-go 的 `UsagePill` / `ActiveUsage` 两层即此形状。
 2. **候选选择防空对象遮蔽**：切换模型后的过渡帧 `next` 可能是空对象（尚未携带新选择），`next ?? lastUsed` 会把可用 `lastUsed` 遮蔽成「无 provider」，归属模型也读成无归属而隐藏胶囊——故候选判定要求 `next` 真携带 `provider` / `model` 才优先，否则回落 `lastUsed`。
 
-配套裁定：小浣熊模型**不**回落 Token Plan 通用池（画灰「—」，tooltip 说明，其余额在小浣熊 tab 读）；重置时间进 tooltip 不进胶囊正文（正文密度对齐 opencode-go：两档百分比 + 标记）。
+配套裁定：小浣熊模型**不**回落 Token Plan 通用池（画灰「—」，tooltip 说明，其余额在小浣熊 tab 读）；重置时间进 tooltip 不进胶囊正文（正文密度对齐 opencode-go：两档百分比 + 标记）。小浣熊档的「灰「—」」裁定已被 2026-10-16 的「套餐名前缀 + 小浣熊档」推翻（它改为读网关自己的余额，见本节末段），**不回落 Token Plan 的池**这一半仍然有效。
 
 **样式裁定（2026-10-16）**：用户报「只能说样式确实不太一样」——内容对、外观错。根因不是配色偏好，是**胶囊没有任何样式可生效**：初版只有 `className`，而本插件不注入样式表（见 `toggle-switch.ts` 的同名裁定：inline style 是唯一手段），于是浏览器把它画成默认按钮（灰底、黑框、系统字体），塞进宿主一排 ghost 控件里自然像异物。落地形态：
 
@@ -582,6 +582,14 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 - 百分比用 tabular figures：快照按 cadence 轮询，比例数字会让整行工具栏每几秒抖一下。
 
 以上由 `test/render-dom.test.mjs` F 段钉住（断言**属性形状**而非渲染色——jsdom 不解 `var()`，写死颜色正是换色漏网的路径，同 `render.test.mjs` C 段的纪律）；实测旧形状 6 条红、新形状 56 条全绿。
+
+**套餐名前缀与小浣熊档（2026-10-16 落地）**：用户给出了参照物——opencode-go 的胶囊正文第一段是 `Go · `，即**套餐名**，「这个前缀可以更快识别当前模型是处于什么套餐，从而避免你猜是哪个供应商的模型」（m00267）。这不是装饰：同一会话里可以同时挂着 Token Plan 与小浣熊的模型，光看「5 小时 1%」读者无法判断在烧谁的配额。三条裁定：
+
+1. **前缀是数据源的名字，不是文案**：`商汤 · ` / `浣熊 · `（英文 UI 走 `SenseNova · ` / `Raccoon · `），跟着**档位**走，所以它回答的正是「下面这些数字属于哪套额度」。渲染成独立 span（`.dsh-sensenova-composer-pill-plan`，`flex-shrink: 0`，三级灰），是为了日后单独调色/加粗而不动读数——opencode-go 的 `Go · ` 包在 `css.brand` 里是同一个理由。
+2. **小浣熊档画它自己的积分余额**（不再画灰「—」）：读 `/raccoon` 的 `balance`。它是**存量**不是用量——网关不声明日/月上限，所以没有诚实的百分比可画；把余额换算成百分比等于发明一个没人公布的上限。因此**分级按事实而非阈值**：`balance <= 0` 耗尽（红）、`> 0` 正常（绿）、读不到未知（灰）；`0` 是读数不是空缺（画 `0 分` + 红点，绝不画「—」）。
+3. **两套额度宇宙互不借数**：小浣熊档不回落 Token Plan 的池（早前的回落会把它错画成 Token Plan 的窗口），Token Plan 档也不在无池时拿余额顶替。挂载哪个内层组件由 provider 在组件边界决定（§6.3 落地状态第 1 条）。
+
+同时把**两处轮询实现合并为一个内核**：新增 `src/client/use-remote-read.ts`（`useRemoteRead(route, defaultCadenceMs)`），承载一代守卫 / 取消句柄 / 请求 / 陈述式 cadence / 失败退避 / 卸载拆除；`useSnapshotPolling` 与胶囊的 `useRaccoonBalance` 各自只留一条 `RemoteRoute`（各自的 `parse` 是纯函数，因为 `parse` 在内核的 load 回调里跑，有状态的读法会写到别人的回调里）。起因是 `duplication-gate.mjs` 判红的**手抄副本**——而且抄出来就已漂了：胶囊那份 401 只回裸状态码（漏掉 `errorOfStatus` 的措辞）。**判据**：共享的是生命周期，不是解释；每条路由自己拥有「这个 body 什么意思」。失败仍然**保留上一次读数**（超时的读不是反证，是空缺，这正是 stale 标记的意义）。`test/panel.test.mjs` F4 的两条源码断言随之改锚到 `use-remote-read.ts`，并新增一条把胶囊也算进去（四个读面不得各自长出私有 `setInterval`；实测塞一个进去即红）。
 
 ## 7. 优先级与时间盒
 
@@ -597,7 +605,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 | **P2 ✅ 部分落地** | 第二上游 provider：已随 0.4.3 落地（三个 tab 之一 + `sensenova-raccoon`），2026-10-01 补做网关契约复测，**契约成立**（§6.1.2）；剩余未做的是 desktop 融合路径（第二**登录路径**，见 §6.1.1）——它已实测判死，维持观望。接入面盘点与死负载处置见 §6.1.4（2026-10-01：诊断收进 `?debug=1` + 常量单真源） | 高（新上游 + 新凭据生命周期） | 已落地：`test/raccoon.test.mjs` 离线 101 项 + `docs.test.mjs` 检查 9 + **`test/live-raccoon.mjs`（2026-10-01 补齐此前的「仍缺」项，比照 §2.2 给商汤做的 `live-contract`：L1 无凭据路由存在性含对照组 + L2 带凭据契约；两条红线写死在脚本里） |
 | P2（可选） | 每日积分机制的唯一悬案（§6.1.8）：「当天登录」的服务端语义（登录事件 vs. 任意认证请求）——复测方法已定：凭据当天在读只读 `GET /bills` 看当日 `daily_grant.expire_at`，零副作用；若做面板「每日发放有效期」展示，数据源是 `bills`（`balance` 不返有效期） | 低（只读端点，无新凭据域） | 接入展示时按小浣熊域 `raccoon-status` + 面板测试补断言 |
 | P2（可选，先观察） | 网关 499 `client_request_aborted_error` 的宿主侧纠正（§6.1.9）：比照 429 误判纠正层的同构做法，在流出口把这种体归入可重试类，让退避重试吃掉偶发的网关内部取消。**触发条件 = 复现率说话**：偶发一次不值得预支一层纠正逻辑；攒到复现样本（带 `x-request-id` 与时间点）再动 | 低（流出口纠正，不动 peer 内部；peer-free 判据可离线钉测） | 若做：`test/error-fix.test.mjs` 同构补用例 + `test/retry.test.mjs` 复核分类契约 |
-| **P2 ✅ 部分落地**（可选剩余） | 对话框用量胶囊（§6.3）：MVP 已落地（2026-10-15：`composer-usage-pill.ts` 两层结构 + `auto` 归属门控 + 池归组 + 重置进 tooltip，`apply.ts` 注册 `conversation.input.right`，切模型回归钉在 `render-dom.test.mjs` E 段；`composer-slot-gate.mjs` 在名册）；剩余：`auto/always/off` 三档开关 + 面板设置项 + 点击展开面板（窗口明细/重试） | 中（剩余项 = 三档开关 + 面板开关写 settings；Host 侧零新路由，复用快照） | 已落地：`render-dom.test.mjs` E 段 + `composer-slot-gate.mjs`；剩余若做：面板开关测试 + `docs.test.mjs` |
+| **P2 ✅ 部分落地**（可选剩余） | 对话框用量胶囊（§6.3）：MVP 已落地（2026-10-15：`composer-usage-pill.ts` 两层结构 + `auto` 归属门控 + 池归组 + 重置进 tooltip，`apply.ts` 注册 `conversation.input.right`，切模型回归钉在 `render-dom.test.mjs` E 段；`composer-slot-gate.mjs` 在名册）；2026-10-16 补齐**套餐名前缀**（`商汤 · ` / `浣熊 · `）与**小浣熊档画自己的积分余额**（存量语义，按事实分级；见 §6.3 末段），并把两处轮询实现合并进 `src/client/use-remote-read.ts`（`duplication-gate.mjs` 判红手抄副本后裁定「抽，不加白名单」）。剩余：`auto/always/off` 三档开关 + 面板设置项 + **点击展开面板**（用户 2026-10-16 裁定「先不做，等套餐名前缀先看效果」，故胶囊仍 `cursor: "default"` 只读） | 中（剩余项 = 三档开关 + 面板开关写 settings；Host 侧零新路由，复用快照） | 已落地：`render-dom.test.mjs` E 段（胶囊存在性/切模型/空 `next`）+ F 段（外观属性形状）+ G 段（前缀与余额读数）+ `composer-slot-gate.mjs` + `duplication-gate.mjs` 3 个克隆全在白名单；剩余若做：面板开关测试 + `docs.test.mjs` |
 | 明确不做 | 多 Key / 签到 / 跨 provider 聚合 | — | — |
 | 明确不做 | 伪倍率折进注册模型名（qoder ② 法：把倍率嵌进 DSH 原生选择器的模型名里，绕「选择器无旁路字段」限制）。2026-09-30 决议 | 低 | 现状即决议：`×N` 只作**面板侧标记**（模型花名册行尾 + 趋势图，同一匹配器、同一数值，均标「非官方」）。理由：① 倍率是操作者手填的对比数据、非平台计费事实，折进 DSH 全局模型名会把个人配置泄漏给所有会话；② qoder 嵌名是「DSH 无字段携带平台真实倍率」的 workaround，本插件的倍率本就没有平台出处，面板就是它唯一合理的位置；③ 模型名是 DSH 配置 / 选择器的稳定标识（id 匹配），加 `×N` 会破坏 id 语义。**本条只管伪倍率**——小浣熊网关倍率是平台声明的计费事实，允许嵌名，是本条的唯一例外，见 §6.1.5 |
 

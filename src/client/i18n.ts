@@ -41,6 +41,20 @@ export const zh = {
   "composer.stale": "上次数据",
   "composer.noPool": "该模型不在 Token Plan 额度池内（余额见小浣熊 tab）",
   "composer.resetAt": "重置于",
+  // The pill's leading word: which QUOTA PLAN the session is spending, read
+  // off the selected provider. Without it a session that has both Token Plan
+  // and Raccoon models on offer shows the same two percentages either way, and
+  // the reader has to guess whose quota is draining. It is a prefix, not a
+  // decoration — and it follows the UI language, so the English UI does not
+  // wear Chinese characters the model picker would never show.
+  "composer.planPrefix": "商汤",
+  "composer.raccoonPrefix": "浣熊",
+  "composer.raccoonTitle": "小浣熊积分余额",
+  // The unit rides the number rather than standing alone: "浣熊 · 4,215 分"
+  // reads as a quantity, "浣熊 · 4,215" as an id.
+  "composer.balanceUnit": "分",
+  "composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
+  "composer.raccoonUnknown": "积分余额未知（见小浣熊 tab）",
   "auth.title": "连接商汤控制台",
   "auth.registerHint": "还没有账号？前往官网注册，免费开通 Token Plan 额度 →",
   "auth.portalHint": "前往官网管理额度 / 获取 API Key →",
@@ -257,6 +271,12 @@ export const en: typeof zh = {
   "composer.stale": "stale data",
   "composer.noPool": "not in a Token Plan quota pool (balance in the Raccoon tab)",
   "composer.resetAt": "resets at",
+  "composer.planPrefix": "SenseNova",
+  "composer.raccoonPrefix": "Raccoon",
+  "composer.raccoonTitle": "Raccoon credit balance",
+  "composer.balanceUnit": "cr",
+  "composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
+  "composer.raccoonUnknown": "balance unknown (see the Raccoon tab)",
   "auth.title": "Connect the SenseNova console",
   "auth.registerHint": "No account yet? Register on the official site for a free Token Plan quota →",
   "auth.portalHint": "Manage quota / get API keys on the official site →",

@@ -7,6 +7,19 @@
  * tooltip，不进胶囊正文——正文密度与 opencode-go 对齐（它也是只在展开面板里给
  * 重置时间，pill 本体只有两档百分比 + 标记）。
  *
+ * **套餐名前缀**（2026-10-16 落地）：正文第一段是**当前 provider 的套餐名**
+ * （`商汤 · ` / `浣熊 · `，英文 UI 走 `SenseNova · ` / `Raccoon · `），照
+ * opencode-go 的 `Go · `。这不是装饰：会话里可以同时有 Token Plan 与小浣熊的模型，
+ * 胶囊不写明是哪套额度，光看「5 小时 1%」读者无法判断在烧谁的配额。前缀跟着
+ * **数据源**走而不是跟着某段文字走——它就是「下面这些数字属于哪套额度」的答案。
+ *
+ * **两条数据源，互不污染**（同一裁定，写在这里免得下一个人把它并回去）：
+ *   - Token Plan 档读 `/snapshot` 的 pools（5h / 周 百分比）；
+ *   - 小浣熊档读 `/raccoon` 的 `balance`（积分余额）。
+ * 两者的额度宇宙不同（小浣熊网关不声明日/月上限），所以**小浣熊不借 Token Plan
+ * 的池**（早前的回落逻辑会把它错画成 Token Plan 的窗口），反过来 Token Plan 档
+ * 也不在没有池时拿余额顶替。哪一档挂载由 provider 在组件边界决定，见下。
+ *
  * **样式**：本组件不注入样式表（见 `toggle-switch.ts` 的同名裁定），所以胶囊的
  * 全部外观是 inline style，取自 `styles.ts` 的 `S.pill*` 一族——那一族按**宿主
  * 工具栏**的尺度定（28px 高 / 12px 字 / 无框 / 透明底），不按本插件卡片自己的
@@ -15,47 +28,66 @@
  * 现在分级色走宿主 token（`--dsw-alias-state-*`），换肤 / 明暗随之走。
  * `className` 保留为测试选择器（`render-dom.test.mjs` 查询它）。
  *
- * **两层结构**（本组件不「切模型即消失」的关键）：归属门控发生在**组件边界**——
- * 外层 `ComposerUsagePill` 只决定内层 `ActiveComposerPill` 的挂/摘，轮询 hook
- * `useSnapshotPolling` 全在内层调用，hook 顺序恒定。若在同一组件里先调 hook 再
- * 按门控早退（`return null`），切模型会踩 Rules of Hooks 的红线（「Rendered
- * fewer hooks than expected」）：组件被 React 甩出树，切回归属模型也起不来。
- * opencode-go 的 `UsagePill` / `ActiveUsage` 就是这个形状。
+ * **三层结构**（本组件不「切模型即消失」的关键）：归属/档位门控发生在**组件边界**
+ * —— 外层 `ComposerUsagePill` 只决定内层 `TokenPlanPill` / `RaccoonPill` 谁的挂/摘，
+ * 轮询 hook 全在内层调用，hook 顺序恒定。若在同一组件里先调 hook 再按门控早退
+ * （`return null`），切模型会踩 Rules of Hooks 的红线（「Rendered fewer hooks
+ * than expected」）：组件被 React 甩出树，切回归属模型也起不来。opencode-go 的
+ * `UsagePill` / `ActiveUsage` 就是这个形状（它的 `UsagePill` 也是先选 provider
+ * 再挑内层组件）。
  *
  * 归属门控走 `useProjection("modelSelection")`（`next` 优先于 `lastUsed`），与
  * workbuddy 的 gate 逐字一致。该 prop 是 session 作用域槽位**严格必需**的物化
  * prop（见 `test/composer-slot-gate.mjs` 断言 D：session 作用域 `optional=false`，
  * 缺源抛 `SlotAssemblyError`），这里的 noop 兜底只是让 Node 侧单测能脱离 Host 注入。
  *
- * 快照复用 `useSnapshotPolling` —— 同一个 `/snapshot` 端点（Host 侧有
- * `cacheSeconds`），不另开一条轮询打控制台接口。失败降级：保留上次数值、超过
- * 一个 cadence 即标「上次数据」，不抛异常（照 §5 不变量 2 的纪律：面板照常用、
- * 该模块缺席）。非归属 provider 的会话内层根本不挂载 —— 不跑任何 fetch 循环。
+ * 两条复用现有轮询，不新开接口：`/snapshot` 走 `useSnapshotPolling`，`/raccoon` 走
+ * 本文件的 `useRaccoonBalance`（Host 侧 5 分钟缓存，`RACCOON_BALANCE_TTL_MS`）。
+ * 两者共用同一个轮询内核 `use-remote-read.ts`——一代守卫 / 取消 / 失败退避 /
+ * 卸载拆除只有一份实现；这里原本的手抄副本被 `duplication-gate.mjs` 拒绝（而且
+ * 抄出来就已经漂了：401 只回裸状态码，没有 `errorOfStatus` 的措辞）。
+ * 失败降级：保留上次数值、超过一个 cadence 即标「上次数据」，不抛异常（照 §5
+ * 不变量 2 的纪律：面板照常用、该模块缺席）。非归属 provider 的会话内层根本不
+ * 挂载 —— 不跑任何 fetch 循环。
  *
  * 池归组：额度是**池级**的（通用池 / Flash-Lite 专属池，每个 pool 带 `modelIds`），
  * 按当前模型 id 匹配所属池；Token Plan 模型匹配不到就回落到第一个池（通用池），
- * 不发明「余额」。小浣熊（`sensenova-raccoon`）模型属于小浣熊网关的积分宇宙，
- * 回落会把 Token Plan 的窗口错画成它的额度——所以它**不**回落：灰「—」+
- * tooltip 说明该模型不在 Token Plan 池内（其余额在小浣熊 tab 读）。
+ * 不发明「余额」。
  *
  * 返赠余额（`grantBalance`）不进胶囊：它是独立口径（30 天有效、不占滚动窗口），
  * 塞进百分比会混淆「窗口消耗」与「可用余额」——它属于插件卡「积分额度」tab。
  */
 import { h } from "./runtime.ts";
 import { S } from "./styles.ts";
+import { count } from "./format.ts";
+import { RACCOON_PATH } from "./const.ts";
+import { useRemoteRead, type RemoteRead, type RemoteRoute } from "./use-remote-read.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import type { Tt } from "./runtime.ts";
 import type { PoolData, QuotaWindowData } from "./wire.ts";
+import type { RaccoonState } from "../shared/wire.ts";
 
 /**
- * The provider ids this pill claims (ROADMAP §6.3): the Token Plan LLM
- * provider and the Raccoon second upstream. The Raccoon *web-search*
- * provider is not in the set — it carries no quota.
+ * The two providers this pill claims (ROADMAP §6.3), and which of them each
+ * reading belongs to. They are named separately because the branch between
+ * them IS the pill's data decision: each provider's numbers come from its own
+ * route, and neither borrows the other's. The Raccoon *web-search* provider is
+ * not among them — it carries no quota at all.
  */
-const PROVIDER_IDS = new Set(["sensenova-token-plan", "sensenova-raccoon"]);
-
-/** The provider whose models may fall back to the general pool (see {@link poolFor}). */
 const TOKEN_PLAN = "sensenova-token-plan";
+const RACCOON = "sensenova-raccoon";
+
+/**
+ * The idle cadence for the Raccoon read, before the route states its own.
+ *
+ * The route states `pollSeconds` in every answer (pinned to
+ * `RACCOON_BALANCE_TTL_MS` by `test/raccoon-status.test.mjs` B8); this is the
+ * same fallback the Raccoon tab keeps (`RACCOON_POLL_MS`) because it is the
+ * number the Host's cache window is built around. A balance is a stock, not a
+ * fast meter — this reader only exists so the pill stops showing a grey "—"
+ * where a real figure is one poll away.
+ */
+const RACCOON_POLL_MS = 60_000;
 
 /** The slice of the `modelSelection` projection this decision needs. */
 export interface ModelSelectionLike {
@@ -111,9 +143,8 @@ export function selectedModelOf(projection: ModelSelectionLike | undefined): str
  * A pool is model-scoped when it declares `modelIds`; a Token Plan model that
  * names no pool falls back to the first (general) pool — never to an invented
  * aggregate. The fallback is Token Plan only: a Raccoon model belongs to the
- * Raccoon gateway's own credit universe (its balance is read in the Raccoon
- * tab), so it never borrows a Token Plan pool — it yields `undefined` and the
- * pill shows grey "—" instead of a foreign number.
+ * Raccoon gateway's own credit universe, so it never borrows a Token Plan pool —
+ * it renders through {@link RaccoonPill}, which reads that gateway's balance.
  */
 export function poolFor(
   pools: PoolData[] | undefined,
@@ -156,11 +187,23 @@ export function percentOf(window: QuotaWindowData | null | undefined): number | 
   return Math.round((used / limit) * 100);
 }
 
+/**
+ * A balance as the pill's number, or `null` when the gateway declared none.
+ *
+ * `0` is a reading, not a gap: an exhausted balance must read `0 分` in the
+ * alarm tier, never the grey "—" that means "we could not find out". Only
+ * `null` / `undefined` / a non-finite value is absence.
+ */
+export function balanceOf(state: RaccoonState | null | undefined): number | null {
+  const balance = state?.balance;
+  return typeof balance === "number" && Number.isFinite(balance) ? balance : null;
+}
+
 const TIER_INK: Record<Tier, string> = {
   ok: S.pillTierOk,
   warn: S.pillTierWarn,
   exhausted: S.pillTierExhausted,
-  unknown: S.pillTierUnknown,
+  unknown: S.pillTierUnknown
 };
 
 /**
@@ -179,63 +222,67 @@ export function resetFor(resetAt: number | null | undefined, now: number): numbe
 /** How long a read may age before the pill calls it "上次数据" (90 s, a bit past the stated cadence). */
 export const STALE_AFTER_MS = 90_000;
 
-/** The inner pill's props — handed down as plain values, so it calls no projection hook. */
+/** The inner pills' props — handed down as plain values, so they call no projection hook. */
 interface ActivePillProps {
   tt: Tt;
-  provider: string;
   model: string | undefined;
 }
 
 /**
- * The composer pill. Renders nothing unless the session's model belongs to this
- * plugin — so no other provider's conversations carry a foreign credit readout,
- * and no fetch loop runs while it is absent (the inner poller is not mounted).
+ * How one `/raccoon` answer becomes a reading.
+ *
+ * The route answers `ok:false` for every EXPECTED failure (signed out, gateway
+ * down, token lapsed), so the failure wording is the route's, not ours: only it
+ * knows which of its failures a user can act on. A balance of `0` is a VALUE,
+ * not a failure, so it travels back as a value and {@link balanceOf} decides
+ * what the pill words. Module-scoped because the polling core closes over this
+ * route — a fresh literal per render would rebuild the loop on every render.
  */
-export function ComposerUsagePill(props: ComposerPillProps) {
-  const { tt, useProjection } = props;
-  // The keyed hook call stays at one fixed site every render: the host's
-  // materialized hook, or the noop when a Node test injects no projection.
-  // The gate below only decides whether the INNER component mounts — a legal
-  // hook boundary — never how many hooks this component called.
-  const projection = (useProjection ?? (() => undefined))("modelSelection");
-  const provider = selectedProviderOf(projection);
-  const owned = provider !== undefined && PROVIDER_IDS.has(provider);
-  return owned ? h(ActiveComposerPill, { tt, provider, model: selectedModelOf(projection) }) : null;
-}
+const RACCOON_ROUTE: RemoteRoute<RaccoonState> = {
+  path: RACCOON_PATH,
+  parse: (body, status): RemoteRead<RaccoonState> => {
+    if (status < 200 || status >= 300) return { value: null, failure: `HTTP ${status}` };
+    const envelope = body as RaccoonState | null;
+    if (envelope === null || typeof envelope !== "object" || envelope.ok === false) {
+      const detail = envelope && typeof envelope.error === "string" ? envelope.error : "";
+      return { value: null, failure: detail !== "" ? detail : "read failed" };
+    }
+    return { value: envelope, failure: null, cadenceSeconds: envelope.pollSeconds };
+  }
+};
 
 /**
- * The mounted pill: owns the snapshot poller (unconditionally, first hook) and
- * draws the reading. Unmounted wholesale when the session leaves an owned
- * provider, which is also what stops its fetch loop.
+ * The Raccoon gateway's balance reader: the same polling core the panel's
+ * snapshot reader uses, pointed at the plugin's OWN `/raccoon` route — which the
+ * Host already answers from a 5-minute cache, so a composer pill adds no gateway
+ * traffic. It reads the whole `RaccoonState` rather than a balance field, so
+ * `loggedIn` and the failure wording come from the same answer instead of a
+ * second request.
+ *
+ * Why the pill cannot simply borrow the Raccoon tab's reader: the tab is a
+ * plugin-card surface that mounts on demand and may never be opened in a given
+ * session; the pill is in the composer of every conversation whose model is a
+ * Raccoon one. A shared hook would mean either the pill polls for tabs nobody
+ * opened, or the tab reads a balance the pill already paid for. What they DO
+ * share is the lifecycle — which is why this is a route over `useRemoteRead`
+ * rather than a hand-kept copy of the snapshot reader's body.
  */
-function ActiveComposerPill({ tt, provider, model }: ActivePillProps) {
-  const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
-  const pools = data?.pools?.pools ?? [];
-  const pool = poolFor(pools, model, provider);
-  const w5 = pool?.window5h ?? null;
-  const w7 = pool?.window7d ?? null;
-  const tier = worseTier(tierOf(w5), tierOf(w7));
-  const p5 = percentOf(w5);
-  const p7 = percentOf(w7);
-  const now = Date.now();
-  const stale = error !== null || (updatedAt > 0 && now - updatedAt > STALE_AFTER_MS);
-  // The "no pool" note is worded for the Raccoon case only (its balance lives
-  // in the Raccoon tab). A Token Plan model that matched no pool is either a
-  // still-unconfigured account or an empty read — the grey "—" plus the panel
-  // tab carries that; the pill does not guess.
-  const noPool = loadedOnce && pool === undefined && provider !== TOKEN_PLAN;
-  const resetTime = resetFor(w5?.resetAt ?? w7?.resetAt ?? null, now);
-  const label = (prefix: string, pct: number | null) =>
-    `${prefix} ${pct === null ? "—" : `${pct}%`}`;
-  const title = [
-    tt("composer.pillTitle"),
-    pool?.name ? String(pool.name) : noPool ? tt("composer.noPool") : null,
-    resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime).toLocaleString()}` : null,
-    stale ? tt("composer.stale") : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+function useRaccoonBalance(defaultCadenceMs = RACCOON_POLL_MS) {
+  const { data, error, loadedOnce, updatedAt } =
+    useRemoteRead<RaccoonState>(RACCOON_ROUTE, defaultCadenceMs);
+  return { state: data, error, loadedOnce, updatedAt };
+}
 
+/** The shared shell: the tier dot, the reading, the plan prefix. */
+function PillBody(props: {
+  tt: Tt;
+  planLabel: string;
+  tier: Tier;
+  children?: unknown;
+  stale?: boolean;
+  title: string;
+}) {
+  const { tt, planLabel, tier, children, stale = false, title } = props;
   return h(
     "button",
     {
@@ -254,6 +301,15 @@ function ActiveComposerPill({ tt, provider, model }: ActivePillProps) {
       "aria-hidden": "true",
       style: { ...S.pillDot, background: TIER_INK[tier] }
     }),
+    // The plan name: which quota the numbers below belong to. Rendered as its
+    // own span so it can be tinted/weighted on its own later without touching
+    // the reading (opencode-go wraps its `Go · ` in `css.brand` for the same
+    // reason).
+    h(
+      "span",
+      { className: "dsh-sensenova-composer-pill-plan", style: S.pillPlan },
+      `${planLabel} · `
+    ),
     h(
       "span",
       {
@@ -264,10 +320,114 @@ function ActiveComposerPill({ tt, provider, model }: ActivePillProps) {
         // the model picker's own chrome.
         style: tier === "exhausted" ? S.pillTierExhaustedText : undefined
       },
-      h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
-      " · ",
-      h("span", { style: S.pillReading }, label(tt("composer.pool7d"), p7)),
+      children,
       stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null
     )
   );
+}
+
+/**
+ * The composer pill. Renders nothing unless the session's model belongs to this
+ * plugin — so no other provider's conversations carry a foreign credit readout,
+ * and no fetch loop runs while it is absent (the inner poller is not mounted).
+ * Which inner pill mounts is the same decision as whether one does: Token Plan
+ * reads the snapshot, Raccoon reads its own balance, and neither is mounted for
+ * the other's provider.
+ */
+export function ComposerUsagePill(props: ComposerPillProps) {
+  const { tt, useProjection } = props;
+  // The keyed hook call stays at one fixed site every render: the host's
+  // materialized hook, or the noop when a Node test injects no projection.
+  // The gate below only decides whether an INNER component mounts — a legal
+  // hook boundary — never how many hooks this component called.
+  const projection = (useProjection ?? (() => undefined))("modelSelection");
+  const provider = selectedProviderOf(projection);
+  const model = selectedModelOf(projection);
+  if (provider === TOKEN_PLAN) return h(TokenPlanPill, { tt, model });
+  if (provider === RACCOON) return h(RaccoonPill, { tt });
+  return null;
+}
+
+/**
+ * The Token Plan reading: the snapshot poller (unconditionally, first hook) and
+ * the two-window percentage pair. Unmounted wholesale when the session leaves
+ * the Token Plan provider, which is also what stops its fetch loop.
+ */
+function TokenPlanPill({ tt, model }: ActivePillProps) {
+  const { data, error, loadedOnce, updatedAt } = useSnapshotPolling();
+  const pools = data?.pools?.pools ?? [];
+  const pool = poolFor(pools, model, TOKEN_PLAN);
+  const w5 = pool?.window5h ?? null;
+  const w7 = pool?.window7d ?? null;
+  const tier = worseTier(tierOf(w5), tierOf(w7));
+  const p5 = percentOf(w5);
+  const p7 = percentOf(w7);
+  const now = Date.now();
+  const stale = error !== null || (updatedAt > 0 && now - updatedAt > STALE_AFTER_MS);
+  const resetTime = resetFor(w5?.resetAt ?? w7?.resetAt ?? null, now);
+  const label = (prefix: string, pct: number | null) =>
+    `${prefix} ${pct === null ? "—" : `${pct}%`}`;
+  const title = [
+    tt("composer.pillTitle"),
+    pool?.name ? String(pool.name) : loadedOnce ? tt("composer.noPool") : null,
+    resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime).toLocaleString()}` : null,
+    stale ? tt("composer.stale") : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return h(PillBody, {
+    tt,
+    planLabel: tt("composer.planPrefix"),
+    tier,
+    stale,
+    title,
+    children: [
+      h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
+      " · ",
+      h("span", { style: S.pillReading }, label(tt("composer.pool7d"), p7))
+    ]
+  });
+}
+
+/**
+ * The Raccoon reading: the gateway's own credit balance, in its own unit.
+ *
+ * It is a STOCK, not a meter — the Raccoon gateway declares no daily or monthly
+ * cap, so there is no honest percentage to draw here. Turning a balance into a
+ * percentage would require inventing the limit it is a share of, and the pill
+ * would then show a number nobody published. So: the balance, the plan prefix,
+ * and a tier that follows the FACT rather than a threshold — drained reads
+ * exhausted, a positive balance reads ok, an unreadable one reads unknown.
+ */
+function RaccoonPill({ tt }: { tt: Tt }) {
+  const { state, error, loadedOnce, updatedAt } = useRaccoonBalance();
+  const balance = balanceOf(state);
+  const now = Date.now();
+  const stale = error !== null || (updatedAt > 0 && now - updatedAt > STALE_AFTER_MS);
+  const signedOut = state !== null && state.loggedIn !== true;
+  const tier: Tier = balance === null ? "unknown" : balance <= 0 ? "exhausted" : "ok";
+  const reading = balance === null
+    ? "—"
+    : `${count(balance)} ${tt("composer.balanceUnit")}`;
+  const title = [
+    tt("composer.raccoonTitle"),
+    signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
+    stale ? tt("composer.stale") : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  // The grey "—" is honest before the first answer arrives but says nothing
+  // after one has: past the first read, the wording has to say WHICH fact is
+  // missing (signed out vs unreadable), or the reader is back to guessing.
+  const pending = !loadedOnce && balance === null;
+
+  return h(PillBody, {
+    tt,
+    planLabel: tt("composer.raccoonPrefix"),
+    tier,
+    stale: stale && loadedOnce,
+    title,
+    children: h("span", { style: S.pillReading }, pending ? "…" : reading)
+  });
 }
