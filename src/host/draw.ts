@@ -150,23 +150,32 @@ export function pickDrawModel(entries: unknown, requested?: string, preferred?: 
 /**
  * Build the `images/generations` request body.
  *
- * Only the fields the endpoint actually consumes travel: `n` is clamped to a
- * sane range (a fraction floors, junk and out-of-range values fall back to 1)
- * and `response_format` defaults to `url` — the panel/agent-facing shape that
- * renders as a Markdown image without the client having to handle base64.
+ * Only the fields the endpoint actually consumes travel. `n` is NOT silently
+ * shrunk: this platform draws one image per request (`DRAW_MAX_IMAGES`), so an
+ * `n` above it is refused HERE rather than answered with fewer images than the
+ * caller asked for — on an agent-facing tool surface, "did less and said
+ * nothing" is indistinguishable from "the model was told one image". Junk /
+ * non-positive values fall back to 1 (the documented default), matching
+ * `outputFormat` and `watermark`, which keep their documented defaults for
+ * the same reason. `response_format` defaults to `url` — the shape that
+ * renders as a Markdown image without the client handling base64.
  * `output_format` and `watermark` are always explicit (defaults `png` and
  * `true`), because the official docs recommend pinning them to survive a
  * future platform default change.
  * @param {object} options - `{ model, prompt, n, size, responseFormat, outputFormat, watermark }`.
  * @returns {object} the wire body.
+ * @throws {Error} when `n` is a finite number above {@link DRAW_MAX_IMAGES}.
  */
 export function buildDrawBody(options: Partial<DrawRequest> = {}) {
   const { model, prompt, n, size, responseFormat, outputFormat, watermark } = options;
   const count = Math.floor(num(n, 1));
+  if (Number.isFinite(count) && count > DRAW_MAX_IMAGES) {
+    throw new Error(`draw: n=${count} is not supported — this platform generates ${DRAW_MAX_IMAGES} image per request; call the tool once per image`);
+  }
   const body: Record<string, unknown> = {
     model: str(model, ""),
     prompt: str(prompt, ""),
-    n: Number.isFinite(count) ? Math.min(DRAW_MAX_IMAGES, Math.max(1, count)) : 1,
+    n: Number.isFinite(count) ? Math.max(1, count) : 1,
     response_format: str(responseFormat, "url") || "url",
     output_format: normalizeDrawOutputFormat(outputFormat),
     watermark: normalizeDrawWatermark(watermark)

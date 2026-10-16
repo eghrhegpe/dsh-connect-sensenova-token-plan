@@ -8,13 +8,17 @@
  * locked models, marking quota-exhausted models, identifying vision models,
  * building the `llm` status block — live here as one testable function.
  *
- * Pure by design: it takes the resolved `settings`, the shared `cache` /
- * `inflight` maps, the `tokenStore`, the `apiKeyStore`, the `publisher`
- * (from `provider-publish.ts`) and the `catalogStore`, and returns the exact
- * snapshot body the route writes. No HTTP surface, no filesystem writes, no
- * module-level state — so `test/routes.test.mjs` can pin every branch (the
- * 15-key snapshot contract, the vision-vs-catalog distinction, the
- * quota-flip re-registration) without mounting the full container.
+ * What "pure" means HERE, stated honestly: no HTTP surface, no module-level
+ * state, every dependency injected — so `test/routes.test.mjs` can pin every
+ * branch (the 15-key snapshot contract, the vision-vs-catalog distinction, the
+ * quota-flip re-registration) without mounting the full container. It is NOT
+ * side-effect-free: this is the plugin's refresh engine, and a poll that finds
+ * a changed catalogue WRITES the catalog state file and may REBUILD the
+ * provider registration (both awaited, on the read path). Those writes are
+ * deliberate — they are what keeps a panel-closed, provider-open Host serving
+ * fresh offers — and they are idempotent behind the signature debounce, so a
+ * GET is still safe to poll. A caller must not read this function as a pure
+ * view and fan concurrent polls out on that assumption.
  *
  * @module dsh-connect-sensenova-token-plan/snapshot-aggregate
  */

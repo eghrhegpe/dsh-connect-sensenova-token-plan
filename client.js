@@ -97,6 +97,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"pool.dedicated": "专属池",
 			"pool.default": "通用池",
 			"pool.callable": "可调用",
+			"pool.coverageUnverified": "覆盖（未核实）",
 			"pool.details": "模型与返赠详情",
 			"pool.locked": "需开通 +{count} 个",
 			"pool.uncounted": "不计入积分池：{models}",
@@ -305,6 +306,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"pool.dedicated": "dedicated",
 			"pool.default": "default",
 			"pool.callable": "Callable",
+			"pool.coverageUnverified": "Covered (unverified)",
 			"pool.details": "Models & grant details",
 			"pool.locked": "+{count} need activation",
 			"pool.uncounted": "Not billed to credit pools: {models}",
@@ -2652,10 +2654,19 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	* spendable grant balance, and the twin quota sub-cards. Everything
 	* explanatory (grant expiry, the model coverage lists) folds into one
 	* `<details>` row so the deck stays scannable on wide screens.
+	*
+	* `catalogAvailable` (the snapshot's own flag) says whether the Host actually
+	* reached `GET /v1/models` this poll. Without a catalog the split cannot be
+	* made: `callableModels` IS the plan's claim list and `lockedModels` is empty
+	* by construction — so the fold must label the list as UNVERIFIED coverage,
+	* not claim every model is callable. `undefined` (an old caller that never
+	* passes the prop) keeps the verified wording, matching the Host that always
+	* states the flag.
 	*/
-	function PoolCard({ pool, tt }) {
+	function PoolCard({ pool, tt, catalogAvailable }) {
 		const callable = pool.callableModels || pool.modelIds || [];
 		const locked = pool.lockedModels || [];
+		const unverified = catalogAvailable === false;
 		const hasDetails = pool.nearestGrantExpiry || callable.length > 0 || locked.length > 0;
 		return h("div", { style: S.card }, h("div", { style: S.cardHead }, h("span", { style: S.poolName }, pool.name), h("span", { style: S.chip }, pool.poolType === "dedicated" ? tt("pool.dedicated") : tt("pool.default")), h("span", { style: S.spacer }), (pool.grantBalance ?? 0) > 0 ? h("span", {
 			style: S.grantChip,
@@ -2675,7 +2686,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			...S.muted,
 			fontSize: 12,
 			marginRight: 2
-		} }, `${tt("pool.callable")}:`), callable.map((model) => h("span", {
+		} }, `${unverified ? tt("pool.coverageUnverified") : tt("pool.callable")}:`), callable.map((model) => h("span", {
 			key: model,
 			style: S.modelTag
 		}, model))) : null, locked.length > 0 ? h("div", {
@@ -3960,7 +3971,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			}), h("div", { style: S.poolsGrid }, (pools?.pools || []).map((pool) => h(PoolCard, {
 				key: pool.id,
 				pool,
-				tt
+				tt,
+				catalogAvailable: data.catalogAvailable !== false
 			}))), Array.isArray(data.uncountedModels) && data.uncountedModels.length > 0 ? h("div", { style: {
 				...S.muted,
 				fontSize: 12,

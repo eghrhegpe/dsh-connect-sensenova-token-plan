@@ -111,10 +111,19 @@ export function QuotaCard({ label, window, tt }: { label: string; window: QuotaW
  * spendable grant balance, and the twin quota sub-cards. Everything
  * explanatory (grant expiry, the model coverage lists) folds into one
  * `<details>` row so the deck stays scannable on wide screens.
+ *
+ * `catalogAvailable` (the snapshot's own flag) says whether the Host actually
+ * reached `GET /v1/models` this poll. Without a catalog the split cannot be
+ * made: `callableModels` IS the plan's claim list and `lockedModels` is empty
+ * by construction — so the fold must label the list as UNVERIFIED coverage,
+ * not claim every model is callable. `undefined` (an old caller that never
+ * passes the prop) keeps the verified wording, matching the Host that always
+ * states the flag.
  */
-export function PoolCard({ pool, tt }: { pool: PoolData; tt: Tt }): unknown {
+export function PoolCard({ pool, tt, catalogAvailable }: { pool: PoolData; tt: Tt; catalogAvailable?: boolean }): unknown {
   const callable = pool.callableModels || pool.modelIds || [];
   const locked = pool.lockedModels || [];
+  const unverified = catalogAvailable === false;
   const hasDetails = pool.nearestGrantExpiry || callable.length > 0 || locked.length > 0;
   return h(
     "div",
@@ -153,7 +162,7 @@ export function PoolCard({ pool, tt }: { pool: PoolData; tt: Tt }): unknown {
               ? h(
                   "div",
                   { style: S.models },
-                  h("span", { style: { ...S.muted, fontSize: 12, marginRight: 2 } }, `${tt("pool.callable")}:`),
+                  h("span", { style: { ...S.muted, fontSize: 12, marginRight: 2 } }, `${unverified ? tt("pool.coverageUnverified") : tt("pool.callable")}:`),
                   callable.map((model) => h("span", { key: model, style: S.modelTag }, model))
                 )
               : null,

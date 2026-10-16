@@ -174,6 +174,18 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     out.includes("Model-A") && out.includes("Model-B"), out.join("\n"));
   check("locked models are summarised, not listed", out.includes("pool.locked") && !out.includes("Model-C"),
     out.join("\n"));
+  // #4 (2026-10 review): without a catalog the callable/locked split cannot be
+  // made — `callableModels` IS the plan's claim list, `lockedModels` is empty
+  // by construction. The fold then says "coverage (unverified)", never
+  // "callable": the panel must not state as fact what the key was never asked.
+  const unverified = rendered(render.PoolCard, { pool, tt, catalogAvailable: false });
+  check("no catalog: the fold labels the list UNVERIFIED, not callable",
+    unverified.includes("pool.coverageUnverified:") && !unverified.includes("pool.callable:"), unverified.join("\n"));
+  const verified = rendered(render.PoolCard, { pool, tt, catalogAvailable: true });
+  check("with a catalog: the verified wording stays",
+    verified.includes("pool.callable:") && !verified.includes("pool.coverageUnverified:"), verified.join("\n"));
+  check("an absent flag (old caller) keeps the verified wording",
+    rendered(render.PoolCard, { pool, tt }).includes("pool.callable:"));
   check("no grant text when the balance is zero", !out.includes("pool.grant"), out.join("\n"));
 
   const dedicated = rendered(render.PoolCard, { pool: { ...pool, poolType: "dedicated" }, tt });

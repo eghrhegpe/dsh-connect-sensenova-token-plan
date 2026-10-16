@@ -16,8 +16,15 @@
  * throws `WEB_PROVIDER_AMBIGUOUS` — the commandcode issue #26 lesson. So
  * enabling this plugin takes the selection over (remembering whatever it
  * displaced) and `teardown` (lifecycle.ts) hands it back. The write is a
- * bounded dependency on the runtime shape, mirrored from commandcode; a
- * hardened runtime degrades to registered-but-unselected.
+ * bounded dependency on the runtime shape, mirrored from commandcode.
+ * The ORDER is load-bearing and inverted from the naive one: take the
+ * selection over, VERIFY the field actually reads our id, and only THEN
+ * register. A hardened/frozen runtime that swallows the write must degrade to
+ * NEITHER registered NOR selected — "registered but unselected" was the old
+ * claimed degradation, but with our provider registered and no selection held,
+ * a previously unconfigured Host hits exactly the #26 ambiguity we cite as
+ * the reason this takeover exists. Absence is the safe direction; a live
+ * ambiguity is not degradation.
  *
  * Home: this section lived inside `lifecycle.ts`, which already owned the
  * Token Plan mount seed, the draw tool, the vision writer AND the raccoon
@@ -38,6 +45,7 @@
 import { resolveServiceWithRetry } from "./lifecycle.ts";
 import { RaccoonSearchProvider, RACCOON_SEARCH_PROVIDER_ID } from "./raccoon-search.ts";
 import { resolveSwitchEnabled } from "./switch-precedence.ts";
+import { degrade } from "./util.ts";
 import type { Wiring } from "./types.ts";
 
 /** Structural view of the `ctx.web` runtime's search surface. */
@@ -130,8 +138,22 @@ export async function registerWebSearchProvider(ctx: { get?: (n: string) => unkn
   });
   if (web === null || typeof web.registerSearchProvider !== "function") return;
   const selection = webSearchSelection();
-  web.registerSearchProvider(new RaccoonSearchProvider({ resolveToken: resolveRaccoonToken }));
+  // Take the selection over FIRST, then prove we hold it before registering
+  // anything (see the module note: a registered-but-unselected provider is the
+  // #26 ambiguity, not a degradation). `applyWebSearchSelection` never throws;
+  // a frozen runtime leaves the read-back as the judge.
   applyWebSearchSelection(web, selection, true);
+  if (web.searchProviderId !== RACCOON_SEARCH_PROVIDER_ID) {
+    // The write did not land (or was swallowed): hand back whatever we thought
+    // we displaced — idempotent, and a failed hand-back is equally swallowed —
+    // register NOTHING, and put the silent bail on voice (PITFALLS §29/§37:
+    // a bail with no log line is how "the switch is on but search never
+    // moved" becomes unanswerable).
+    applyWebSearchSelection(web, selection, false);
+    degrade("web-search: the runtime would not accept the search-provider selection; registering no provider (the switch stays visibly on, search keeps its current backend)", null, wiring.logger, null);
+    return;
+  }
+  web.registerSearchProvider(new RaccoonSearchProvider({ resolveToken: resolveRaccoonToken }));
   // `startSideEffects` runs this as the `"web-search"` mount effect (ADR-008):
   // it is tracked, not awaited, so the `await` above can still be pending when
   // the host disposes the plugin — and `teardown` reads `webSearchRestore.current`

@@ -1,9 +1,11 @@
 /**
  * `buildSnapshotBody`'s quota-state contract — the three-state one.
  *
- * The aggregator is a pure function behind one read-only route, so everything
- * here is driven through its parameters plus a stubbed `fetch`; nothing touches
- * the network, the filesystem, or a real Host.
+ * Everything here is driven through the aggregator's parameters plus a stubbed
+ * `fetch` and stubbed stores, so THIS SUITE touches no network, no filesystem,
+ * and no real Host. (The aggregator itself is not side-effect-free — a changed
+ * catalogue writes the catalog state file and can rebuild the registration;
+ * that is exactly why the stores below are stubs that RECORD rather than skip.)
  *
  * What is pinned, and why it needed a suite of its own:
  *

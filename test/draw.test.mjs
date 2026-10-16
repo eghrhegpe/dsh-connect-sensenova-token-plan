@@ -115,7 +115,7 @@ async function rejects(fn) {
     pickDrawModel([], "", "") === null);
 }
 
-// --- 4. buildDrawBody clamps -------------------------------------------------
+// --- 4. buildDrawBody: defaults, the n refusal, normalization ----------------
 {
   const body = buildDrawBody({ model: "sensenova-u1-fast", prompt: "a cat" });
   check("defaults are n=1 and response_format=url",
@@ -125,12 +125,22 @@ async function rejects(fn) {
   check("no size field travels when unset", !Object.prototype.hasOwnProperty.call(body, "size"));
   check("size travels when set",
     buildDrawBody({ model: "m", prompt: "p", size: "1024x1024" }).size === "1024x1024");
-  check("n clamps to the platform's single-image cap (a hostile value must not burn the pool)",
-    buildDrawBody({ model: "m", prompt: "p", n: 99 }).n === 1);
-  check("n clamps low and floors fractions to the single-image cap",
-    buildDrawBody({ model: "m", prompt: "p", n: 0 }).n === 1 &&
-    buildDrawBody({ model: "m", prompt: "p", n: 2.9 }).n === 1);
-  check("junk n falls back to 1", buildDrawBody({ model: "m", prompt: "p", n: "many" }).n === 1);
+  // The platform draws ONE image per request. An `n` above the cap is REFUSED,
+  // never silently shrunk: on an agent-facing tool, answering a 3-image call
+  // with one image and no trace is "did less and said nothing".
+  const refuse = (fn) => {
+    try { fn(); return false; } catch { return true; }
+  };
+  check("n above the single-image cap is REFUSED, not clamped",
+    refuse(() => buildDrawBody({ model: "m", prompt: "p", n: 99 })) &&
+    refuse(() => buildDrawBody({ model: "m", prompt: "p", n: 2 })),
+    "buildDrawBody({n:2}) must throw");
+  check("a fractional n floors first, then follows the same rule (2.9 → 2 → refused)",
+    refuse(() => buildDrawBody({ model: "m", prompt: "p", n: 2.9 })));
+  check("junk and non-positive n fall back to the documented default 1",
+    buildDrawBody({ model: "m", prompt: "p", n: "many" }).n === 1 &&
+    buildDrawBody({ model: "m", prompt: "p", n: 0 }).n === 1);
+  check("n=1 travels exactly", buildDrawBody({ model: "m", prompt: "p", n: 1 }).n === 1);
   check("a custom response_format travels",
     buildDrawBody({ model: "m", prompt: "p", responseFormat: "b64_json" }).response_format === "b64_json");
   check("documented output_format values travel through",
@@ -295,6 +305,19 @@ async function rejects(fn) {
   {
     const message = await rejects(() => makeTool({ resolveApiKey: async () => "" }).execute({ prompt: "a cat" }));
     check("a missing key degrades with the actionable message", /SENSENOVA_API_KEY/.test(message ?? ""), message);
+  }
+  {
+    // The n refusal must reach the agent as a tool error BEFORE any request:
+    // a burned pool on a call the platform could never honor is worse than a
+    // fast refusal, and a silent clamp would tell the agent it drew 4 images
+    // while charging one.
+    let calls = 0;
+    const counted = makeTool({
+      fetchImpl: async () => { calls += 1; return { ok: true, json: async () => ({ data: [{ url: "https://img/ok.png" }] }) }; }
+    });
+    const message = await rejects(() => counted.execute({ prompt: "a cat", n: 4 }));
+    check("execute({n:4}) refuses with the reason and fires no request",
+      /n=4 is not supported/.test(message ?? "") && calls === 0, message);
   }
   {
     const message = await rejects(() => makeTool({ getEntries: () => [] }).execute({ prompt: "a cat" }));

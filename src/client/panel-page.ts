@@ -203,7 +203,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
               h(
                 "div",
                 { style: S.poolsGrid },
-                (pools?.pools || []).map((pool: PoolData) => h(PoolCard, { key: pool.id, pool, tt }))
+                (pools?.pools || []).map((pool: PoolData) => h(PoolCard, { key: pool.id, pool, tt, catalogAvailable: data.catalogAvailable !== false }))
               ),
               Array.isArray(data.uncountedModels) && data.uncountedModels.length > 0
                 ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: -4, marginBottom: 4 } },

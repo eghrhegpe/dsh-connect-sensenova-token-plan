@@ -7,7 +7,10 @@
  *   a pre-existing own pin is left alone, and a non-owner hand-back is a no-op;
  * - `registerWebSearchProvider`: off / config-error / no-web-service bail, and
  *   the happy path — one provider registered, selection taken over, and the
- *   restore remembered on `wiring.webSearchRestore`;
+ *   restore remembered on `wiring.webSearchRestore`; plus the ORDER (§2a): the
+ *   takeover is verified by read-back BEFORE anything registers, so a runtime
+ *   that swallows the write registers NOTHING instead of leaving the #26
+ *   registered-but-unselected ambiguity;
  * - the switch store: save / read / forget round-trip in a temp dir, the
  *   ADR-006 version guard, and "unrecognised reads as not set".
  *
@@ -149,6 +152,8 @@ try {
     // it is armed, so a late-arriving take-over must hand the selection straight
     // back instead of arming an unreachable restore — otherwise the global
     // `searchProviderId` stays hijacked by Raccoon after the plugin exits.
+    // Under the verified-selection order the provider IS registered (the
+    // selection landed), but the takeover is handed back and no restore arms.
     const disposedWeb = makeWeb("deepseek-official");
     const disposedWiring = makeWiring({
       settings: { webSearchEnabled: true },
@@ -160,6 +165,71 @@ try {
       disposedWeb.searchProviderId === "deepseek-official", disposedWeb.searchProviderId);
     check("disposed mid-flight: no unreachable restore is armed",
       disposedWiring.webSearchRestore.current === null, typeof disposedWiring.webSearchRestore.current);
+  }
+
+  // --- 2a. the ORDER: verified selection BEFORE registration ---------------
+  // The module claim (commandcode #26 turned into code): a runtime that
+  // swallows the selection write must leave NO provider registered —
+  // "registered but unselected" is the live ambiguity, not a degradation.
+  {
+    // A runtime whose setter silently swallows writes.
+    const stubbornRegistered = [];
+    let stubbornId = "deepseek-official";
+    const stubborn = {
+      registered: stubbornRegistered,
+      registerSearchProvider: (p) => stubbornRegistered.push(p),
+      get searchProviderId() { return stubbornId; },
+      set searchProviderId(_v) { /* the write is dropped — a hardened runtime */ }
+    };
+    const warned = [];
+    const stubbornWiring = makeWiring({
+      settings: { webSearchEnabled: true },
+      webSearchStore: { enabled: async () => true },
+      logger: { warn: (m) => warned.push(String(m)) }
+    });
+    await registerWebSearchProvider({ get: (n) => (n === "web" ? stubborn : null) }, stubbornWiring);
+    check("a swallowed selection write registers NOTHING (no registered-but-unselected ambiguity)",
+      stubbornRegistered.length === 0 && stubbornId === "deepseek-official",
+      `registered=${stubbornRegistered.length} id=${stubbornId}`);
+    check("the failed verification arms no restore",
+      stubbornWiring.webSearchRestore.current === null);
+    check("the silent bail goes to voice (PITFALLS §29/§37: no unlogged bail)",
+      warned.length === 1 && /web-search/.test(warned[0]), JSON.stringify(warned));
+
+    // The frozen shape from §1's unit case, driven through register: the
+    // assignment throws INSIDE applyWebSearchSelection, is caught there, and
+    // the read-back judges — still zero registrations.
+    const frozenRegistered = [];
+    const frozen = Object.freeze({
+      searchProviderId: undefined,
+      registerSearchProvider: (p) => frozenRegistered.push(p)
+    });
+    const frozenWiring = makeWiring({
+      settings: { webSearchEnabled: true },
+      webSearchStore: { enabled: async () => true },
+      logger: { warn: () => {} }
+    });
+    await registerWebSearchProvider({ get: (n) => (n === "web" ? frozen : null) }, frozenWiring);
+    check("a frozen runtime registers nothing either", frozenRegistered.length === 0, `registered=${frozenRegistered.length}`);
+
+    // The happy path keeps its ORDER: the takeover write lands (and reads
+    // back) strictly before registerSearchProvider fires.
+    const events = [];
+    let liveId = "deepseek-official";
+    const ordered = {
+      registerSearchProvider: () => events.push("register"),
+      get searchProviderId() { return liveId; },
+      set searchProviderId(v) { liveId = v; events.push("select"); }
+    };
+    const orderedWiring = makeWiring({
+      settings: { webSearchEnabled: true },
+      webSearchStore: { enabled: async () => true }
+    });
+    await registerWebSearchProvider({ get: (n) => (n === "web" ? ordered : null) }, orderedWiring);
+    check("selection is taken over and verified BEFORE registering (exactly select→register)",
+      events.length === 2 && events[0] === "select" && events[1] === "register", JSON.stringify(events));
+    check("the normal path registers exactly once and arms the restore",
+      typeof orderedWiring.webSearchRestore.current === "function" && liveId !== "deepseek-official");
   }
 
   // --- 2b. the restore SLOT (reconcile / teardown) ------------------------
