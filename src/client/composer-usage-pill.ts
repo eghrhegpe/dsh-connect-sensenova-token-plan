@@ -275,6 +275,36 @@ export function resetFor(resetAtSeconds: number | null | undefined, nowMs: numbe
   return resetAtSeconds * 1000 > nowMs ? resetAtSeconds : null;
 }
 
+/**
+ * The SOONEST reset still ahead among several windows' — or `null` if none is.
+ *
+ * `window_5h.resetAt ?? window_7d.resetAt` picks the first non-null, not the
+ * first LIVE one, and the two are not the same window: the 5h deadline elapses
+ * four times a day (so it is mid-reset or lagged by the snapshot's own cadence),
+ * while the weekly one is still ahead — and the tooltip, having taken the dead
+ * 5h value, then worded no deadline at all. That deleted the reset clock exactly
+ * when the reader had the most reason to look at it. Choosing the soonest future
+ * instant makes each window contribute what it knows and a spent deadline
+ * contribute nothing, instead of shadowing the other window.
+ *
+ * Ties and equal values are harmless: the first minimum wins, and both callers
+ * only ever word the one instant.
+ * @param resets - every window's `resetAt`, epoch seconds, in any order.
+ * @param nowMs - epoch ms (injectable for tests).
+ */
+export function nextResetOf(
+  resets: readonly (number | null | undefined)[],
+  nowMs: number
+): number | null {
+  let soonest: number | null = null;
+  for (const at of resets) {
+    const live = resetFor(at, nowMs);
+    if (live === null) continue;
+    if (soonest === null || live < soonest) soonest = live;
+  }
+  return soonest;
+}
+
 /** How long a read may age before the pill calls it "上次数据" (90 s, a bit past the stated cadence). */
 export const STALE_AFTER_MS = 90_000;
 
@@ -312,7 +342,18 @@ function QuotaRow({ label, window, tt }: { label: string; window: QuotaWindowDat
       "div",
       { style: S.pillPopoverRowLine },
       h("span", { style: S.pillPopoverLabel }, label),
-      h("span", { style: S.pillPopoverFigure }, `${count(used)} / ${count(limit)}`)
+      // The figure is ONE token when the limit is undeclared, not `0 / 0`: a
+      // limit of zero is the console declining to publish a cap, and printing
+      // both sides of a ratio nobody can compute publishes two numbers the
+      // platform never sent. The predicate is the one `percentOf` and `tierOf`
+      // already apply to this very field (finite and positive), so the row and
+      // the pill's colour cannot disagree about whether a share is knowable —
+      // §34's "one contract drawn twice" settled at the source.
+      h(
+        "span",
+        { style: S.pillPopoverFigure },
+        Number.isFinite(limit) && limit > 0 ? `${count(used)} / ${count(limit)}` : "—"
+      )
     ),
     h(
       "div",
@@ -623,13 +664,32 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
   const p7 = percentOf(w7);
   const now = Date.now();
   const stale = error !== null || (updatedAt > 0 && now - updatedAt > STALE_AFTER_MS);
-  const resetTime = resetFor(w5?.resetAt ?? w7?.resetAt ?? null, now);
+  // The SOONEST live deadline of the two windows, never the first non-null: the
+  // 5h deadline elapses four times a day, so `w5?.resetAt ?? w7?.resetAt` handed
+  // the tooltip a spent instant and worded no deadline at all while the weekly
+  // one was still ahead.
+  const resetTime = nextResetOf([w5?.resetAt, w7?.resetAt], now);
   const label = (prefix: string, pct: number | null) =>
     `${prefix} ${pct === null ? "—" : `${pct}%`}`;
+  // Two ways a model can own no pool, and `loadedOnce` cannot tell them apart:
+  // `use-remote-read.ts` sets it in a `finally`, so an attempt that FAILED counts
+  // as "loaded". The discriminator is `data` — the poller keeps the last good
+  // reading across a failure, so a non-null `data` means an answer did arrive at
+  // some point and the model really is in no pool, while a null `data` means we
+  // never found out. Wording the first on the second's evidence is how a 401
+  // became a claim about the billing model.
+  const everRead = data !== null;
+  const noPoolReason = everRead ? tt("composer.noPool") : tt("composer.quotaUnknown");
+  const poolTitle = pool !== undefined
+    ? pool.name ? String(pool.name) : null
+    : loadedOnce ? noPoolReason : null;
   const title = [
     tt("composer.pillTitle"),
-    pool?.name ? String(pool.name) : loadedOnce ? tt("composer.noPool") : null,
-    resetTime ? `${tt("composer.resetAt")} ${new Date(resetTime * 1000).toLocaleString()}` : null,
+    poolTitle,
+    // `when()`, not `toLocaleString()`: every other reset in this panel is worded
+    // through `when`, and the tooltip's raw locale string was a second dialect for
+    // the same field — with no day when the reset crossed midnight.
+    resetTime !== null ? `${tt("composer.resetAt")} ${when(resetTime)}` : null,
     stale ? tt("composer.stale") : null
   ]
     .filter(Boolean)
@@ -656,7 +716,7 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
     : tt("pool.default");
   const poolLine = pool === undefined
     ? null
-    : `${String(pool.name ?? "")} · ${poolKind} · ${matched ? tt("composer.poolHit") : tt("composer.poolShared")}`;
+    : `${String(pool.name ?? "")} · ${poolKind} · ${matched ? tt("composer.poolHit") : tt("composer.poolFallback")}`;
   // The pool-less case still gets the FRAME, not a bare note: a panel that
   // changes shape when the model has no pool teaches the reader two layouts, and
   // `role="dialog"` / `aria-controls` must describe the same node in both.
@@ -687,7 +747,7 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
           title: tt("composer.pillTitle"),
           stale,
           poolLine: null,
-          note: loadedOnce ? tt("composer.noPool") : "…",
+          note: loadedOnce ? noPoolReason : "…",
           children: null
         })
       : h(QuotaPopover, {
@@ -698,8 +758,8 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
           note: null,
           footnote,
           children: [
-            h(QuotaRow, { label: tt("pool.window5h"), window: w5, tt }),
-            h(QuotaRow, { label: tt("pool.window7d"), window: w7, tt })
+            h(QuotaRow, { key: "w5", label: tt("pool.window5h"), window: w5, tt }),
+            h(QuotaRow, { key: "w7", label: tt("pool.window7d"), window: w7, tt })
           ]
         });
 
@@ -714,9 +774,9 @@ function TokenPlanPill({ tt, model }: ActivePillProps) {
     onClose: close,
     panel,
     children: [
-      h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
+      h("span", { key: "r5", style: S.pillReading }, label(tt("composer.pool5h"), p5)),
       " · ",
-      h("span", { style: S.pillReading }, label(tt("composer.pool7d"), p7))
+      h("span", { key: "r7", style: S.pillReading }, label(tt("composer.pool7d"), p7))
     ]
   });
 }
@@ -767,11 +827,15 @@ function RaccoonPill({ tt }: { tt: Tt }) {
   // `tt()` calls, not a table lookup, because the keys are fixed — the same
   // reasoning `raccoon-card.ts` records.
   const breakdown = state?.balanceBreakdown;
+  // `key` on each: these four go into ONE array that is then handed as a single
+  // `children` value, so React sees a nested list and asks every member for a
+  // stable identity. Without one it reuses this row's fibre for the next part
+  // when the gateway stops declaring one — and warns on every render besides.
   const partRows = [
-    breakdown?.daily === undefined ? null : h(RaccoonPartRow, { label: tt("raccoon.partNameDaily"), value: breakdown.daily, tt }),
-    breakdown?.reward === undefined ? null : h(RaccoonPartRow, { label: tt("raccoon.partNameReward"), value: breakdown.reward, tt }),
-    breakdown?.monthly === undefined ? null : h(RaccoonPartRow, { label: tt("raccoon.partNameMonthly"), value: breakdown.monthly, tt }),
-    breakdown?.topup === undefined ? null : h(RaccoonPartRow, { label: tt("raccoon.partNameTopup"), value: breakdown.topup, tt })
+    breakdown?.daily === undefined ? null : h(RaccoonPartRow, { key: "daily", label: tt("raccoon.partNameDaily"), value: breakdown.daily, tt }),
+    breakdown?.reward === undefined ? null : h(RaccoonPartRow, { key: "reward", label: tt("raccoon.partNameReward"), value: breakdown.reward, tt }),
+    breakdown?.monthly === undefined ? null : h(RaccoonPartRow, { key: "monthly", label: tt("raccoon.partNameMonthly"), value: breakdown.monthly, tt }),
+    breakdown?.topup === undefined ? null : h(RaccoonPartRow, { key: "topup", label: tt("raccoon.partNameTopup"), value: breakdown.topup, tt })
   ].filter((row) => row !== null);
 
   const panel = h(QuotaPopover, {
@@ -786,7 +850,7 @@ function RaccoonPill({ tt }: { tt: Tt }) {
     children: [
       h(
         "div",
-        { style: S.pillPopoverRow },
+        { key: "balance", style: S.pillPopoverRow },
         h(
           "div",
           { style: S.pillPopoverRowLine },
@@ -800,7 +864,7 @@ function RaccoonPill({ tt }: { tt: Tt }) {
         ? null
         : h(
             "div",
-            { style: S.pillPopoverParts },
+            { key: "parts", style: S.pillPopoverParts },
             h("div", { style: S.pillPopoverPartsLabel }, tt("composer.balanceParts")),
             partRows
           )

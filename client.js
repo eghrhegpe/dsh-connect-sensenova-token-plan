@@ -49,6 +49,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.pool7d": "每周",
 			"composer.stale": "上次数据",
 			"composer.noPool": "该模型不在 Token Plan 额度池内（余额见小浣熊 tab）",
+			"composer.quotaUnknown": "额度未知（未能读到控制台数据）",
 			"composer.resetAt": "重置于",
 			"composer.planPrefix": "商汤",
 			"composer.raccoonPrefix": "浣熊",
@@ -57,7 +58,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.balanceLabel": "积分余额",
 			"composer.balanceParts": "余额构成",
 			"composer.poolHit": "本模型计入此池",
-			"composer.poolShared": "本模型无专属池，按通用池计",
+			"composer.poolFallback": "本模型未列入任何池，此处按平台顺序取第一个池",
 			"composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
 			"composer.raccoonUnknown": "积分余额未知（见小浣熊 tab）",
 			"auth.title": "连接商汤控制台",
@@ -256,6 +257,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.pool7d": "weekly",
 			"composer.stale": "stale data",
 			"composer.noPool": "not in a Token Plan quota pool (balance in the Raccoon tab)",
+			"composer.quotaUnknown": "quota unknown (the console could not be read)",
 			"composer.resetAt": "resets at",
 			"composer.planPrefix": "SenseNova",
 			"composer.raccoonPrefix": "Raccoon",
@@ -264,7 +266,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.balanceLabel": "Credit balance",
 			"composer.balanceParts": "Balance breakdown",
 			"composer.poolHit": "this model draws from this pool",
-			"composer.poolShared": "no dedicated pool for this model — drawn from the general pool",
+			"composer.poolFallback": "no pool lists this model — showing the first pool the platform returned",
 			"composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
 			"composer.raccoonUnknown": "balance unknown (see the Raccoon tab)",
 			"auth.title": "Connect the SenseNova console",
@@ -4243,6 +4245,32 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		return resetAtSeconds * 1e3 > nowMs ? resetAtSeconds : null;
 	}
 	/**
+	* The SOONEST reset still ahead among several windows' — or `null` if none is.
+	*
+	* `window_5h.resetAt ?? window_7d.resetAt` picks the first non-null, not the
+	* first LIVE one, and the two are not the same window: the 5h deadline elapses
+	* four times a day (so it is mid-reset or lagged by the snapshot's own cadence),
+	* while the weekly one is still ahead — and the tooltip, having taken the dead
+	* 5h value, then worded no deadline at all. That deleted the reset clock exactly
+	* when the reader had the most reason to look at it. Choosing the soonest future
+	* instant makes each window contribute what it knows and a spent deadline
+	* contribute nothing, instead of shadowing the other window.
+	*
+	* Ties and equal values are harmless: the first minimum wins, and both callers
+	* only ever word the one instant.
+	* @param resets - every window's `resetAt`, epoch seconds, in any order.
+	* @param nowMs - epoch ms (injectable for tests).
+	*/
+	function nextResetOf(resets, nowMs) {
+		let soonest = null;
+		for (const at of resets) {
+			const live = resetFor(at, nowMs);
+			if (live === null) continue;
+			if (soonest === null || live < soonest) soonest = live;
+		}
+		return soonest;
+	}
+	/**
 	* One window as a panel row: the label, a bar that carries the same share the
 	* pill's percentage rounds, the RAW figures, and the reset clock.
 	*
@@ -4261,7 +4289,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const share = limit > 0 ? Math.min(100, used / limit * 100) : null;
 		const tier = tierOf(window);
 		const resetAt = resetFor(window?.resetAt ?? null, Date.now());
-		return h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, label), h("span", { style: S.pillPopoverFigure }, `${count(used)} / ${count(limit)}`)), h("div", {
+		return h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, label), h("span", { style: S.pillPopoverFigure }, Number.isFinite(limit) && limit > 0 ? `${count(used)} / ${count(limit)}` : "—")), h("div", {
 			style: S.pillPopoverBar,
 			role: "progressbar",
 			"aria-label": `${label} ${tt("pool.used")}`,
@@ -4449,17 +4477,19 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const p7 = percentOf(w7);
 		const now = Date.now();
 		const stale = error !== null || updatedAt > 0 && now - updatedAt > 9e4;
-		const resetTime = resetFor(w5?.resetAt ?? w7?.resetAt ?? null, now);
+		const resetTime = nextResetOf([w5?.resetAt, w7?.resetAt], now);
 		const label = (prefix, pct) => `${prefix} ${pct === null ? "—" : `${pct}%`}`;
+		const noPoolReason = data !== null ? tt("composer.noPool") : tt("composer.quotaUnknown");
+		const poolTitle = pool !== void 0 ? pool.name ? String(pool.name) : null : loadedOnce ? noPoolReason : null;
 		const title = [
 			tt("composer.pillTitle"),
-			pool?.name ? String(pool.name) : loadedOnce ? tt("composer.noPool") : null,
-			resetTime ? `${tt("composer.resetAt")} ${(/* @__PURE__ */ new Date(resetTime * 1e3)).toLocaleString()}` : null,
+			poolTitle,
+			resetTime !== null ? `${tt("composer.resetAt")} ${when(resetTime)}` : null,
 			stale ? tt("composer.stale") : null
 		].filter(Boolean).join(" · ");
 		const matched = model !== void 0 && pool !== void 0 ? Array.isArray(pool.modelIds) && pool.modelIds.includes(model) : false;
 		const poolKind = pool !== void 0 && pool.poolType === "dedicated" ? tt("pool.dedicated") : tt("pool.default");
-		const poolLine = pool === void 0 ? null : `${String(pool.name ?? "")} · ${poolKind} · ${matched ? tt("composer.poolHit") : tt("composer.poolShared")}`;
+		const poolLine = pool === void 0 ? null : `${String(pool.name ?? "")} · ${poolKind} · ${matched ? tt("composer.poolHit") : tt("composer.poolFallback")}`;
 		const grant = pool === void 0 ? 0 : pool.grantBalance ?? 0;
 		const grantExpiry = pool?.nearestGrantExpiry ?? null;
 		const footnote = grant > 0 ? [format(tt("pool.grant"), { balance: count(grant) }), grantExpiry !== null && resetFor(grantExpiry, now) !== null ? format(tt("pool.grantExpiry"), {
@@ -4471,7 +4501,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			title: tt("composer.pillTitle"),
 			stale,
 			poolLine: null,
-			note: loadedOnce ? tt("composer.noPool") : "…",
+			note: loadedOnce ? noPoolReason : "…",
 			children: null
 		}) : h(QuotaPopover, {
 			tt,
@@ -4481,10 +4511,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			note: null,
 			footnote,
 			children: [h(QuotaRow, {
+				key: "w5",
 				label: tt("pool.window5h"),
 				window: w5,
 				tt
 			}), h(QuotaRow, {
+				key: "w7",
 				label: tt("pool.window7d"),
 				window: w7,
 				tt
@@ -4501,9 +4533,15 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			onClose: close,
 			panel,
 			children: [
-				h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
+				h("span", {
+					key: "r5",
+					style: S.pillReading
+				}, label(tt("composer.pool5h"), p5)),
 				" · ",
-				h("span", { style: S.pillReading }, label(tt("composer.pool7d"), p7))
+				h("span", {
+					key: "r7",
+					style: S.pillReading
+				}, label(tt("composer.pool7d"), p7))
 			]
 		});
 	}
@@ -4536,21 +4574,25 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const breakdown = state?.balanceBreakdown;
 		const partRows = [
 			breakdown?.daily === void 0 ? null : h(RaccoonPartRow, {
+				key: "daily",
 				label: tt("raccoon.partNameDaily"),
 				value: breakdown.daily,
 				tt
 			}),
 			breakdown?.reward === void 0 ? null : h(RaccoonPartRow, {
+				key: "reward",
 				label: tt("raccoon.partNameReward"),
 				value: breakdown.reward,
 				tt
 			}),
 			breakdown?.monthly === void 0 ? null : h(RaccoonPartRow, {
+				key: "monthly",
 				label: tt("raccoon.partNameMonthly"),
 				value: breakdown.monthly,
 				tt
 			}),
 			breakdown?.topup === void 0 ? null : h(RaccoonPartRow, {
+				key: "topup",
 				label: tt("raccoon.partNameTopup"),
 				value: breakdown.topup,
 				tt
@@ -4562,7 +4604,13 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			stale: stale && loadedOnce,
 			poolLine: null,
 			note: signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
-			children: [h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")), h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`))), partRows.length === 0 ? null : h("div", { style: S.pillPopoverParts }, h("div", { style: S.pillPopoverPartsLabel }, tt("composer.balanceParts")), partRows)]
+			children: [h("div", {
+				key: "balance",
+				style: S.pillPopoverRow
+			}, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")), h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`))), partRows.length === 0 ? null : h("div", {
+				key: "parts",
+				style: S.pillPopoverParts
+			}, h("div", { style: S.pillPopoverPartsLabel }, tt("composer.balanceParts")), partRows)]
 		});
 		return h(PillBody, {
 			tt,

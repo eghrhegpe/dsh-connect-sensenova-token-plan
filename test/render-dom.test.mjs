@@ -51,6 +51,23 @@ function check(name, condition, detail = "") {
   results.push({ name, pass: Boolean(condition), detail });
 }
 
+// React's missing-`key` warning, collected for the WHOLE run.
+//
+// It cannot be collected around a single mount: React warns once per component
+// NAME and then stays quiet (`ownerHasKeyUseWarning`), so a per-mount spy passes
+// vacuously on an already-warned component — observed here as an empty list while
+// stderr carried four warnings. The spy is installed for the run and forwards to
+// the real console, so nothing is hidden; the assertion at the end of §H reads
+// the run's own count. The DOM never carries a key, so the console is the only
+// observable a missing one has.
+const reactKeyWarnings = [];
+const realConsoleError = console.error;
+console.error = (...args) => {
+  const line = args.map((arg) => String(arg)).join(" ");
+  if (line.includes('unique "key"')) reactKeyWarnings.push(line);
+  realConsoleError.call(console, ...args);
+};
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const requireFromHere = createRequire(import.meta.url);
 
@@ -971,13 +988,24 @@ function typeInto(input, value) {
   // the fallback lands on `pools[0]`, which the console does not promise is the
   // general pool, so a panel that hard-wrote 「通用池」 would state a fact this
   // client cannot support.
+  //
+  // The sentence itself promises nothing about the pool's KIND — it reports the
+  // SELECTION (the model listed nowhere, the platform's order consulted), because
+  // the kind is `pools[0]`'s own `pool_type`, drawn beside the name from the wire.
+  // The old wording ("按通用池计") asserted a general pool and so contradicted
+  // itself the moment the fallback landed on a dedicated one; the `dedicated`
+  // fixture at the end of this section is that case, taken rather than assumed.
   check("the panel names the pool, its declared type, and how the model reached it",
-    panelText().includes("通用池 · pool.default · composer.poolShared") && !panelText().includes("composer.poolHit"),
+    panelText().includes("通用池 · pool.default · composer.poolFallback") && !panelText().includes("composer.poolHit"),
     `panel text=${panelText().slice(0, 200)}`);
 
   // The bar carries the SAME tier ink the pill's dot does — one threshold for
   // one plugin (80% warn), NOT `cards.ts`'s 70/90: two tiers disagreeing inside
-  // one screenshot is worse than either number.
+  // one screenshot is worse than either number. This fixture sits at 1% and 2%,
+  // so it is the OK-token control; the pair that actually straddles the line is
+  // asserted at the end of this section, because the prefix this check pins
+  // (`var(--dsw-alias-state-`) is satisfied by ANY tier. Measured: with only
+  // this assertion, `share >= 0.8` → `0.7` left every suite green.
   const fills = [...(openPanel?.querySelectorAll("div") ?? [])].filter((el) => el.style.width !== "");
   check("each window's bar is filled with the shared tier ink, not a plugin hex",
     fills.length === 2 && fills.every((el) => css(el, "background").startsWith("var(--dsw-alias-state-")),
@@ -1255,6 +1283,122 @@ function typeInto(input, value) {
 
   pill.unmount();
   check("unmounting the pill with its panel open leaves nothing behind", pill.host.childNodes.length === 0);
+
+  // ---- 判定级断言：阈值、分支、以及新增的状态 -------------------------------
+  // Every ink check above asserts a PREFIX, and a prefix is satisfied by any
+  // tier: `share >= 0.8` could become `0.7` and all suites stayed green (measured
+  // against the build, not suspected). A threshold is pinned only by two readings
+  // that straddle it; a branch only by a fixture that takes it. So: the 79%/85%
+  // pair names the exact token on each side of the line, the `dedicated` pool
+  // takes the branch that asserts its type off the wire, and each state the panel
+  // can now be in gets the reading that fails when its discriminator is removed.
+  const poolSnapshot = (pool) => ({ ok: true, pools: { pools: [pool] }, trend: { hours: 24, models: [] } });
+  const windowOf = (used, limit, resetAt) => (resetAt === undefined
+    ? { limit, used, remaining: limit - used }
+    : { limit, used, remaining: limit - used, resetAt });
+  /** A pool that LISTS the selected model, so `matched` is decided by the fixture. */
+  const planPool = (window5h, window7d, overrides = {}) => ({
+    id: "p1", name: "通用池", poolType: "default", modelIds: ["deepseek-v4-flash"],
+    window5h, window7d, grantBalance: 0, nearestGrantExpiry: null, nearestGrantExpiringBalance: 0,
+    ...overrides
+  });
+  /** Mount a Token Plan pill over `snapshot`, open its panel, hand back what it drew. */
+  const openPanelFor = async (snapshot) => {
+    win.fetch = (path) => Promise.resolve({
+      ok: true, status: 200,
+      json: async () => path === RACCOON_PATH ? raccoonState : snapshot
+    });
+    pill.unmount();
+    pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+    await act(async () => { await sleep(0); });
+    await click(button());
+    const node = panelNode();
+    return { text: node?.textContent ?? "", title: button()?.getAttribute("title") ?? "", node };
+  };
+  const fillsOf = (node) => [...(node?.querySelectorAll("div") ?? [])].filter((el) => el.style.width !== "");
+
+  // 85% — above the line, and it must be the WARN token and nothing else.
+  const warnRead = await openPanelFor(poolSnapshot(planPool(windowOf(850, 1000, inHours(1)), windowOf(10, 1000))));
+  const warnFills = fillsOf(warnRead.node);
+  check("a window at 85% wears the warn token — the 80% line asserted AT the line",
+    warnFills.length === 2
+      && css(warnFills[0], "background").startsWith("var(--dsw-alias-state-warn-primary")
+      && css(warnFills[1], "background").startsWith("var(--dsw-alias-state-success-primary"),
+    `fills=${warnFills.map((el) => `${el.style.width}/${css(el, "background")}`).join(" ")}`);
+
+  // 79% — the OTHER side of the same line, and the reading that kills a moved
+  // threshold: should 0.8 ever become 0.7, this window turns warn and fails.
+  const underRead = await openPanelFor(poolSnapshot(planPool(windowOf(790, 1000, inHours(1)), windowOf(10, 1000))));
+  const underFills = fillsOf(underRead.node);
+  check("a window just under the line (79%) is still ok — the threshold's other side",
+    underFills.length === 2
+      && css(underFills[0], "background").startsWith("var(--dsw-alias-state-success-primary"),
+    `fills=${underFills.map((el) => `${el.style.width}/${css(el, "background")}`).join(" ")}`);
+
+  // The pool branch whose type the fallback cannot assume. `poolType` is READ off
+  // the wire, so a dedicated pool must be worded dedicated — and a mutant that
+  // hard-writes "default" is invisible until a fixture declares otherwise, which
+  // is exactly why the surviving mutant survived.
+  const dedicatedRead = await openPanelFor(poolSnapshot(planPool(
+    windowOf(500, 1000, inHours(1)), windowOf(10, 1000), { name: "Flash-Lite 专属池", poolType: "dedicated" }
+  )));
+  check("a pool that LISTS the model says so, and its declared type comes off the wire",
+    dedicatedRead.text.includes("Flash-Lite 专属池 · pool.dedicated · composer.poolHit")
+      && !dedicatedRead.text.includes("composer.poolFallback"),
+    `panel text=${dedicatedRead.text.slice(0, 240)}`);
+
+  // A spent deadline must not shadow a live one. `w5?.resetAt ?? w7?.resetAt` took
+  // the first NON-NULL, so with the 5h reset already past (mid-reset, or a
+  // snapshot that lagged) the tooltip worded NO reset at all while the weekly one
+  // was still two days out. The 48h clock is also on another day, so the day form
+  // is what a `when()`-formatted instant produces — and a revert to a raw
+  // `toLocaleString()` fails the same pattern.
+  const liveRead = await openPanelFor(poolSnapshot(planPool(windowOf(500, 1000, inHours(-1)), windowOf(10, 1000, inHours(48)))));
+  check("a spent 5h deadline does not shadow the weekly one still ahead (the tooltip words the live reset)",
+    /composer\.resetAt \d{2}-\d{2} \d{2}:\d{2}/.test(liveRead.title),
+    `title=${liveRead.title}`);
+  check("and the panel words the same one live reset, for the same reason",
+    (liveRead.text.match(/pool\.reset/g) ?? []).length === 1,
+    `reset lines=${(liveRead.text.match(/pool\.reset/g) ?? []).length} text=${liveRead.text.slice(0, 240)}`);
+
+  // A limit the platform never declared. `credits()` normalizes an absent limit to
+  // 0, so the row used to publish "0 / 0" — two numbers nobody sent, for a ratio
+  // nobody can compute — while the pill beside it read 「每周 —」 for the same
+  // window. One token, and the same rule `percentOf` uses to decide the pill's.
+  const noLimitRead = await openPanelFor(poolSnapshot(planPool(windowOf(500, 1000, inHours(1)), windowOf(0, 0))));
+  // `count()` groups only at 10000 and above, so the declared side reads
+  // 「500 / 1000」 — the formatter's own rule, spelled out rather than a house
+  // style it does not have.
+  check("an undeclared limit draws no ratio at all, instead of a fabricated 0 / 0",
+    noLimitRead.text.includes("500 / 1000") && noLimitRead.text.includes("—")
+      && !noLimitRead.text.includes("0 / 0"),
+    `panel text=${noLimitRead.text.slice(0, 240)}`);
+
+  // The OTHER way a model can own no pool, and the one a 401 used to be reported
+  // as. `loadedOnce` cannot carry this branch — `use-remote-read.ts` sets it in a
+  // `finally`, so a failed attempt counts as "loaded" — and this fixture is the
+  // only one in the suite whose read never once succeeds.
+  win.fetch = () => Promise.reject(new Error("snapshot unreachable"));
+  pill.unmount();
+  pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  await click(button());
+  const unreadText = panelNode()?.textContent ?? "";
+  check("a read that never once succeeded says the quota is UNKNOWN, not that the model is outside the pools",
+    unreadText.includes("composer.quotaUnknown") && !unreadText.includes("composer.noPool"),
+    `panel text=${unreadText.slice(0, 240)}`);
+
+  // React's own dev-mode contract, read from the only place it is visible. This
+  // component builds four `children` arrays by hand — the two window rows, the two
+  // readings, the Raccoon parts deck and its two-entry frame — and React warns on
+  // EVERY render for a member with no `key`. The collector spans the whole run
+  // (see the top of this file for why a per-mount spy cannot work), so this is
+  // the run's own count: every mount above, both pills included, has rendered
+  // these arrays at least once by now.
+  check("no render in this run logs React's missing-key warning",
+    reactKeyWarnings.length === 0,
+    `${reactKeyWarnings.length} warning(s), first: ${(reactKeyWarnings[0] ?? "").slice(0, 200)}`);
+  pill.unmount();
 }
 
 console.log(JSON.stringify(results, null, 2));

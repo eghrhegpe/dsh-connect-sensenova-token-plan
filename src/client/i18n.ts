@@ -45,6 +45,14 @@ export const zh = {
   "composer.pool7d": "每周",
   "composer.stale": "上次数据",
   "composer.noPool": "该模型不在 Token Plan 额度池内（余额见小浣熊 tab）",
+  // The OTHER way a pool can be missing: the console was never read. It has to
+  // be a different sentence from `composer.noPool`, because that one is a fact
+  // about the app while this one is a fact about us — and the pill said the
+  // former on a 401's evidence. `use-remote-read.ts` sets `loadedOnce` in a
+  // `finally`, failed attempts included, so "asked and got nothing" is not
+  // "asked and was told no"; the panel's head still carries 「上次数据」 for the
+  // age of the miss.
+  "composer.quotaUnknown": "额度未知（未能读到控制台数据）",
   "composer.resetAt": "重置于",
   // The pill's leading word: which QUOTA PLAN the session is spending, read
   // off the selected provider. Without it a session that has both Token Plan
@@ -64,7 +72,16 @@ export const zh = {
   // unrelated figures.
   "composer.balanceParts": "余额构成",
   "composer.poolHit": "本模型计入此池",
-  "composer.poolShared": "本模型无专属池，按通用池计",
+  // Says HOW the pool was chosen, never WHAT KIND it is. The previous wording
+  // ("按通用池计") asserted a general pool, which `poolFor` cannot know: it falls
+  // back to `pools[0]`, and the console returns sibling pools in its own order,
+  // so a fallback legitimately lands on a 专属池 — where the old sentence then
+  // read 「Flash-Lite 专属池 · 专属池 · 本模型无专属池，按通用池计」, contradicting
+  // itself inside one line. The pool's declared type is already said by
+  // `pool.dedicated` / `pool.default` beside the name; this part is about the
+  // selection, and `docs/ROADMAP.md` §6.3 already ruled the fallback is "not a
+  // confirmed attribution, the sentence describes the selection".
+  "composer.poolFallback": "本模型未列入任何池，此处按平台顺序取第一个池",
   "composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
   "composer.raccoonUnknown": "积分余额未知（见小浣熊 tab）",
   "auth.title": "连接商汤控制台",
@@ -282,6 +299,7 @@ export const en: typeof zh = {
   "composer.pool7d": "weekly",
   "composer.stale": "stale data",
   "composer.noPool": "not in a Token Plan quota pool (balance in the Raccoon tab)",
+  "composer.quotaUnknown": "quota unknown (the console could not be read)",
   "composer.resetAt": "resets at",
   "composer.planPrefix": "SenseNova",
   "composer.raccoonPrefix": "Raccoon",
@@ -290,7 +308,7 @@ export const en: typeof zh = {
   "composer.balanceLabel": "Credit balance",
   "composer.balanceParts": "Balance breakdown",
   "composer.poolHit": "this model draws from this pool",
-  "composer.poolShared": "no dedicated pool for this model — drawn from the general pool",
+  "composer.poolFallback": "no pool lists this model — showing the first pool the platform returned",
   "composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
   "composer.raccoonUnknown": "balance unknown (see the Raccoon tab)",
   "auth.title": "Connect the SenseNova console",
