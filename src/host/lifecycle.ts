@@ -23,6 +23,7 @@
 import { defineDrawTool } from "./draw.ts";
 import { seedPublisherFromCatalog, catalogSignature } from "./provider-publish.ts";
 import { retryBounded, errMsg, degrade } from "./util.ts";
+import { armProviderRefresher } from "./provider-refresh.ts";
 import { resetDrawToolNote, setDrawToolNote } from "./draw-tool-state.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
@@ -382,19 +383,23 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
  * @returns {void} — every effect starts on call and is tracked in the registry.
  */
 export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Wiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }, effects: EffectRegistry) {
-  const { publisher, catalogStore } = wiring;
+  const { publisher, catalogStore, settings } = wiring;
 
   // Seed the registration from the persisted catalog so a restarted Host
   // offers models before its first poll (and with no console login at all).
   // Tracked, not fire-and-forget: a state dir that cannot be read just waits
   // for the poll, and the unmount's drain lets a still-settling seed finish
-  // before the publisher is disposed.
+  // before the publisher is disposed. The last KNOWN quota-exhausted set
+  // rides the seed too (v2 record): a restart must not hand the picker back
+  // the models the last known poll blocked (the three-state rule applies at
+  // boot — a v1 record states nothing and the fresh-install offer is wide).
   effects.add("catalog-seed", () =>
     seedPublisherFromCatalog(
       publisher,
       () => catalogStore.list(),
       () => catalogStore.listEnabledIds(),
-      catalogSignature
+      catalogSignature,
+      () => catalogStore.listUnavailable()
     )
   );
 
@@ -415,6 +420,20 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // rather than the bare register, so the panel's in-session flip can drop
   // and re-apply the same way this mount does.
   effects.add("web-search", () => reconcileWebSearch(ctx, wiring));
+
+  // Background freshness for the standing provider (2026-10 review #1b): the
+  // panel's poll used to be the ONLY refresher of the catalog/quota state a
+  // REGISTERED provider keeps serving — while the panel lives and dies with
+  // the browser tab. This effect arms the same aggregate engine on a slow
+  // cadence (config `providerRefreshMinutes`, default 15, 0 = off) whenever
+  // the EFFECTIVE provider switch is on; every tick re-reads the switch, so an
+  // opt-in Host that never registers a provider runs no aggregate at all. The
+  // handle lives in the `providerRefresh` slot and `teardown` closes it.
+  effects.add("provider-refresh", async () => {
+    if (settings.providerRefreshMinutes <= 0) return;
+    const handle = armProviderRefresher(wiring, settings.providerRefreshMinutes);
+    if (handle !== null) wiring.providerRefresh.current = handle;
+  });
 
   // ------------------------------------------------------------------
   // Vision step two (ARCHITECTURE.md §5.1): publish which of this key's
@@ -533,20 +552,31 @@ export { reconcileWebSearch };
  * (the unmount cleanup in `apply`) drains the effect registry BEFORE this
  * runs, so by the time these lines execute every mount-time effect has
  * either settled or been reported as a straggler by its label.
- * @param {Wiring} wiring - assembled by `apply()`; only four fields are read
- *   (`publisher`, `releaseProvider`, `raccoonPublisher`, `webSearchRestore`),
- *   so the type says exactly that shape.
+ * @param {Wiring} wiring - assembled by `apply()`; the fields read here are
+ *   `publisher` / `releaseProvider` / `raccoonPublisher` / `webSearchRestore`
+ *   / `providerRefresh`, so the type says exactly that shape.
  * @param {Array<() => void>} offs - the unregister callbacks from
  *   {@link registerRoutes}. `Function[]` was the old spelling and it is
  *   `any[]` in disguise — a `Function` may be called with any arguments and
  *   return anything, so it pinned neither the shape nor the arity.
  * @returns {void}
  */
-export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher" | "webSearchRestore">, offs: Array<() => void>) {
+export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher" | "webSearchRestore" | "providerRefresh">, offs: Array<() => void>) {
   try {
     wiring.webSearchRestore.current?.();
   } catch {
     // The web runtime may already be gone during shutdown.
+  }
+  // Stop the background refresher's clock FIRST among the timers: a tick that
+  // fires between this line and `publisher.dispose()` would be stopped by the
+  // disposed gate anyway, but clearing the interval here means a withdrawing
+  // Host never schedules another one. Idempotent through the slot: never
+  // armed (config 0 / provider off at mount) reads as `null`.
+  try {
+    wiring.providerRefresh.current?.close();
+    wiring.providerRefresh.current = null;
+  } catch {
+    // Nothing downstream depends on the clock being stopped twice-proof.
   }
   const { publisher, releaseProvider, raccoonPublisher } = wiring;
   // Before anything else: a publish still in flight (the mount seed's, or a

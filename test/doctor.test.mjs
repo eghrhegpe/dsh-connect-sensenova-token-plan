@@ -62,13 +62,35 @@ function check(name, condition, detail = "") {
 // --- 3. parseCatalogPayload -------------------------------------------------
 {
   const ok = parseCatalogPayload({
-    version: 1,
+    version: 2,
     fetchedAt: 1000,
     entries: [{ id: "m1", output_modalities: ["image"] }, { id: "m2" }],
     enabledModelIds: ["m1", "m1", 3, null]
   });
   check("catalog entries normalize + allow-list dedupes junk",
     ok.entries.length === 2 && JSON.stringify(ok.enabledModelIds) === JSON.stringify(["m1"]));
+  check("a v2 record parses (the store's whitelist, not a pinned number)",
+    ok !== null && ok.fetchedAt === 1000);
+  // The quota dimension the restart seed reads (review #1a): ABSENT states
+  // "never answered" (null) — it must not read as the healthy `[]`, or the
+  // doctor would answer "nothing is blocked" where the truth is "unknown".
+  check("a record that states no quota reads null (never ≠ answered-empty)",
+    ok.unavailableIds === null);
+  const stated = parseCatalogPayload({
+    version: 2, fetchedAt: 1000, entries: [{ id: "m1" }], enabledModelIds: [],
+    unavailableIds: ["m1", "m1", 7], unavailableAt: 900
+  });
+  check("a stated exhausted set normalizes and survives",
+    JSON.stringify(stated.unavailableIds) === JSON.stringify(["m1"]), JSON.stringify(stated));
+  const answeredEmpty = parseCatalogPayload({
+    version: 2, fetchedAt: 1000, entries: [{ id: "m1" }], enabledModelIds: [], unavailableIds: []
+  });
+  check("an answered-empty set stays [] (healthy ≠ never stated)",
+    Array.isArray(answeredEmpty.unavailableIds) && answeredEmpty.unavailableIds.length === 0);
+  // v1 is in KNOWN_CATALOG_VERSIONS: the doctor must see what the store serves.
+  const v1 = parseCatalogPayload({ version: 1, fetchedAt: 500, entries: [{ id: "m9" }], enabledModelIds: [] });
+  check("a v1 record parses (the doctor follows the store's whitelist)",
+    v1 !== null && v1.entries.length === 1 && v1.unavailableIds === null, JSON.stringify(v1));
   check("a foreign catalog version reads as unset", parseCatalogPayload({ version: 99, fetchedAt: 1, entries: [] }) === null);
   check("a catalog with no fetchedAt and no entries reads as unset",
     parseCatalogPayload({ version: 1, entries: [] }) === null);
@@ -105,6 +127,21 @@ function check(name, condition, detail = "") {
     web.providerPanel === false && web.drawPanel === null && web.catalogEntries.length === 1,
     JSON.stringify({ provider: web.providerPanel, draw: web.drawPanel, entries: web.catalogEntries.length }));
   check("the profile scope reads its own allow-list", JSON.stringify(web.catalogEnabledIds) === JSON.stringify(["c"]));
+
+  // The quota dimension on disk (review #1a wiring): a v2 record that STATES a
+  // blocked set must reach both the JSON scope and the human row — this is the
+  // field that answers "model X is still hidden after a reboot" from disk.
+  await writeFile(join(profileDir, "catalog.json"), JSON.stringify({
+    version: 2, fetchedAt: 2000, entries: [{ id: "c" }], enabledModelIds: ["c"],
+    unavailableIds: ["c"], unavailableAt: 2000
+  }));
+  const reamed = await diagnose({ dshHome: home });
+  const webQuota = reamed.scopes.find((s) => s.profile === "web");
+  check("a stated v2 quota reaches the scope",
+    JSON.stringify(webQuota.catalogUnavailableIds) === JSON.stringify(["c"]),
+    JSON.stringify(webQuota.catalogUnavailableIds));
+  check("the human row quotes the blocked count",
+    renderReport(reamed).includes("blocked=1"), renderReport(reamed));
 
   // A machine that has a profile directory should NOT also report the shared
   // directory as a fake "profile" — the shared layout is only the pre-§23 answer.

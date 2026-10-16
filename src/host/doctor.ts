@@ -19,7 +19,7 @@ import { name } from "./host-config.ts";
 import { isProfileSegment, dshHome as defaultDshHome } from "./state-store.ts";
 import { PROVIDER_VERSION, normalizeEnabled } from "./provider-store.ts";
 import { DRAW_STORE_VERSION, normalizeDrawEnabled, normalizeDrawModelId } from "./draw-store.ts";
-import { CATALOG_VERSION, normalizeEntries, normalizeEnabledIds } from "./catalog-store.ts";
+import { KNOWN_CATALOG_VERSIONS, normalizeEntries, normalizeEnabledIds } from "./catalog-store.ts";
 import { SYMPTOM, hintFor, type SymptomValue } from "./codes.ts";
 
 /** A scope whose state the doctor reported on (a profile name, or "" for shared). */
@@ -38,6 +38,11 @@ export interface DoctorScope {
   catalogEnabledIds: string[];
   /** When the catalog was fetched (ms), or 0 when unknown. */
   catalogFetchedAt: number;
+  /** The stored last-KNOWN quota-exhausted set; `null` = never stated (a v1
+   *  record or a machine that never answered a quota poll). This is what a
+   *  restart seed re-offers as blocked — "the picker hid model X and it is
+   *  still hidden after a reboot" is answered from disk by THIS field. */
+  catalogUnavailableIds: string[] | null;
   /** The state file could not be read as this plugin's payload. */
   unreadable: string[];
 }
@@ -106,16 +111,24 @@ export function parseDrawPayload(raw: unknown): { enabled: boolean | null; model
   return { enabled: normalizeDrawEnabled(source.enabled), modelId: normalizeDrawModelId(source.drawModelId) };
 }
 
-/** Parse one stored catalog record, or `null` when absent / corrupt / foreign version. */
-export function parseCatalogPayload(raw: unknown): { fetchedAt: number; entries: object[]; enabledModelIds: string[] } | null {
+/** Parse one stored catalog record, or `null` when absent / corrupt / foreign version.
+ *  v2 adds the quota dimension: `unavailableIds` is the last KNOWN exhausted set
+ *  and reads `null` when the record never stated one (v1, or quota never read).
+ *  Any version in `KNOWN_CATALOG_VERSIONS` parses — the store's own whitelist is
+ *  the single source; pinning `!== CATALOG_VERSION` here would make the doctor
+ *  report "no catalog" for every record the running store happily serves. */
+export function parseCatalogPayload(raw: unknown): { fetchedAt: number; entries: object[]; enabledModelIds: string[]; unavailableIds: string[] | null } | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const source = raw as Record<string, unknown>;
-  if (typeof source.version !== "number" || source.version !== CATALOG_VERSION) return null;
+  if (typeof source.version !== "number" || !KNOWN_CATALOG_VERSIONS.includes(source.version)) return null;
   const fetchedAt = typeof source.fetchedAt === "number" && source.fetchedAt > 0 ? source.fetchedAt : 0;
   const entries = normalizeEntries(source.entries);
   const enabledModelIds = normalizeEnabledIds(source.enabledModelIds);
+  // The same three-state the store keeps: ABSENT quota fields state "never
+  // answered" (null); a stated list — even an empty one — answers.
+  const unavailableIds = Array.isArray(source.unavailableIds) ? normalizeEnabledIds(source.unavailableIds) : null;
   if (fetchedAt <= 0 && entries.length === 0) return null;
-  return { fetchedAt, entries, enabledModelIds };
+  return { fetchedAt, entries, enabledModelIds, unavailableIds };
 }
 
 /**
@@ -139,6 +152,7 @@ async function readScope(stateDir: string, profile: string | null): Promise<Doct
     catalogEntries: [],
     catalogEnabledIds: [],
     catalogFetchedAt: 0,
+    catalogUnavailableIds: null,
     unreadable: []
   };
   // Distinguish "file absent" from "file present but not this plugin's
@@ -175,6 +189,7 @@ async function readScope(stateDir: string, profile: string | null): Promise<Doct
       scope.catalogEntries = parsed.entries;
       scope.catalogEnabledIds = parsed.enabledModelIds;
       scope.catalogFetchedAt = parsed.fetchedAt;
+      scope.catalogUnavailableIds = parsed.unavailableIds;
     } else scope.unreadable.push("catalog.json");
   }
   return scope;
@@ -333,8 +348,14 @@ export function renderReport(report: DoctorReport): string {
     const draw = scope.drawPanel === null ? "unset (deployment default rules)" : String(scope.drawPanel);
     const modelPart = scope.drawModelPanel !== null ? ` model=${scope.drawModelPanel}` : "";
     const enabledPart = scope.catalogEnabledIds.length === 0 ? "(no filter)" : String(scope.catalogEnabledIds.length);
+    // The persisted last-KNOWN exhausted set — what the restart seed re-offers
+    // as blocked. `never` = the record states nothing (a v1 file or no quota
+    // read yet), which is a DIFFERENT fact from `0` (answered: nothing is
+    // exhausted); a user asking "why is model X still hidden after a reboot"
+    // reads the answer off this number.
+    const blockedPart = ` blocked=${scope.catalogUnavailableIds === null ? "never" : scope.catalogUnavailableIds.length}`;
     lines.push(
-      `${label}: provider=${provider} draw=${draw}${modelPart} catalog=${scope.catalogEntries.length} enabled=${enabledPart}`
+      `${label}: provider=${provider} draw=${draw}${modelPart} catalog=${scope.catalogEntries.length} enabled=${enabledPart}${blockedPart}`
     );
     if (scope.unreadable.length > 0) lines.push(`${label}: unreadable state: ${scope.unreadable.join(", ")}`);
   }

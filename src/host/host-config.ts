@@ -122,7 +122,18 @@ export const CONFIG_DEFAULTS = Object.freeze({
   /** Deadline for one image request. Image models are slow; chat deadlines do not apply. */
   drawTimeoutMs: 120_000,
   /** Opt-in: register the Raccoon hosted `web_search` provider in `ctx.web`. */
-  webSearchEnabled: false
+  webSearchEnabled: false,
+  /**
+   * Background freshness for the registered provider (2026-10 review #1b).
+   * The panel polls only while it is open, but a registered provider is a
+   * STANDING execution channel — its catalog/quota state used to decay until
+   * somebody opened the panel. While the effective provider switch is ON, the
+   * Host drives one aggregate refresh every N minutes (the same engine the
+   * snapshot route calls, sharing its cache — a panel that polls in between
+   * costs the platform nothing extra). `0` disables it; a panel-only Host
+   * (switch off) never schedules the timer, keeping the opt-in shape.
+   */
+  providerRefreshMinutes: 15
 });
 
 /**
@@ -167,6 +178,22 @@ export function clampInt(raw: unknown, def: number, min: number, max = Infinity)
   return Math.min(max, Math.max(min, Math.floor(num(raw, def))));
 }
 
+/**
+ * Resolve the background-refresher cadence, where ZERO IS A LOADED ANSWER.
+ *
+ * Every other numeric setting reads through `clampInt`, whose `num` treats a
+ * non-positive value as "unset" and falls back. Here `0` means "the refresher
+ * is disabled" — a deliberate operator decision — so an explicit finite number
+ * always travels (floored and clamped to [0, 1440]); only a non-number / NaN /
+ * ±Infinity falls back to the shipped default.
+ * @param {unknown} raw - the raw `providerRefreshMinutes` row value.
+ * @returns {number} the effective cadence in minutes (0 = off).
+ */
+export function resolveProviderRefreshMinutes(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return CONFIG_DEFAULTS.providerRefreshMinutes;
+  return Math.min(1440, Math.max(0, Math.floor(raw)));
+}
+
 /** The resolved settings shape `resolveSettings` produces and consumers read. */
 export interface ResolvedSettings {
   consoleBase: string;
@@ -188,6 +215,8 @@ export interface ResolvedSettings {
   drawTimeoutMs: number;
   /** Whether the Raccoon `web_search` provider is registered in `ctx.web`. */
   webSearchEnabled: boolean;
+  /** Background refresher cadence while the provider registration is ON (0 = off). */
+  providerRefreshMinutes: number;
 }
 
 /**
@@ -255,7 +284,14 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         drawEnabled: source.drawEnabled === true,
         drawModelId: str(source.drawModelId, ""),
         drawTimeoutMs: clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 5_000),
-        webSearchEnabled: source.webSearchEnabled === true
+        webSearchEnabled: source.webSearchEnabled === true,
+        // NOT `clampInt`: `num` reads 0 as "unset", but 0 here is the LOADED
+        // answer ("the background refresher is off"), so an explicit number —
+        // zero included — always wins over the default. A set value floors and
+        // clamps into [0, 1440] (one day: anything longer is a typo, and the
+        // timer would be indistinguishable from "disabled" in practice). A
+        // non-number / NaN / ±Infinity falls back to the shipped default.
+        providerRefreshMinutes: resolveProviderRefreshMinutes(source.providerRefreshMinutes),
       },
       configError: null
     };
@@ -282,7 +318,8 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         drawEnabled: false,
         drawModelId: "",
         drawTimeoutMs: CONFIG_DEFAULTS.drawTimeoutMs,
-        webSearchEnabled: false
+        webSearchEnabled: false,
+        providerRefreshMinutes: CONFIG_DEFAULTS.providerRefreshMinutes
       },
       configError: errMsg(error)
     };

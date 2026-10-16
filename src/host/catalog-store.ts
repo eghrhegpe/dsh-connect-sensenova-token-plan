@@ -25,15 +25,20 @@ import { name } from "./host-config.ts";
 import { readStateJson, createStateReadCache, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir, createVersionedJsonWriter } from "./state-store.ts";
 import type { StoreOptions } from "./types.ts";
 
-/** Shape version, bumped when the persisted form changes incompatibly. */
-export const CATALOG_VERSION = 1;
+/** Shape version, bumped when the persisted form changes incompatibly.
+ *  v2 adds the quota dimension (`unavailableIds` / `unavailableAt`): a restart
+ *  must not hand the picker back the models the last KNOWN poll had blocked
+ *  (the three-state rule — unknown never widens the offer — applies at boot
+ *  too, see `seedPublisherFromCatalog`). v1 records still parse; they simply
+ *  carry no quota record (`listUnavailable` reads `null` = never stated). */
+export const CATALOG_VERSION = 2;
 
 /**
  * Every persisted shape THIS build can read (current + history) — the ADR-006
  * write-side guard's whitelist (see {@link persist}). Mirrors
  * `provider-store.ts` / `draw-store.ts`.
  */
-export const KNOWN_CATALOG_VERSIONS: readonly number[] = [1];
+export const KNOWN_CATALOG_VERSIONS: readonly number[] = [2, 1];
 
 /** The persisted record shape `parse` accepts and the writers produce. */
 export interface CatalogRecord {
@@ -41,6 +46,10 @@ export interface CatalogRecord {
   fetchedAt: number;
   entries: object[];
   enabledModelIds: string[];
+  /** The last KNOWN quota-exhausted ids; absent on v1 records (never stated). */
+  unavailableIds?: string[];
+  /** Wall time of the last quota write; 0 when never stated. */
+  unavailableAt?: number;
 }
 
 /**
@@ -113,16 +122,27 @@ export function normalizeEntries(raw: unknown): object[] {
  */
 function parse(raw: unknown): CatalogRecord | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const body = raw as { version?: unknown; fetchedAt?: unknown; entries?: unknown; enabledModelIds?: unknown };
-  if (num(body.version, 0) !== CATALOG_VERSION) return null;
+  const body = raw as { version?: unknown; fetchedAt?: unknown; entries?: unknown; enabledModelIds?: unknown; unavailableIds?: unknown; unavailableAt?: unknown };
+  const version = num(body.version, 0);
+  if (!KNOWN_CATALOG_VERSIONS.includes(version)) return null;
   const fetchedAt = num(body.fetchedAt, 0);
   if (fetchedAt <= 0) return null;
   const entries = normalizeEntries(body.entries);
   const enabledModelIds = normalizeEnabledIds(body.enabledModelIds);
+  // The quota dimension is v2-only: a v1 record leaves both fields ABSENT,
+  // which `listUnavailable` reports as `null` ("never stated"), the same
+  // three-state value a failed poll carries. Coercing a v1 absence to `[]`
+  // would re-invent the boot-time widening this version exists to stop.
+  const stated = Array.isArray(body.unavailableIds);
+  const record: CatalogRecord = { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds };
+  if (stated) {
+    record.unavailableIds = normalizeEnabledIds(body.unavailableIds);
+    record.unavailableAt = Math.max(0, num(body.unavailableAt, 0));
+  }
   // `version` travels with the record so the in-memory view and the written
   // payload are the same shape: what `parse` accepted is exactly what `persist`
   // will write back.
-  return { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds };
+  return record;
 }
 
 /**
@@ -131,8 +151,10 @@ function parse(raw: unknown): CatalogRecord | null {
  * @typedef {object} CatalogStore
  * @property {() => Promise<object[]>} list - stored entries, `[]` when none usable.
  * @property {() => Promise<string[]>} listEnabledIds - allow-list; `[]` means "no filter".
- * @property {(entries: object[], enabledModelIds?: string[]) => Promise<void>} replace - swap the catalog, preserving the allow-list unless given a new one.
+ * @property {() => Promise<string[]|null>} listUnavailable - last KNOWN quota-exhausted ids; `null` = never stated (v1 record or fresh install).
+ * @property {(entries: object[], enabledModelIds?: string[], unavailableIds?: string[]) => Promise<void>} replace - swap the catalog, preserving the allow-list and the quota record unless new ones are given.
  * @property {(ids: string[]) => Promise<void>} setEnabledIds - swap ONLY the allow-list.
+ * @property {(ids: string[]) => Promise<void>} setUnavailable - swap ONLY the quota record (stamps it fresh).
  * @property {() => Promise<void>} clear - remove the stored catalog.
  */
 
@@ -225,28 +247,59 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
     },
 
     /**
+     * The last KNOWN quota-exhausted ids, or `null` when never stated.
+     * `null` is the three-state "unknown", NOT an empty set: a v1 record or a
+     * fresh install carries no answer, and callers must not widen the offer
+     * on one.
+     * @returns {Promise<string[]|null>}
+     */
+    async listUnavailable() {
+      const record = await seen();
+      if (record === null || record.unavailableIds === undefined) return null;
+      return record.unavailableIds;
+    },
+
+    /**
      * Atomically replace the stored catalog.
      *
      * A read-only Home must not break the panel: the write failing only means
      * the catalog is re-fetched after the next restart, so the error is
-     * swallowed after the in-memory copy is updated. The curated allow-list is
-     * PRESERVED across a catalog refresh unless a new one is supplied.
+     * swallowed after the in-memory copy is updated. The curated allow-list and
+     * the quota record are PRESERVED across a catalog refresh unless new ones
+     * are supplied.
      * @param {object[]} entries - the fresh catalog entries.
      * @param {string[]} [enabledModelIds] - an optional replacement allow-list.
+     * @param {string[]} [unavailableIds] - the poll's last KNOWN exhausted set
+     *   (`undefined` keeps the stored statement; a `[]` states "answered,
+     *   nothing exhausted" and must travel — the three-state lives in the
+     *   ABSENCE of the argument, not the emptiness of the list).
      * @returns {Promise<void>}
      */
-    async replace(entries: object[], enabledModelIds?: string[]) {
+    async replace(entries: object[], enabledModelIds?: string[], unavailableIds?: string[]) {
       // Sync first, so the allow-list being preserved is the one ACTUALLY
       // stored — including a list another process wrote since this one last
       // looked. Reading it lazily used to silently reset it to `[]` whenever a
       // replace happened before the first `list()`.
       const current = await seen();
       const kept = current === null ? [] : current.enabledModelIds;
+      const keptQuota = current === null || current.unavailableIds === undefined
+        ? undefined
+        : current.unavailableIds;
+      const keptQuotaAt = current === null ? 0 : Math.max(0, num(current.unavailableAt, 0));
+      // `undefined` = "this poll did not answer quota" → preserve the stored
+      // statement AND its stamp. A supplied list (even `[]`, which states
+      // "answered, nothing exhausted") lands fresh with the current clock.
+      const quota = unavailableIds === undefined
+        ? keptQuota === undefined
+          ? {}
+          : { unavailableIds: keptQuota, unavailableAt: keptQuotaAt }
+        : { unavailableIds: normalizeEnabledIds(unavailableIds), unavailableAt: now() };
       held = {
         version: CATALOG_VERSION,
         fetchedAt: now(),
         entries: normalizeEntries(entries),
-        enabledModelIds: enabledModelIds === undefined ? kept : normalizeEnabledIds(enabledModelIds)
+        enabledModelIds: enabledModelIds === undefined ? kept : normalizeEnabledIds(enabledModelIds),
+        ...quota
       };
       cache.remember(held);
       await persist();
@@ -257,7 +310,28 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
       const current = await seen();
       const entries = current === null ? [] : current.entries;
       const fetchedAt = current === null ? now() : current.fetchedAt;
-      held = { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds: normalizeEnabledIds(ids) };
+      const quota = current === null || current.unavailableIds === undefined
+        ? {}
+        : { unavailableIds: current.unavailableIds, unavailableAt: Math.max(0, num(current.unavailableAt, 0)) };
+      held = { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds: normalizeEnabledIds(ids), ...quota };
+      cache.remember(held);
+      await persist();
+    },
+
+    /**
+     * Swap ONLY the quota record, keeping catalog and allow-list. A successful
+     * quota read that arrives while no catalog fetch is due (the catalogue is
+     * cached an hour; quota flips every poll) still lands here, so a restart
+     * inherits THIS last known answer rather than the hour-old one.
+     * @param {string[]} ids - the exhausted ids (`[]` states "nothing exhausted").
+     * @returns {Promise<void>}
+     */
+    async setUnavailable(ids: string[]) {
+      const current = await seen();
+      const base = current === null
+        ? { version: CATALOG_VERSION, fetchedAt: now(), entries: [], enabledModelIds: [] }
+        : current;
+      held = { ...base, unavailableIds: normalizeEnabledIds(ids), unavailableAt: now() };
       cache.remember(held);
       await persist();
     },
@@ -287,7 +361,12 @@ export function createMemoryCatalogStore(now = Date.now) {
   // The initializer would pin this to `null` (noImplicitAny is off, but a
   // default/initialized binding is still typed from its initializer — see the
   // tsconfig note); annotate the record shape parse() produces instead.
-  let held: { version: number; fetchedAt: number; entries: object[]; enabledModelIds: string[] } | null = null;
+  let held: CatalogRecord | null = null;
+  const quotaOf = (unavailableIds?: string[]) => unavailableIds === undefined
+    ? (held === null || held.unavailableIds === undefined
+        ? {}
+        : { unavailableIds: held.unavailableIds, unavailableAt: Math.max(0, num(held.unavailableAt, 0)) })
+    : { unavailableIds: normalizeEnabledIds(unavailableIds), unavailableAt: now() };
   return {
     async list() {
       return held === null ? [] : held.entries;
@@ -295,19 +374,27 @@ export function createMemoryCatalogStore(now = Date.now) {
     async listEnabledIds() {
       return held === null ? [] : held.enabledModelIds;
     },
-    async replace(entries: object[], enabledModelIds?: string[]) {
+    async listUnavailable() {
+      return held === null || held.unavailableIds === undefined ? null : held.unavailableIds;
+    },
+    async replace(entries: object[], enabledModelIds?: string[], unavailableIds?: string[]) {
       const kept = held === null ? [] : held.enabledModelIds;
       held = {
         version: CATALOG_VERSION,
         fetchedAt: now(),
         entries: normalizeEntries(entries),
-        enabledModelIds: enabledModelIds === undefined ? kept : normalizeEnabledIds(enabledModelIds)
+        enabledModelIds: enabledModelIds === undefined ? kept : normalizeEnabledIds(enabledModelIds),
+        ...quotaOf(unavailableIds)
       };
     },
     async setEnabledIds(ids: string[]) {
       const entries = held === null ? [] : held.entries;
       const fetchedAt = held === null ? now() : held.fetchedAt;
-      held = { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds: normalizeEnabledIds(ids) };
+      held = { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds: normalizeEnabledIds(ids), ...quotaOf() };
+    },
+    async setUnavailable(ids: string[]) {
+      const base = held === null ? { version: CATALOG_VERSION, fetchedAt: now(), entries: [], enabledModelIds: [] } : held;
+      held = { ...base, unavailableIds: normalizeEnabledIds(ids), unavailableAt: now() };
     },
     async clear() {
       held = null;

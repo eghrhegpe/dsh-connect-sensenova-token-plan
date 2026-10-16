@@ -337,7 +337,12 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     webSearchRestore: { current: null },
     // What the panel's `webSearch` route calls so a flip applies in-session
     // (drop the taken-over selection, then re-register against the new value).
-    reconcileWebSearch: () => reconcileWebSearch(ctx, wiring)
+    reconcileWebSearch: () => reconcileWebSearch(ctx, wiring),
+    // The background provider refresher's handle (review #1b): a SLOT like
+    // `visionPublish` — null = no refresher scheduled; `startSideEffects`
+    // arms it when `providerRefreshMinutes > 0` AND the effective provider
+    // switch is on, and `teardown` closes the interval.
+    providerRefresh: { current: null }
   };
 
   // The seven route handlers (trust fence, method allowances, body ceilings,

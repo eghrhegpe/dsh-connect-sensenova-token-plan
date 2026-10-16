@@ -338,6 +338,15 @@ export function createProviderPublisher(deps: HostDeps = {}) {
  * models before its first poll (and with no console login at all).
  *
  * Fire-and-forget: a state dir that cannot be read just waits for the poll.
+ *
+ * The quota dimension rides the seed (2026-10-17, review #1a): the persisted
+ * LAST-KNOWN exhausted set is re-published with the catalog, so a restart does
+ * not hand the picker back the models the last known poll had blocked. A v1
+ * record / fresh install states NOTHING (`listUnavailable` reads `null`), and
+ * the offer then defaults to wide — which is the correct FRESH-INSTALL answer
+ * (nothing was ever known to be exhausted), not a widening of a known state.
+ * `quotaSignature` is stamped from the same set so the first poll that reads
+ * the identical set sees no flip and does not churn the registration.
  * @param {Pick<ReturnType<typeof createProviderPublisher>, "state" | "publish">} publisher
  *   — the only two members the seed touches. Typed off the REAL publisher
  *   rather than a hand-written structural copy: that copy declared the third
@@ -345,22 +354,27 @@ export function createProviderPublisher(deps: HostDeps = {}) {
  *   publisher actually accepts, so under `strictFunctionTypes` the genuine
  *   publisher was not assignable to it. `lifecycle.ts` passing `wiring: any`
  *   is the only reason this never surfaced — tightening that annotation
- *   exposed it. The seed only ever passes a literal `[]` (below), so the
- *   narrower type is a zero-runtime-change correction.
+ *   exposed it. The seed passes a `string[]` for the quota dimension (below),
+ *   so the narrower type is what the call actually needs.
  * @param {() => Promise<object[]>} listCatalog - read the persisted catalog entries.
  * @param {() => Promise<string[]>} listEnabled - read the persisted allow-list.
  * @param {(entries: object[], enabledIds: string[]) => string} signatureOf -
  *   the cheap offered-set signature.
+ * @param {() => Promise<string[]|null>} [listUnavailable] - read the persisted
+ *   last-KNOWN exhausted set; `null`/absent reader = never stated (seed wide).
  */
-export function seedPublisherFromCatalog(publisher: Pick<ReturnType<typeof createProviderPublisher>, "state" | "publish">, listCatalog: () => Promise<object[]>, listEnabled: () => Promise<string[]>, signatureOf: (entries: object[], enabledIds: string[]) => string) {
+export function seedPublisherFromCatalog(publisher: Pick<ReturnType<typeof createProviderPublisher>, "state" | "publish">, listCatalog: () => Promise<object[]>, listEnabled: () => Promise<string[]>, signatureOf: (entries: object[], enabledIds: string[]) => string, listUnavailable?: () => Promise<string[] | null>) {
   return (async () => {
     try {
-      const [stored, storedEnabled] = await Promise.all([
+      const [stored, storedEnabled, storedQuota] = await Promise.all([
         listCatalog(),
-        listEnabled()
+        listEnabled(),
+        listUnavailable === undefined ? Promise.resolve(null) : listUnavailable()
       ]);
+      const unavailable = storedQuota ?? [];
       publisher.state.signature = signatureOf(stored, storedEnabled);
-      await publisher.publish(stored, storedEnabled, []);
+      publisher.state.quotaSignature = quotaSignatureOf(unavailable);
+      await publisher.publish(stored, storedEnabled, unavailable);
     } catch {
       // No seed catalog: the first successful poll publishes.
     }

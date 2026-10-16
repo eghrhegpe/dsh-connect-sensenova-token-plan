@@ -173,7 +173,7 @@ export async function buildSnapshotBody({
     // case came to be treated as a landed one.
     publish: (entries: unknown, enabledIds: unknown, unavailableModelIds?: string[]) => Promise<PublishResult>;
   };
-  catalogStore: { listEnabledIds(): Promise<string[]>; replace(entries: unknown, enabledIds?: unknown): Promise<void> };
+  catalogStore: { listEnabledIds(): Promise<string[]>; replace(entries: unknown, enabledIds?: unknown, unavailableIds?: unknown): Promise<void>; setUnavailable(ids: string[]): Promise<void> };
   panelSwitch: () => Promise<boolean | null>;
   drawSwitch?: () => Promise<boolean | null>;
   drawModelId?: () => Promise<string | null>;
@@ -333,7 +333,10 @@ export async function buildSnapshotBody({
     const freshSignature = catalogSignature(catalog, enabledIds);
     if (freshSignature !== providerState.signature) {
       catalogChanged = true;
-      await catalogStore.replace(catalog, enabledIds).catch(() => {});
+      // The quota dimension travels with the catalog write (`undefined` when
+      // this poll never answered quota = keep the stored statement): a restart
+      // must inherit the LAST KNOWN exhausted set, not a wide-open offer.
+      await catalogStore.replace(catalog, enabledIds, unavailableModelIds ?? undefined).catch(() => {});
       // `effectiveUnavailable`, never the raw three-state value: a catalogue
       // change still re-registers, and it must re-register with the LAST
       // KNOWN unavailable set rather than an empty one.
@@ -374,6 +377,11 @@ export async function buildSnapshotBody({
     if (quotaSig !== providerState.quotaSignature) {
       let publishOk = catalogPublishOk;
       if (!catalogChanged) {
+        // Persist the flipped quota even when the catalogue branch did not
+        // write (it is cached an hour, a quota pool flips per poll): the seed
+        // reads THIS on the next restart. When the catalogue branch DID
+        // publish, it stamped the same set already — one write per poll.
+        await catalogStore.setUnavailable(unavailableModelIds).catch(() => {});
         const published = await publisher.publish(providerState.entries, providerState.enabledIds, unavailableModelIds);
         publishOk = published?.ok !== false;
       }

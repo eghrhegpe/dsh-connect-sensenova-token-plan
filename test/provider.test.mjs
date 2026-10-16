@@ -35,6 +35,7 @@ import {
 import { isImageGenModel } from "../src/host/modality.ts";
 import {
   CATALOG_VERSION,
+  KNOWN_CATALOG_VERSIONS,
   normalizeEnabledIds,
   normalizeEntries,
   createFileCatalogStore,
@@ -45,7 +46,7 @@ import { PROVIDER_VERSION, createFileProviderStore } from "../src/host/provider-
 import { DRAW_STORE_VERSION, createFileDrawStore, normalizeDrawEnabled } from "../src/host/draw-store.ts";
 import { redactSecrets } from "../src/host/util.ts";
 import { profileSegment, profileStateDir } from "../src/host/state-store.ts";
-import { syncSignaturesAfterPublish, catalogSignature } from "../src/host/provider-publish.ts";
+import { syncSignaturesAfterPublish, catalogSignature, quotaSignatureOf, seedPublisherFromCatalog } from "../src/host/provider-publish.ts";
 import { surface as clientSurface } from "./client-surface.js";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
@@ -546,6 +547,133 @@ const BASE_URL = "https://token.sensenova.cn/v1";
   } finally {
     restoreHome();
     restoreEnv();
+  }
+}
+
+// --- 8q. the quota dimension rides the persisted catalog (review #1a) --------
+// The restart seed must inherit the last KNOWN exhausted set, so the store
+// owns three facts: a stamped quota persists and reads back; a quota-less
+// `replace` PRESERVES the stored statement (an unknown poll must not erase
+// what the last known one said); and a v1 record states NOTHING (null, not
+// []: "never answered" must not read as "answered, nothing exhausted").
+{
+  const restoreEnv = isolateHostEnv();
+  const restoreHome = isolateStateDir();
+  try {
+    const dir = join(process.env.DSH_HOME, "state", "dsh-connect-sensenova-token-plan");
+    const file = join(dir, "catalog.json");
+    let clockNow = 1000;
+    const clock = () => (clockNow += 500);
+    const store = createFileCatalogStore({ dir, now: clock });
+
+    check("a fresh store states no quota (null, not empty)", (await store.listUnavailable()) === null);
+
+    await store.replace([{ id: "glm-5.2" }], [], ["glm-5.2"]);
+    const persisted = JSON.parse(readFileSync(file, "utf8"));
+    check("replace stamps the quota dimension with the injected clock",
+      JSON.stringify(persisted.unavailableIds) === JSON.stringify(["glm-5.2"]) &&
+      persisted.unavailableAt > 1000 && persisted.unavailableAt <= clockNow,
+      JSON.stringify({ ids: persisted.unavailableIds, at: persisted.unavailableAt }));
+
+    const reopened = createFileCatalogStore({ dir, now: clock });
+    check("a fresh process reads back the last KNOWN exhausted set",
+      JSON.stringify(await reopened.listUnavailable()) === JSON.stringify(["glm-5.2"]),
+      JSON.stringify(await reopened.listUnavailable()));
+
+    await reopened.replace([{ id: "glm-5.2" }, { id: "glm-4.6" }], ["glm-5.2"]);
+    check("a quota-less replace PRESERVES the stored statement",
+      JSON.stringify(await reopened.listUnavailable()) === JSON.stringify(["glm-5.2"]),
+      JSON.stringify(await reopened.listUnavailable()));
+
+    await reopened.setUnavailable([]);
+    check("setUnavailable states the healthy answer (empty list, not null)",
+      (await reopened.listUnavailable()) !== null && (await reopened.listUnavailable()).length === 0);
+
+    // v1 compatibility: the record parses, the quota simply reads as never-stated.
+    writeFileSync(file, JSON.stringify({ version: 1, fetchedAt: 123, entries: [{ id: "a" }], enabledModelIds: ["a"] }), "utf8");
+    const v1 = createFileCatalogStore({ dir, now: clock });
+    check("a v1 record still serves its catalog",
+      (await v1.list()).length === 1 && JSON.stringify(await v1.listEnabledIds()) === JSON.stringify(["a"]));
+    check("a v1 record states no quota (seed-wide is the fresh-install answer)",
+      (await v1.listUnavailable()) === null);
+    // Writing from a v1 base keeps the v2 shape and does NOT invent a statement.
+    await v1.replace([{ id: "a" }, { id: "b" }], ["a"]);
+    check("a v1→v2 upgrade write still omits the quota fields", (() => {
+      const raw = JSON.parse(readFileSync(file, "utf8"));
+      return raw.version === CATALOG_VERSION && raw.unavailableIds === undefined;
+    })(), readFileSync(file, "utf8"));
+
+    // The ADR-006 whitelist reads both ages: v1 must not be refused at the door.
+    check("KNOWN_CATALOG_VERSIONS holds the current and the prior shape",
+      JSON.stringify(KNOWN_CATALOG_VERSIONS) === JSON.stringify([2, 1]), JSON.stringify(KNOWN_CATALOG_VERSIONS));
+
+    // The memory store speaks the SAME dialect (the test seam must not be a
+    // second truth about the quota contract).
+    const mem = createMemoryCatalogStore(() => 77);
+    check("memory store: fresh states no quota", (await mem.listUnavailable()) === null);
+    await mem.replace([{ id: "x" }], [], ["x"]);
+    check("memory store: replace carries the quota",
+      JSON.stringify(await mem.listUnavailable()) === JSON.stringify(["x"]));
+    await mem.replace([{ id: "x" }]);
+    check("memory store: quota-less replace preserves",
+      JSON.stringify(await mem.listUnavailable()) === JSON.stringify(["x"]));
+    await mem.setEnabledIds(["x"]);
+    check("memory store: setEnabledIds keeps the quota statement",
+      JSON.stringify(await mem.listUnavailable()) === JSON.stringify(["x"]));
+    await mem.setUnavailable([]);
+    check("memory store: setUnavailable states the healthy answer",
+      (await mem.listUnavailable()) !== null && (await mem.listUnavailable()).length === 0);
+  } catch (error) {
+    fail("catalog quota dimension", error);
+  } finally {
+    restoreHome();
+    restoreEnv();
+  }
+}
+
+// --- 8r. the restart seed inherits the quota (seedPublisherFromCatalog) ------
+{
+  try {
+    const published = [];
+    const state = { entries: [], enabledIds: [], unavailableIds: [], signature: "", quotaSignature: "" };
+    const publisher = {
+      state,
+      publish: async (entries, enabledIds, unavailableModelIds) => {
+        published.push({ entries, enabledIds, unavailableModelIds });
+        state.entries = entries; state.enabledIds = enabledIds; state.unavailableIds = unavailableModelIds;
+        return { ok: true };
+      }
+    };
+    // `seedPublisherFromCatalog` returns the STARTED seed promise (the effect
+    // registry tracks that promise), so await it directly.
+    await seedPublisherFromCatalog(
+      publisher,
+      async () => [{ id: "glm-5.2" }],
+      async () => [],
+      catalogSignature,
+      async () => ["glm-5.2"]
+    );
+    check("the seed publishes WITH the persisted exhausted set",
+      published.length === 1 && JSON.stringify(published[0].unavailableModelIds) === JSON.stringify(["glm-5.2"]),
+      JSON.stringify(published[0]?.unavailableModelIds));
+    check("the seed stamps quotaSignature so the first identical poll does not churn",
+      state.quotaSignature === quotaSignatureOf(["glm-5.2"]), state.quotaSignature);
+    check("the seed records the set on the live state (routes re-publish from it)",
+      JSON.stringify(state.unavailableIds) === JSON.stringify(["glm-5.2"]), JSON.stringify(state.unavailableIds));
+
+    const published2 = [];
+    const state2 = { entries: [], enabledIds: [], unavailableIds: [], signature: "", quotaSignature: "" };
+    await seedPublisherFromCatalog(
+      { state: state2, publish: async (e, i, u) => { published2.push(u); return { ok: true }; } },
+      async () => [{ id: "a" }],
+      async () => [],
+      catalogSignature,
+      async () => null
+    );
+    check("a never-stated record seeds WIDE (fresh install, nothing was ever known)",
+      published2.length === 1 && JSON.stringify(published2[0]) === JSON.stringify([]), JSON.stringify(published2[0]));
+  } catch (error) {
+    fail("quota seed", error);
   }
 }
 

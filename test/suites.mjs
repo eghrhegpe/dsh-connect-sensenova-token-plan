@@ -65,7 +65,7 @@
  * @type {ReadonlyArray<{name: string, kind: "suite"|"gate", note: string}>}
  */
 export const SUITES = Object.freeze([
-  // ── the 27 *.test.mjs suites (this exact set is what package.test.mjs pins
+  // ── the 28 *.test.mjs suites (this exact set is what package.test.mjs pins
   //    against disk; the four gate files below are exempt there, as e2e-gate
   //    has been since it stopped being a *.test.mjs) ───────────────────────
   { name: "auth.test.mjs", kind: "suite", note: "login / PKCE / JWE / throttle classification" },
@@ -77,6 +77,7 @@ export const SUITES = Object.freeze([
   { name: "render-dom.test.mjs", kind: "suite", note: "shipped client.js in jsdom + REAL react (SKIPs without the devDeps)" },
   { name: "parsers.test.mjs", kind: "suite", note: "response parsing + shape-drift detection" },
   { name: "snapshot-aggregate.test.mjs", kind: "suite", note: "snapshot body aggregation" },
+  { name: "provider-refresh.test.mjs", kind: "suite", note: "background provider refresher (arm gates + per-tick switch + persistence)" },
   { name: "provider.test.mjs", kind: "suite", note: "provider registration state machine" },
   { name: "provider-rollback-guard.test.mjs", kind: "suite", note: "rollback path (only runs when things broke)" },
   { name: "switch-precedence.test.mjs", kind: "suite", note: "panel value vs config default" },

@@ -243,4 +243,11 @@ export interface Wiring {
   /** Re-register (or drop) the web-search provider to the current switch value;
    *  what the panel's `webSearch` route calls so a flip is applied in-session. */
   reconcileWebSearch?: () => Promise<void>;
+  /** The background provider refresher's handle (review #1b). A SLOT in the
+   *  `visionPublish` / `webSearchRestore` shape: `apply()` spells it
+   *  `current: null` = "no refresher scheduled", `startSideEffects` arms it
+   *  when the effective cadence is > 0, and `teardown` closes it. A slot (not
+   *  an optional property) because "is a timer live?" is state the teardown
+   *  must read off the contract, not off property presence. */
+  providerRefresh: { current: { close(): void } | null };
 }

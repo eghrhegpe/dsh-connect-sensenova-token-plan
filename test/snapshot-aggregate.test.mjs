@@ -90,7 +90,7 @@ function stubFetch(routes) {
  * registered — stubbing it as `{}` would let these checks pass for the wrong
  * reason.
  */
-function harness({ stateOverrides = {}, published = [], publishResult = { ok: true } } = {}) {
+function harness({ stateOverrides = {}, published = [], publishResult = { ok: true }, quotaWrites = [], replaceCalls = [], apiKey = "" } = {}) {
   const state = {
     entries: [],
     enabledIds: [],
@@ -104,6 +104,8 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
   return {
     state,
     published,
+    quotaWrites,
+    replaceCalls,
     params: {
       settings,
       cache: new Map(),
@@ -114,10 +116,11 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
         state: async () => ({ configured: true, ephemeral: false })
       },
       apiKeyStore: {
-        // No key: the catalogue fetch is skipped, so these checks exercise the
-        // quota path alone (which is where the three-state bug lived).
-        resolve: async () => ({ value: "" }),
-        state: async () => ({ hasApiKey: false, keySource: null, ephemeral: false })
+        // No key by default: the catalogue fetch is skipped, so the groups
+        // below exercise the quota path alone (which is where the three-state
+        // bug lived). `apiKey` opts a group into the catalogue branch.
+        resolve: async () => ({ value: apiKey }),
+        state: async () => ({ hasApiKey: apiKey !== "", keySource: apiKey !== "" ? "memory" : null, ephemeral: false })
       },
       publisher: {
         state,
@@ -140,7 +143,15 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
       },
       catalogStore: {
         listEnabledIds: async () => [],
-        replace: async () => {}
+        // The quota dimension of a catalog write is RECORDED, not dropped:
+        // the restart seed reads it (review #1a), and the checks below say
+        // which poll must have stamped it.
+        replace: async (entries, enabledIds, unavailableIds) => {
+          replaceCalls.push({ entries, enabledIds, unavailableIds });
+        },
+        setUnavailable: async (ids) => {
+          quotaWrites.push(ids);
+        }
       },
       panelSwitch: async () => null
     }
@@ -319,6 +330,85 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
   }
   check("F3 a successful publish still adopts the signature (the gate did not just delete the sync)",
     state.quotaSignature === quotaSignatureOf(["glm-5.2", "glm-4.6"]), `${state.quotaSignature}`);
+}
+
+// === G. the quota dimension rides the persisted catalog (review #1a) =========
+// A restart must inherit the LAST KNOWN exhausted set (`seedPublisherFromCatalog`
+// reads `listUnavailable`), so every branch that re-registers must also PERSIST
+// the answer: the catalogue branch stamps it inside `replace`, a quota flip with
+// an unchanged catalogue lands via `setUnavailable`, and an UNKNOWN poll states
+// nothing (the third argument is ABSENT — preserving the stored record, not
+// writing an empty one).
+{
+  const CATALOG_OK = { data: [{ id: "glm-5.2" }, { id: "glm-4.6" }] };
+
+  // Catalogue changed + quota answered → replace carries the exhausted set.
+  const replaceCalls = [];
+  const { params } = harness({ apiKey: "sk-test", replaceCalls });
+  let net = stubFetch({
+    "pool-usage": EXHAUSTED_POOL,
+    "credit-usage-trend": TREND_OK,
+    "/v1/models": CATALOG_OK
+  });
+  try {
+    await buildSnapshotBody(params);
+  } finally {
+    net.restore();
+  }
+  check("G1 a catalogue write carries the last KNOWN exhausted set",
+    replaceCalls.length === 1 &&
+      JSON.stringify(replaceCalls[0].unavailableIds) === JSON.stringify(["glm-5.2", "glm-4.6"]),
+    JSON.stringify(replaceCalls.map((c) => c.unavailableIds)));
+
+  // Catalogue UNCHANGED (signature seeded) + quota flipped → setUnavailable.
+  const quotaWrites = [];
+  const seeded = {
+    entries: [{ id: "glm-5.2" }, { id: "glm-4.6" }],
+    enabledIds: [],
+    unavailableIds: ["glm-5.2"],
+    signature: catalogSignature([{ id: "glm-5.2" }, { id: "glm-4.6" }], []),
+    quotaSignature: quotaSignatureOf(["glm-5.2"])
+  };
+  const h2 = harness({ apiKey: "sk-test", quotaWrites, stateOverrides: seeded });
+  net = stubFetch({
+    "pool-usage": EXHAUSTED_POOL,
+    "credit-usage-trend": TREND_OK,
+    "/v1/models": CATALOG_OK
+  });
+  try {
+    await buildSnapshotBody(h2.params);
+  } finally {
+    net.restore();
+  }
+  check("G2 a quota flip with an unchanged catalogue still persists the flip",
+    quotaWrites.length === 1 && JSON.stringify(quotaWrites[0]) === JSON.stringify(["glm-5.2", "glm-4.6"]),
+    JSON.stringify(quotaWrites));
+  check("G3 the catalogue write that did not change does not double-stamp",
+    h2.replaceCalls.length === 0, JSON.stringify(h2.replaceCalls.map((c) => c.unavailableIds)));
+
+  // Quota UNKNOWN (console unreachable) + catalogue branch → third arg ABSENT.
+  const h4calls = [];
+  const h4 = harness({
+    apiKey: "sk-test",
+    replaceCalls: h4calls,
+    stateOverrides: { unavailableIds: ["glm-5.2"], quotaSignature: quotaSignatureOf(["glm-5.2"]) }
+  });
+  net = stubFetch({
+    "pool-usage": () => { throw new Error("the console is unreachable"); },
+    "credit-usage-trend": TREND_OK,
+    "/v1/models": CATALOG_OK
+  });
+  try {
+    await buildSnapshotBody(h4.params);
+  } finally {
+    net.restore();
+  }
+  check("G4 an unknown quota writes the catalogue WITHOUT stating a set",
+    h4calls.length === 1 && h4calls[0].unavailableIds === undefined,
+    JSON.stringify(h4calls.map((c) => c.unavailableIds)));
+  check("G5 the publish on an unknown quota re-offers the LAST KNOWN set, not an empty one",
+    JSON.stringify(h4.published[0]?.unavailableModelIds) === JSON.stringify(["glm-5.2"]),
+    JSON.stringify(h4.published[0]?.unavailableModelIds));
 }
 
 // --- report ----------------------------------------------------------------

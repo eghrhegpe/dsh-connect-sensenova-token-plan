@@ -37,6 +37,15 @@
         # Deadline for one console call, in milliseconds. The login flow has its
         # own (loginTimeoutMs, below) because it walks several IAM hops.
         consoleTimeoutMs: 15000
+        # Background freshness for a REGISTERED provider. The panel polls only
+        # while it is open, but a registered provider is a standing execution
+        # channel: while the EFFECTIVE provider switch is on, the Host drives
+        # one aggregate refresh every N minutes (the same engine and cache the
+        # panel's poll uses, so no extra upstream traffic within a cache
+        # window). 0 disables it and keeps the panel-only shape. Every tick
+        # re-reads the switch, so a Host that never registers a provider runs
+        # no refresh at all. (2026-10 review #1b.)
+        providerRefreshMinutes: 15
         # Renew the console token this many seconds before it actually expires,
         # so a poll never races the expiry boundary. 120 = two minutes.
         tokenSkewSeconds: 120

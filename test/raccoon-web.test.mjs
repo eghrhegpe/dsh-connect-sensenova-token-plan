@@ -52,6 +52,11 @@ function makeWiring(overrides = {}) {
     // not a missing property. The factory used to omit the field entirely and
     // let the type declare it optional, which is the shape the slot replaced.
     webSearchRestore: { current: null },
+    // The provider-refresher slot (2026-10 review #1b): teardown reads it, so
+    // the stub must spell it — a missing field would make teardown's
+    // `?.current` path pass by THROWING into its catch instead of by holding
+    // the slot's null. Same slot discipline as the line above.
+    providerRefresh: { current: null },
     ...overrides
   };
 }
