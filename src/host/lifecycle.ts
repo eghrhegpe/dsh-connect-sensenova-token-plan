@@ -21,7 +21,7 @@
  * @module dsh-connect-sensenova-token-plan/lifecycle
  */
 import { defineDrawTool } from "./draw.ts";
-import { seedPublisherFromCatalog, catalogSignature } from "./provider-publish.ts";
+import { seedPublisherFromCatalog } from "./provider-publish.ts";
 import { retryBounded, errMsg, degrade } from "./util.ts";
 import { armProviderRefresher } from "./provider-refresh.ts";
 import { resetDrawToolNote, setDrawToolNote } from "./draw-tool-state.ts";
@@ -398,7 +398,6 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
       publisher,
       () => catalogStore.list(),
       () => catalogStore.listEnabledIds(),
-      catalogSignature,
       () => catalogStore.listUnavailable()
     )
   );

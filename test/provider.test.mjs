@@ -645,12 +645,13 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       }
     };
     // `seedPublisherFromCatalog` returns the STARTED seed promise (the effect
-    // registry tracks that promise), so await it directly.
+    // registry tracks that promise), so await it directly. The signatures are
+    // stamped INTERNALLY (syncSignaturesAfterPublish, the poll's own formulas)
+    // only after a LANDED publish — no signatureOf parameter any more.
     await seedPublisherFromCatalog(
       publisher,
       async () => [{ id: "glm-5.2" }],
       async () => [],
-      catalogSignature,
       async () => ["glm-5.2"]
     );
     check("the seed publishes WITH the persisted exhausted set",
@@ -658,6 +659,8 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       JSON.stringify(published[0]?.unavailableModelIds));
     check("the seed stamps quotaSignature so the first identical poll does not churn",
       state.quotaSignature === quotaSignatureOf(["glm-5.2"]), state.quotaSignature);
+    check("the seed stamps the catalog signature from the same single source",
+      state.signature === catalogSignature([{ id: "glm-5.2" }], []), state.signature);
     check("the seed records the set on the live state (routes re-publish from it)",
       JSON.stringify(state.unavailableIds) === JSON.stringify(["glm-5.2"]), JSON.stringify(state.unavailableIds));
 
@@ -667,11 +670,25 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       { state: state2, publish: async (e, i, u) => { published2.push(u); return { ok: true }; } },
       async () => [{ id: "a" }],
       async () => [],
-      catalogSignature,
       async () => null
     );
     check("a never-stated record seeds WIDE (fresh install, nothing was ever known)",
       published2.length === 1 && JSON.stringify(published2[0]) === JSON.stringify([]), JSON.stringify(published2[0]));
+
+    // The F2/F3 lesson at the boot boundary: a seed whose publish FAILED must
+    // not stamp the signatures — pre-stamping makes the first poll compare,
+    // see "no change", and never retry the persisted blocked set until a real
+    // change or a restart ("a restart fixes it" in its purest form).
+    const state3 = { entries: [], enabledIds: [], unavailableIds: [], signature: "", quotaSignature: "" };
+    await seedPublisherFromCatalog(
+      { state: state3, publish: async () => ({ ok: false }) },
+      async () => [{ id: "a" }],
+      async () => [],
+      async () => ["a"]
+    );
+    check("a FAILED seed publish leaves both signatures unstamped",
+      state3.signature === "" && state3.quotaSignature === "",
+      JSON.stringify({ signature: state3.signature, quota: state3.quotaSignature }));
   } catch (error) {
     fail("quota seed", error);
   }

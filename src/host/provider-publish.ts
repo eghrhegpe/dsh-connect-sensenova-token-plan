@@ -346,7 +346,12 @@ export function createProviderPublisher(deps: HostDeps = {}) {
  * the offer then defaults to wide — which is the correct FRESH-INSTALL answer
  * (nothing was ever known to be exhausted), not a widening of a known state.
  * `quotaSignature` is stamped from the same set so the first poll that reads
- * the identical set sees no flip and does not churn the registration.
+ * the identical set sees no flip and does not churn the registration — and it
+ * is stamped ONLY after a LANDED publish: a seed that pre-stamped would stamp
+ * the new offer's signature onto a registration that never happened, and the
+ * first poll would compare, see "no change", and never retry the blocked set
+ * until a real change or a restart. Same lesson as F2/F3 in
+ * `test/snapshot-aggregate.test.mjs`, at the boot boundary.
  * @param {Pick<ReturnType<typeof createProviderPublisher>, "state" | "publish">} publisher
  *   — the only two members the seed touches. Typed off the REAL publisher
  *   rather than a hand-written structural copy: that copy declared the third
@@ -358,12 +363,10 @@ export function createProviderPublisher(deps: HostDeps = {}) {
  *   so the narrower type is what the call actually needs.
  * @param {() => Promise<object[]>} listCatalog - read the persisted catalog entries.
  * @param {() => Promise<string[]>} listEnabled - read the persisted allow-list.
- * @param {(entries: object[], enabledIds: string[]) => string} signatureOf -
- *   the cheap offered-set signature.
  * @param {() => Promise<string[]|null>} [listUnavailable] - read the persisted
  *   last-KNOWN exhausted set; `null`/absent reader = never stated (seed wide).
  */
-export function seedPublisherFromCatalog(publisher: Pick<ReturnType<typeof createProviderPublisher>, "state" | "publish">, listCatalog: () => Promise<object[]>, listEnabled: () => Promise<string[]>, signatureOf: (entries: object[], enabledIds: string[]) => string, listUnavailable?: () => Promise<string[] | null>) {
+export function seedPublisherFromCatalog(publisher: Pick<ReturnType<typeof createProviderPublisher>, "state" | "publish">, listCatalog: () => Promise<object[]>, listEnabled: () => Promise<string[]>, listUnavailable?: () => Promise<string[] | null>) {
   return (async () => {
     try {
       const [stored, storedEnabled, storedQuota] = await Promise.all([
@@ -372,9 +375,12 @@ export function seedPublisherFromCatalog(publisher: Pick<ReturnType<typeof creat
         listUnavailable === undefined ? Promise.resolve(null) : listUnavailable()
       ]);
       const unavailable = storedQuota ?? [];
-      publisher.state.signature = signatureOf(stored, storedEnabled);
-      publisher.state.quotaSignature = quotaSignatureOf(unavailable);
-      await publisher.publish(stored, storedEnabled, unavailable);
+      const landed = await publisher.publish(stored, storedEnabled, unavailable);
+      // Signatures ONLY after a landed publish (see the note above): the same
+      // single-source sync the poll and the route handlers use, computed from
+      // what the publisher ACTUALLY offered. A skipped/failed publish leaves
+      // both stamps as they were, so the first poll retries the offer.
+      if (landed?.ok !== false) syncSignaturesAfterPublish(publisher.state);
     } catch {
       // No seed catalog: the first successful poll publishes.
     }
