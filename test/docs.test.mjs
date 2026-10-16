@@ -11,6 +11,9 @@
 //   裁定账本闭合（12-13）：现行文档无内联考古补丁、账本条目形状齐；
 //                    且代码/测试里引用的 ADR-NNN 必须在账本里存在（曾有 ADR-006 被引用
 //                    27 处却不在账本，而只校验形状的门禁全绿放过）。
+//   变更日志分工（15）：CHANGELOG 只记公开行为变化——不写实现坐标（src/、test/）、
+//                    测试工程词（变异 / 断言级 / 套件 / fixture）与 commit hash；
+//                    版本导语 ≤ 90 字（先给结论）。
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname, extname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -685,6 +688,76 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
   }
   for (const h of hits) bad(`现行文档引用了已 TS 化的源码扩展名：${h}——源码 2026-09-30 起全量 .ts，按名找不到 .js`);
   note(`现行文档源码引用扩展名 ${hits.length} 处漂移（.js 应为 .ts）`);
+}
+
+// 15. CHANGELOG 分工纪律（把 CHANGELOG.md:3 的自我声明变成可执行检查）
+//
+// 由来：第 3 行写明「本文件只记公开行为变化……实现细节、重构与测试加固请直接看 git log」，
+// 但 0.5.x / 0.6.0 实际写成了工作日志——0.6.0 导语 149 字、0.5.0 单条 525 字，
+// 用户想 40 字看完新功能，读到的却是测试门禁、变异矩阵与 src/ 文件坐标。
+// 四条口径：
+//   a. 小标题不得自称「用户不可见 / 发布质量」——自我声明为发布质量的内容，
+//      按第 3 行本就不该留在本文件（该撤稿，而不是加个标记免责）；
+//   b. 不写 commit hash（属于 git log 与 Release body，写进正文还会随 rebase 腐坏）；
+//   c. 自 0.5.0 起的条目不写实现坐标（src/、test/）与测试工程词，只讲行为与影响；
+//   d. 自 0.5.0 起的版本导语 ≤ 90 字（0.5.2 是范本：83 字讲完 5 条修复）。
+// 0.5.0 之前是考古，不回填；本门禁只保证新版本不再回潮。
+{
+  const rel = "CHANGELOG.md";
+  const lines = readFileSync(join(ROOT, rel), "utf8").split(/\r?\n/);
+  const tuple = (m) => (m[3] === "x" ? [-1, -1, -1] : [Number(m[1]), Number(m[2]), Number(m[3])]);
+  const atLeast = (a, b) => {
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+    return true;
+  };
+
+  let selfDeclared = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^#{3,4} /.test(lines[i])) continue;
+    if (!/用户不可见|发布质量/.test(lines[i])) continue;
+    selfDeclared++;
+    bad(`${rel}:${i + 1} 小标题自称「用户不可见 / 发布质量」：${lines[i].trim()}——第 3 行已声明本文件只记公开行为变化，这类内容留在 git log / Release body，加标记不等于可以留`);
+  }
+  note(`${rel} 自称「用户不可见 / 发布质量」的小标题 ${selfDeclared} 处`);
+
+  let hashes = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (!/`[0-9a-f]{7}`/.test(lines[i])) continue;
+    hashes++;
+    bad(`${rel}:${i + 1} 写入 commit hash：${lines[i].trim().slice(0, 60)}…——哈希属于 git log 与 Release body，本文件只记公开行为变化`);
+  }
+  note(`${rel} 行内 commit hash ${hashes} 处`);
+
+  const heads = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^## \[(\d+)\.(\d+)\.(\d+|x)\]/);
+    if (m) heads.push({ i, ver: tuple(m) });
+  }
+  const JARGON = /(src|test)\/|变异(测试|矩阵|存活)|条断言|断言级|测试套件|单测|回归测试|fixture|jsdom|coverage/;
+  let windowed = 0;
+  let longIntro = 0;
+  let jargon = 0;
+  for (let k = 0; k < heads.length; k++) {
+    const h = heads[k];
+    if (!atLeast(h.ver, [0, 5, 0])) continue;
+    windowed++;
+    const end = k + 1 < heads.length ? heads[k + 1].i : lines.length;
+    let j = h.i + 1;
+    while (j < end && !lines[j].trim()) j++;
+    let intro = "";
+    while (j < end && lines[j].trim()) { intro += lines[j]; j++; }
+    if (intro.length > 90) {
+      longIntro++;
+      bad(`${rel} 版本 ${h.ver.join(".")}（第 ${h.i + 1} 行）导语 ${intro.length} 字，超过 90 字上限——导语只回答「这版给用户带来了什么」，过程留给下面的条目与 git log`);
+    }
+    for (let x = h.i + 1; x < end; x++) {
+      const m = lines[x].match(JARGON);
+      if (!m) continue;
+      jargon++;
+      bad(`${rel}:${x + 1} 条目出现实现坐标 / 测试工程词「${m[0]}」：${lines[x].trim().slice(0, 50)}…——第 3 行声明实现细节与测试加固看 git log，这里只留行为与影响`);
+    }
+  }
+  note(`${rel} 0.5.0 起 ${windowed} 个版本受分工纪律约束（导语超限 ${longIntro} 处、实现坐标 / 测试词 ${jargon} 处）`);
 }
 
 if (fails.length) {

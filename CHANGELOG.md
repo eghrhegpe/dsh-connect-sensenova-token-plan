@@ -4,95 +4,50 @@
 
 ## [0.6.0] — 2026-10-16
 
-本版主题是**对话框里的用量胶囊**：Harness 输入框右侧多了一颗常驻胶囊，直接告诉你在烧谁的配额；点一下展开额度卡，看得到原始用量、精确重置时刻与池归属。从 MVP 到额度卡只隔两天，中间经两轮代码审与一轮设计审——修掉的八处里最值得单列的一处，是**线上从来没有显示出来过**的重置时刻。
+Harness 输入框右侧新增一颗常驻用量胶囊：直接告诉你正在烧谁的配额；点一下展开额度卡，看得到原始用量、精确重置时刻与池归属。
 
-- **对话框用量胶囊**（`src/client/composer-usage-pill.ts`、`apply.ts`、`styles.ts`、`i18n.ts`）：
-  - 在 `conversation.input.right` 座席注册；按 provider 分两档读数——Token Plan 档读 `/snapshot` 的 5 小时 / 每周两个滚动窗口，小浣熊档读 `/raccoon` 的积分**余额**。
-  - 小浣熊档不换算百分比：网关不声明日/月上限，把余额换算成百分比等于发明一个没人公布的上限。分级按事实而非阈值（`> 0` 正常、`0` 耗尽、读不到未知），且 `0` 是读数不是空缺。
-  - **两套额度宇宙互不借数**：小浣熊档不回落 Token Plan 的池（早前的回落会把它错画成 Token Plan 的窗口），Token Plan 档也不在无池时拿余额顶替。挂哪个档由 provider 在组件边界决定——切模型即整颗胶囊重挂，所以永远不会显示上一个模型的额度。
-  - 套餐名前缀（`商汤 · ` / `浣熊 · `，英文 `SenseNova · ` / `Raccoon · `）回答的是「下面这些数字属于哪套额度」——同一会话里可以同时挂着两家的模型，光看「5 小时 1%」读者无从判断。
-  - 分级色全部走宿主 `--dsw-alias-state-*` token（hex 只作 fallback，换肤/明暗随之走）；**只有耗尽档给正文上色**，其余档只染 7px 圆点。外观按宿主工具栏尺度定（28px 高 / 12px 字 / 无框透明底），因为它不注入样式表，inline style 是唯一手段；百分比用 tabular figures，否则快照按 cadence 轮询会让整行工具栏每几秒抖一下。
-- **点击展开额度卡**（`f22c0db`）：面板画胶囊装不下的东西——每个窗口的**原始 `used / limit`**、精确重置时刻（跨日带日期）、池名与归属方式，以及小浣熊余额的四份构成（每日 / 奖励 / 月充 / 充值）。**不重复百分比**（胶囊已有四舍五入后的百分比，开面板要回答的是「1% 还够不够跑一次长上下文」，只有原始数字答得了）。小浣熊档复用同一外框但**没有进度条**——同理，上限没人声明。面板是触发器的**兄弟节点**而非子节点：后者既是无效嵌套，绝对定位也会拿按钮的 padding box 当包含块、把工具栏撑开。
-- **两处轮询实现合并为一个内核**（`src/client/use-remote-read.ts`）：`useSnapshotPolling` 与胶囊的小浣熊余额各自只留一条 `RemoteRoute`，生命周期（一代守卫 / 取消 / cadence / 失败保留上次读数）归内核，**每条路由自己拥有「这个 body 什么意思」**。合并起因是 duplication-gate 判红的手抄副本——而且抄出来就已漂了：胶囊那份 401 只回裸状态码，漏掉了面板那套措辞。
-- **两轮审的修正**（`ab2bab3`、`e632c42`）：
-  - **线上一直没画出来的那条**：`reset_at` 经 `epochSeconds()` 到达客户端时是**秒**，而 `resetFor()` 拿它和 `Date.now()`（毫秒）比，于是每个真实读数都被判定为「已过期」——面板的重置时刻与 title 里的「重置于」**在线上一条都没出现过**。此前的测试 fixture 恰好喂毫秒，与错的那条路一致，所以一路绿灯。现 `resetFor` 以秒进出。
-  - **五处按 A→E 一次做完**：点外部与 `Esc` 也能关（用 `pointerdown` 而非 `click`，后者与触发器自己的 toggle 互相打架）；池归组改为按平台声明的 `poolType` 说，不再自称「通用池」；小浣熊余额画构成而不只画总数（总数答「还剩多少」，构成答「今晚要过期多少」）；同一个滚动窗口在胶囊与面板里统一叫「每周」（原为「本周」，自然周与滚动周各说各话）；返赠余额进面板脚注，且**只在 `> 0` 时画**（「平台没声明」会被归一成 0，画「返赠余额 0」等于谎称这笔返赠被花光了）。
-  - **三处「把不知道说成关于世界的断言」**：401 读失败且从未成功过时，原话是「该模型不在 Token Plan 额度池内」——那是把**传输失败**说成事实（`loadedOnce` 在失败路径上也置位，区分不了，判据换成「拿到过读数」，新增 `composer.quotaUnknown` 与 `composer.noPool` 分成两句）；兜底取第一个池时不再自称「按通用池计」（兜底可以落在专属池上，那句话该说的是**选池方式**）；周窗口 `limit` 为 0 时面板不再印「0 / 0」，只出「—」。
-  - **一处静默丢信息**：5 小时重置已过期而每周重置仍活着时，tooltip 一个字都不显示；现取**最近的未来**（`nextResetOf`），并顺手把裸的 `toLocaleString()` 换成 `when()`（跨日会带日期）。
-
-### 发布质量（用户不可见）
-
-- 新增**产物真 DOM 渲染档** `test/render-dom.test.mjs`（jsdom + 真 React 挂载构建产物）：从最小可用版铺到 ModelPicker 草稿/保存态、PanelPage 轮询生命周期（真定时器）；本版胶囊的每一次行为变更都由它钉住，E/F/G/H 共 110 条。**它的一个坑值得写进纪律**：它跑的是构建产物根 `client.js`，改 `src/` 而不 build 时，一条变异也杀不掉。
-- 新增 `test/composer-slot-gate.mjs`：静态断言 `conversation.input.right` 的座席契约（`slots.d.ts` 的 `kind:'list'` + `scope:'session'`、`renderSlot` 调用、`keyedHooks` 的 `projection`、物化为 `use<Name>` 且 session 作用域 `optional=false`），并扫描本机每个可解析的 DSH client 副本；四件套缺一按失败处理，找不到任何副本才 SKIP。
-- 缺依赖从「红」改为 **loud skip**（`test/env-skip.mjs`）：本地缺 peer 时 stdout 一行原因、stderr 写明这轮没验证什么，`run-all.mjs` 把它们单列不当作通过；**CI 恒为严格模式**（skip 在 `CI` 下升回失败）。
-- 新增 `live-contract` 每日独立守望；tsdown 钉精确版本（无锁文件 × 缓存键漂移的第一次显形）。
-- 设计审（第三次）的杀毒证据：§H 新增 8 条**判定级**断言（85% 用 warn ink / 79% 仍 ok ink、`dedicated` 正例 fixture、5 小时过期时 tooltip 说的是活着的每周、`limit` 0 只出「—」、从未读成功时是 `quotaUnknown`、全程零缺 key 警告）；变异矩阵 16 条全杀，其中 `poolType === "dedicated"` → `false` 与 `0.8` → `0.7` 两条**上一轮是存活的**（当时只查 ink 前缀、`dedicated` 没有正例 fixture），正是这批断言杀掉的。
-- 商汤大装置网关错误信封观察（HTTP 499）记入 `docs/TROUBLESHOOTING.md` 与 `docs/ROADMAP.md`。
+- **对话框用量胶囊**：按 provider 分两档读数——Token Plan 档读 5 小时 / 每周两个滚动窗口，小浣熊档读积分**余额**。小浣熊档不换算百分比：网关不声明日 / 月上限，换算等于发明一个没人公布的上限；分级按事实而非阈值（`> 0` 正常、`0` 耗尽、读不到未知），且 `0` 是读数不是空缺。两套额度宇宙互不借数：小浣熊档不回落 Token Plan 的池，Token Plan 档也不拿余额顶替；切模型即整颗胶囊重挂，永远不会显示上一个模型的额度。套餐名前缀（`商汤 · ` / `浣熊 · `，英文 `SenseNova · ` / `Raccoon · `）说明下面的数字属于哪套额度——同一会话里可以同时挂着两家的模型。只有耗尽档给正文上色，其余档只染圆点。
+- **点击展开额度卡**：每个窗口的原始 `used / limit`、精确重置时刻（跨日带日期）、池名与归属方式，以及小浣熊余额的四份构成（每日 / 奖励 / 月充 / 充值）。不重复胶囊已有的百分比——开面板要回答的是「1% 还够不够跑一次长上下文」，只有原始数字答得了。小浣熊档复用同一外框但**没有进度条**，同理：上限没人声明。
+- **修复：重置时刻在线上从未显示过**。`reset_at` 到达客户端时是**秒**，却与毫秒时间戳比较，于是每个真实读数都被判成「已过期」；面板的重置时刻与 tooltip 里的「重置于」此前一条都没出现过。
+- **修复：五处面板交互与文案**。点外部与 `Esc` 也能关（用 `pointerdown`，否则与触发器自己的 toggle 互相打架）；池归组按平台声明的 `poolType` 说，不再自称「通用池」；小浣熊余额画构成而非只画总数（总数答「还剩多少」，构成答「今晚要过期多少」）；同一个滚动窗口在胶囊与面板里统一叫「每周」（原为「本周」，自然周与滚动周各说各话）；返赠余额进脚注且**只在 `> 0` 时画**——「平台没声明」会被归一成 0，画「返赠余额 0」等于谎称这笔返赠被花光。
+- **修复：三处把「不知道」说成关于世界的断言**。读失败且从未成功过时，原文案说「该模型不在 Token Plan 额度池内」——那是把**传输失败**说成事实；现按「拿到过读数」判定，新增 `composer.quotaUnknown` 与 `composer.noPool` 两句。兜底取第一个池时不再自称「按通用池计」（兜底可以落在专属池上），改说**选池方式**；周窗口 `limit` 为 0 时面板不再印「0 / 0」，只出「—」。
+- **修复：tooltip 不再静默丢信息**。5 小时重置已过期而每周重置仍活着时，原来一个字都不显示；现取**最近的未来**重置，跨日会带日期。
 
 ## [0.5.2] — 2026-10-10
 
-本版是把 0.5.1 之后已进 `main` 的一批修复集结发出：重点是出图回写、凭据边界、provider 并发安全，以及小浣熊的 vision 能力判定与 401 登录自愈。
+集结 0.5.1 之后已进 `main` 的一批修复：出图请求体回写、凭据边界、provider 并发安全，以及小浣熊的 vision 能力判定与 401 登录自愈。
 
-- **出图请求体回写不再写坏盘**（`src/host/draw-store.ts`）：draw-store 将出图请求体回填磁盘时偏移越界，特定输入下损坏本地记录；现修正写入边界。
-- **凭据边界三条修正**（`src/host/api-key-store.ts`、`console-client.ts`、`token-store/acquire.ts`、`token-store/throttle.ts`）：误把节流状态写进凭据记录（违反红线 2 的「私有状态不进凭据服务」）、`forget` 吞掉真实错误、`doctor.ts` 残留类型误导排查；均归位修正。
-- **provider 注册并发安全两条**（`src/host/console-client.ts`、`publish-core.ts`、`provider-publish.ts`、`raccoon-publish.ts`）：console 缓存键缺身份维度导致不同账号串缓存；dispose 闸在残窗内仍可能被并发触发。现加身份维度并复查残窗。
-- **小浣熊 vision 能力判定双实测覆盖**（`lib/raccoon-models.js`、`src/host/raccoon-catalog.ts`、`raccoon-fallback.ts`）：原判定对 `glm-5-3` 错报为支持、对 `glm-5-3-flash` 漏报；用真凭据双向实测修正。
-- **小浣熊 401 登录自愈 + 状态写失败清 temp**（`src/host/raccoon-auth.ts`、`state-store.ts`）：401 偶发时被 latch 锁死无法重试；状态文件写失败残留临时文件；现修 latch 洞并在失败时清 temp。
-- **适配器工厂失败不再被 memo 死**（`src/host/publish-core.ts`）：一次失败的 peer import 原会把 rejected promise 钉死，用户修好 peer 仍需重启 Host；现失败清槽、可重试。
-- **小浣熊开关判定收进具名 API**（`src/host/switch-precedence.ts`、`raccoon-publish.ts`、`raccoon-status.ts`、`routes/raccoon.ts`）：「无 config 默认」豁免从内联分支收进具名 API，开关语义不变、判定更可断言。
-
-### 发布质量（用户不可见）
-
-`1d013bf` 的出图回写修复由 `package.test.mjs` / `provider.test.mjs` / `e2e.mjs` 钉住；并发两条由 `routes.test.mjs` / `wiring.test.mjs` 新增场景锁死；`raccoon-auth` 的 latch 洞与 state-store 写失败由 `raccoon.test.mjs` / `store-baseline.test.mjs`（48 帧）覆盖；工厂失败由 `provider-rollback-guard.test.mjs` 补强。
+- **出图请求体回写不再写坏盘**：draw-store 把出图请求体回填磁盘时偏移越界，特定输入下会损坏本地记录；现修正写入边界。
+- **凭据边界修正**：不再把节流状态写进凭据记录；`forget` 不再吞掉真实错误；`doctor` 的残留类型不再误导排查。
+- **provider 注册并发安全**：console 缓存键补上身份维度，不同账号不再串缓存；dispose 闸的残窗已复查。
+- **小浣熊 vision 能力判定按实测修正**：原判定对 `glm-5-3` 错报为支持、对 `glm-5-3-flash` 漏报。
+- **小浣熊 401 登录自愈**：401 偶发时不再被 latch 锁死无法重试；状态文件写失败不再残留临时文件。
 
 ## [0.5.1] — 2026-10-06
 
-本版全是修复。主线是一条 0.5.0 时代就已写下的纪律在**失败路径**上反复失效：保护写对了意图，却在元失败那一步朝反方向执行。五处里三处直接落在凭据边界与锁号路径上（AGENTS.md 红线 1 / 5），另两处是并发竞态与一个死参数；末尾是一次插件卡图标重绘。
+本版全是修复，重点是凭据边界（AGENTS.md 红线 1 / 5）：几处保护写对了意图，却在失败路径上朝反方向执行。
 
-- **登录失败原因不再可能带出凭据**（`src/host/raccoon-walk.ts`、`src/host/util.ts`）：
-  小浣熊扫码失败的 catch 上方注释写着「sanitized — the store's message may quote the document」，下一行却是裸的 `String(saveError.message)`。这条路径是本模块唯一保证到达浏览器的出口（`takeEvent()` → `raccoon-status.ts` 的 `loginError` → GET 响应 → 面板渲染），而 save 失败时打印的正是凭据记录本身（store / 凭据服务报错时会把输入一起带出来）——中间没有任何一层会拦它。现统一走 `redactSecrets`。
-  顺带补上 `redactSecrets` 漏掉的形态：原规则只吃**带引号**的值，`{ accessToken: eyJ… }` 这种 `util.inspect` 形状（恰好就是凭据记录被打印时的形状）整条原样保留。新增规则覆盖无引号值，并刻意跳过 `null` / `true` / `false` / `undefined` / 数字——字段报「不存在」本身就是诊断依据，脱敏成 `[REDACTED]` 会毁掉唯一线索。
-- **快速双击提交不再双发密码登录**（`src/host/token-store.ts`、`src/host/token-store/state.ts`）：
-  `saveAccount` 直调登录，完全没有 inflight 互斥。用户双击提交、或提交与轮询（`getToken` → `acquire`）重叠时，两次密码登录同时打向平台——这正是红线 5 要防的锁号路径，也是 throttle 闸门想挡却挡不住的：`saveAccount` 绕过了它。现 `saveAccount` 用独立的 `saveInflight` 去重（不与 `getToken` 的 `inflight` 混槽，类型与复用语义都不同），且双方在开头互相等待对方在飞的那一次。并发组合下全局只发一次密码登录。
-- **四处「失败时反向生效」的保护修正**（`src/host/util.ts`、`auth-trace.ts`、`token-store/grant.ts`、`snapshot-aggregate.ts`、`publish-core.ts`、`provider-publish.ts`）：
-  - `redactSecrets` 规则顺序：Basic 的 scheme 词被排在后面的规则先吞掉，base64 载荷原样留下——那串反解就是控制台的 `user:password`。补 `Cookie` / `Set-Cookie`（整条到末尾，不只第一个分号）、`code_verifier`、`client_secret`，键名比对改为分隔符无关（覆盖 camelCase）。
-  - auth-trace 脱敏：先归一键名再比对（去 `_` / `-` 后小写），camelCase 的 `accessToken` / `refreshToken` 不再漏穿；新增按值形态的兜底（裸 JWT / `sk-` / `Bearer`），相对 URL 与 fragment 也走脱敏——以前两者都被原样截断返回。
-  - `purgeGrant` 读失败不再被当成「记录已轮换」：原实现把读失败折成 `undefined` 后放行到 delete，恰好在它要防的双进程竞态下删掉邻进程刚写完的健康凭据。读不到即什么都不删。
-  - 发布签名只在真正落地时采纳：publish 以返回 `ok:false` 报告失败（不抛），原实现无条件 sync 会把新目录的签名盖到仍在服务的旧注册上，下一轮检测不到变化、永不重试。
-  - 适配器工厂解析器只记忆成功、失败清槽可重试：原实现一次 peer 解析失败就把 rejected promise 钉死，用户修好 peer 仍要重启 Host。
-- **`web_search` 全局单例不再被永久顶掉**（`src/host/lifecycle.ts`）：
-  web 搜索 provider 的注册是 fire-and-forget，内部要 `await` 拿 web 服务。若 Host 在挂起期间 dispose，teardown 已读过（当时还是 `null` 的）归还闭包，待接管完成后闭包才装上去却不会再被调用——宿主全局 `searchProviderId` 被小浣熊永久顶掉。这是唯一一处真违反 ARCHITECTURE §5「改 raccoon 对主注册影响恒为零」的破口（导入级隔离零越界，但写的是宿主全局单例）。现接管后、装闭包前检查 `isDisposed()`：已 dispose 则立即归还且不装闭包，正常路径行为不变。
-- **插件卡图标重绘**（`icon.svg`）：
-  换掉「积分币」母题。原来的青绿渐变圆盘 + 白色记数笔画读起来像一枚通用代币，看不出是谁家；现改为商汤视觉语言（紫 `#5533D6` × 青 `#00FAC4`）的交织几何标记——圆角方块互相咬合、留出一个负空间中心窗，配一扇 45° 斜纹「窗口」。图标仍走仓库根的 `icon.svg`，Plugins 页插件卡的读取端硬校验不变（相对路径、SVG/PNG/JPEG/WebP、清单目录内、≤256 KiB）；本次仅重绘图形内容，未触及任何 Host / Client 行为。
-- **`usePollingInterval` 删掉死参数**（`src/client/use-polling-interval.ts`）：
-  退役的 `enabled` 参数不再接收，注释同步纠正——原注释仍在描述一个已删的分支。
-
-### 发布质量（用户不可见）
-
-`1826a81` 的四处保护各带反向对照：`+15` 条断言里 3 条专门钉住「不要只是把保护删掉」（如 publish 成功仍须 sync；`purgeGrant` 的仍要删 / 仍要留两条），防修法的唯一退化路径变成无脑跳过。脱敏另有两条反向对照钉住「无密消息必须原样保留」，防止脱敏退化成静默吞字段。
-
-`store-baseline` 17 场景 48 帧零漂移：并发去重只影响并发路径，顺序行为不变；新增的并发场景按 `docs/TESTING.md` 不进冻结基线，由 `store.test.mjs` 的 double-submit check 单独锁死。
+- **登录失败原因不再可能带出凭据**：小浣熊扫码失败时打印的正是凭据记录本身，而这条路径是本模块唯一保证到达浏览器的出口（`takeEvent()` → 面板 `loginError`），中间没有一层会拦它；现统一走 `redactSecrets`。脱敏同时补上漏掉的形态——`{ accessToken: eyJ… }` 这类 `util.inspect` 形状此前整条原样保留；`null` / 布尔 / `undefined` / 数字刻意不动，字段报「不存在」本身就是诊断依据。
+- **快速双击提交不再双发密码登录**：`saveAccount` 直调登录、没有 inflight 互斥，用户双击提交或提交与轮询重叠时，两次密码登录同时打向平台——正是红线 5 要防的锁号路径。现用**独立**的 `saveInflight` 去重（不与 `getToken` 的 `inflight` 混槽），并发组合下全局只发一次密码登录。
+- **脱敏规则补全**：Basic 的 scheme 词不再抢在后面的规则之前吞掉 base64 载荷（那串反解就是控制台的 `user:password`）；补 `Cookie` / `Set-Cookie`（整条到末尾）、`code_verifier`、`client_secret`，键名比对改为分隔符无关（覆盖 camelCase）；裸 JWT / `sk-` / `Bearer` 与相对 URL、fragment 也一并覆盖。
+- **`purgeGrant` 读失败不再被当成「记录已轮换」**：原实现把读失败折成 `undefined` 后放行到 delete，恰好在它要防的双进程竞态下删掉邻进程刚写完的健康凭据；读不到即什么都不删。
+- **`web_search` 全局单例不再被永久顶掉**：小浣熊 web 搜索 provider 的注册是 fire-and-forget，Host 在挂起期间 dispose 时，归还闭包会被跳过、宿主全局 `searchProviderId` 被永久占用。现接管后、装闭包前检查 `isDisposed()`，正常路径行为不变。
+- **适配器工厂失败不再被 memo 死**：一次失败的 peer import 原会把 rejected promise 钉死，用户修好 peer 仍需重启 Host；现失败清槽、可重试。
+- **发布签名只在真正落地时采纳**：publish 以返回 `ok:false` 报告失败（不抛错），原实现无条件 sync 会把新目录的签名盖到仍在服务的旧注册上，下一轮检测不到变化、永不重试。
+- **插件卡图标重绘**：换掉「积分币」母题——原来的青绿渐变圆盘读起来像一枚通用代币；现改为商汤视觉语言的紫 × 青交织几何标记。图标读取端的硬校验（相对路径、SVG/PNG/JPEG/WebP、清单目录内、≤256 KiB）不变。
 
 ## [0.5.0] — 2026-10-04
 
-本版把小浣熊的**联网搜索做成 DSH 面板上可开启的工具**：`web_search` 背后接小浣熊托管的 `web_search` MCP，复用它那一份 `RACCOON_CREDENTIAL`，面板上不再需要单独配一条搜索端点 key。同版还带两条小浣熊网关契约的实测修正，都由桌面客户端行为反推后真凭据验证。
+把小浣熊的**联网搜索**做成 DSH 面板上可开启的工具：`web_search` 背后接小浣熊托管的 MCP，复用同一份凭据，不必再单独配一条搜索端点 key。
 
-- **联网搜索可用（`web_search` 工具走小浣熊）**（`src/host/raccoon-search.ts`、`src/host/lifecycle.ts`、`src/host/routes/raccoon.ts`、`src/host/raccoon-status.ts`、`src/client/raccoon-card.ts`、`raccoon-tab.ts`、`i18n.ts`）：
-  - DSH 的 `web_search` 工具背后换成小浣熊 MCP（`https://xiaohuanxiong.com/api/web/mcp/web_search/v1/mcp`，协议 `2024-11-05`，工具 `web_search`），通过 `ctx.web` 注册 provider（`id=raccoon`），**不复用 `tools.register`**（避免出现第二条并行的搜索工具）；
-  - 「小浣熊」tab 新增「**启用联网搜索（小浣熊）**」开关，与提供方/出图开关同一套 `ToggleSwitch`；`webSearchEnabled` 由 Host 按「面板开关 vs 配置文件」的既有 precedence 解析，保存后立即重新注册；
-  - 搜索实现是 MCP over HTTP streamable 客户端（`initialize` → `Mcp-Session-Id` → `tools/call`），`parseMcpSse` 容忍 keep-alive，错误提取兼容 Raccoon 网关的 `{code,message,details}` 信封（实测 401 就是这形状）；
-  - `web_fetch` 不受影响。用户可感知的差别：不用再为搜索能力单独找一条搜索端点 key。
-
-### 搜索契约基线（发布质量，用户不可见）
-
-`test/raccoon-search.test.mjs` 以 PEER-FREE 单测钉住传输层与挂载层（SSE 解析、会话头、错误信封、provider 去重 / abort / 错误码，18 项）。`test/live-raccoon.mjs` 新增 L2d 层：用真实凭据做一次完整 MCP 握手与单次 `tools/call`（Count=1），实测返回 `WebResults` 并带 `Url/Title/Snippet`。`test/baselines/raccoon-contract.json` 新增 `image-gen` 与 `mcp-web-search` 两条路由，以及 `imageGen` / `mcpWebSearch` 两段契约——`images/gen` 的真实出图**刻意不做自动探针**（每次消耗积分、同步 >600 s、响应格式仍标 `unconfirmed`），只在 L1 档确认路由可达。
-
-- **目录字段漂移修复**（`src/host/raccoon.ts`）：网关 `/model_catalog` 已切换为只发 `model_name` / `tags` / `params` / `billing_multiplier`，旧字段（`id` / `vision` / `input_modalities` / `context_window` / `max_output_*` / `multiplier`）全部消失，目录读取因此恒为空（不报错），面板与模型注册**恒走内置快照表**。实测 `sn-deepseek-v4-1-flash` 支持读图（`chat/completions` 带 `image_url` 回 HTTP 200），快照却标 `vision:false`。现按 v2 字段归一化、`tags` 判定 vision，并新增实测白名单 `RACCOON_VISION_WHITELIST`（实测优先于声明）。
-- **限时免费 / 折扣如实展示**（`raccoon.ts` + `raccoon-roster.ts` + `wire.ts` + `i18n.ts`）：目录行的 `multiplier` 改读**生效倍率**（限免时为 0），并保留 `originalMultiplier` / `billingStatus` / `billingStatusNote`；面板模型清单对促销模型加「限时免费 / 限时折扣」徽章，倍率 tooltip 同时给出当前价与原价。此前只读原价，`sn-sensenova-6-8-flash` 面板显示 ×0.50，实际限免 0 倍（客户端把限免折扣当永久免费读）。
+- **联网搜索开关**：「小浣熊」tab 新增「启用联网搜索（小浣熊）」，与提供方 / 出图开关同一套控件；生效值按「面板开关 > 配置文件」的既有 precedence 解析，保存后立即重新注册。`web_fetch` 不受影响。
+- **搜索走 MCP over HTTP streamable**：`initialize` → `Mcp-Session-Id` → `tools/call`；容忍 keep-alive，错误提取兼容网关的 `{code,message,details}` 信封。
+- **目录字段漂移修复**：网关 `/model_catalog` 改为只发 `model_name` / `tags` / `params` / `billing_multiplier`，旧字段全部消失，目录读取因此恒为空且不报错——面板与模型注册**恒走内置快照表**。现按 v2 字段归一化、用 `tags` 判定 vision，并新增实测白名单（实测优先于声明）：`sn-deepseek-v4-1-flash` 实测支持读图，快照原标 `vision:false`。
+- **限时免费 / 折扣如实展示**：目录行改读**生效倍率**（限免时为 0），并保留 `originalMultiplier` / `billingStatus` / `billingStatusNote`；面板对促销模型加「限时免费 / 限时折扣」徽章，倍率 tooltip 同时给出当前价与原价。此前只读原价，客户端把限免折扣当永久免费读，`sn-sensenova-6-8-flash` 显示 ×0.50 而实际限免 0 倍。
 
 ## [0.4.9] — 2026-10-03
 
-两条主线：**「小浣熊」tab 的面板按自家设计系统重做**（三个注册开关换成真开关、余额从一行散文改成卡片组、模型清单表头不再替整段说明当标题），以及**限频与并发两处真实缺口**（Retry-After 的 HTTP-date 形式读不到、跨进程写入缺版本护栏）。
+两条主线：**「小浣熊」tab 按自家设计系统重做**，以及**限频与并发的两处真实缺口**。
 
 - **小浣熊面板重做**（`src/client/raccoon-card.ts`、`raccoon-roster.ts`、`toggle-switch.ts`、`styles.ts`）：
   - 三处注册开关（通用提供方、出图工具、小浣熊提供方）换成共享的滑动开关。原来是一个裸 checkbox 加一句脚注长的标签（`启用小浣熊提供方（向 DSH 注册模型）`），读起来像一行散文前面挂了个方框；现在是短标签 + `title` tooltip 承担说明，开关本体承担「这是个开关」的意思；
@@ -120,12 +75,11 @@ DSH 市场的 `github:` 安装源是 pnpm git-dep，pnpm 11 在没有 allowBuild
 
 ## [0.4.7] — 2026-10-02
 
-扫码登录不再把面板与网关绑在一起：此前一次扫码能让一个 HTTP 请求阻塞最长 5 分钟，客户端再用 150 次补偿轮询去够那个迟迟不返回的状态，而第二上游的每次读都实打实打网关——等待的是人，不是连接。本版把等待挪出请求路径，并给第二上游的读接上缓存与单飞。
+扫码登录不再把面板与网关绑在一起：等待挪出请求路径，第二上游的读接上缓存与单飞。此前一次扫码能让一个 HTTP 请求阻塞最长 5 分钟，客户端再用 150 次补偿轮询去够状态——等待的是人，不是连接。
 
 - **扫码登录改为「发码即回、walk 转后台」**（`src/host/routes.ts`、`src/host/raccoon-walk.ts`）：POST 立刻返回二维码；超时 / 取消 / 凭据保存失败三种终态作为**一次性事件**由 GET 的 `loginStatus` 下发，读到即清——「已登录」仍由凭据回答，事件不承担状态。客户端删掉补偿轮询死循环，改由服务端状态驱动的双档轮询，不再持有比 walk 活得更久的定时器。
 - **三种失败终态有了名字**（`src/client/i18n.ts`）：`raccoon.loginTimeout` / `raccoon.loginCanceled` / `raccoon.loginFailed`，中英成对。此前它们只表现为「面板没反应」。
 - **第二上游读接入缓存与单飞**（`src/host/coalesced-fetch.ts`）：前台读与后台轮询合并，一次扫码打网关的读次数从几百次降到合并后的少数几次；Token Plan 侧 `console-client` 里两份手写的 cache/inflight 一并换成同一个原语。
-- **门禁补强**（发布质量，用户不可见）：名册新增 4 个套件（provider 回滚护栏、小浣熊状态读、state 分段形状）并把 `typecheck-gate` 接进链（`tsc` 缺席则 SKIP）；新增 `commit:lint` 与 jscpd 重复代码**报告档**（`npm run duplicate-check`，不挡发布）；新增 `npm run test:live:raccoon`（小浣熊 live 契约探针 + 基线，L1 档无需凭据）。
 - **CI 的两处静默红修掉**：offline 硬门禁在干净 runner 上拿不到 peer 依赖，连续一整天红在第二个套件（`set -e` 让后面 17 个套件从未跑过）；e2e job 少了构建步骤，一直在拿 gitignored 的缺席产物做端到端。两项修完 CI 在 `main` 上转绿。
 - **内部重构**（行为由冻结基线与套件背书）：`routes.ts` 拆成 7 条命名路由并给 `Wiring` 上类型；两个上游的发布状态机与 adapter 装配各收敛为一份（`publish-core.ts` / `llm-adapter-core.ts`）；小浣熊的状态读与 walk 各自成模块。`peerDependencies` 补齐原先漏声明的 5 个 Host 包。
 
