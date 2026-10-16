@@ -219,5 +219,62 @@ export const S = {
   // leaving a whole list adrift: the Raccoon tab pairs its roster with a login
   // block that already wears a card, and an unframed list beside a framed one
   // read as an unfinished half rather than as a deliberate hierarchy.
-  modelPanel: { border: "1px solid var(--dsw-alias-border-l1)", borderRadius: 12, background: "var(--dsw-alias-bg-layer-1)", padding: "12px 14px" }
+  modelPanel: { border: "1px solid var(--dsw-alias-border-l1)", borderRadius: 12, background: "var(--dsw-alias-bg-layer-1)", padding: "12px 14px" },
+  // === the composer pill: a different surface, borrowed metrics ============
+  // Every token above draws INSIDE this plugin's own card — 13px type, framed
+  // buttons, 8–12px radii, brand ink. The pill (ROADMAP §6.3) is a guest in
+  // the HOST's composer toolbar, where its neighbours are the model picker and
+  // the attach/mode ghost controls: 28px tall, unframed, 12px, transparent.
+  // It therefore borrows the TOOLBAR's scale, not the card's — a card-sized pill
+  // in that row reads as a foreign widget at a glance, which is exactly what
+  // the 2026-10-15 report was. This plugin injects no stylesheet (see
+  // `toggle-switch.ts`), so these are inline styles by the only route available.
+  //
+  // `background: "none"` + `borderStyle: "none"` rather than `border: 0`: the
+  // UA button frame is a real border on some engines and a `border-image` on
+  // others, and the longhand removes it in all of them (jsdom also mis-parses
+  // the `border` shorthand). `appearance: "none"` drops the rest of the UA
+  // skin so the shell's own focus treatment is what shows.
+  pillTrigger: {
+    appearance: "none", display: "inline-flex", alignItems: "center", gap: 5,
+    height: 28, padding: "0 6px", flexShrink: 0,
+    // UA chrome has to be taken off explicitly: this element is a `<button>`
+    // for its tooltip and accessible name, and a browser paints that as a
+    // filled, bordered, rounded box. `background: "none"` + `borderStyle:
+    // "none"` (not `border: 0`, which jsdom mis-parses and some engines treat
+    // as a border-image) leaves nothing behind.
+    background: "none", borderStyle: "none",
+    color: "inherit", fontFamily: "inherit", fontSize: 12, lineHeight: "20px",
+    whiteSpace: "nowrap", userSelect: "none",
+    // The MVP pill READS, it does not act (the expand-panel is still §6.3's
+    // next phase), so it promises no pointer rather than inviting a click that
+    // does nothing. The moment the panel lands this gives way to
+    // `cursor: "pointer"`, a real handler and a focus ring.
+    cursor: "default"
+  },
+  // The tier's whole job is the 7px dot (opencode-go's shape too): the reading
+  // keeps the host's label ink so a routine 1% never shouts. `flexShrink: 0`
+  // because the trigger's `overflow: hidden` would otherwise flatten it into
+  // an ellipse the moment the row gets narrow.
+  pillDot: { width: 7, height: 7, borderRadius: 999, flexShrink: 0 },
+  // Tabular figures: the snapshot polls on a cadence, and proportional digits
+  // make the whole toolbar twitch every few seconds as `9%` becomes `10%`.
+  pillReading: { fontVariantNumeric: "tabular-nums" },
+  // The stale mark is a footnote, not a reading — the dot and the numbers
+  // already say the data is old; this only says WHY the numbers may lag.
+  pillStale: { color: "var(--dsw-alias-label-tertiary)" },
+  // Tier ink from the shell's own state tokens (`--dsw-alias-state-*`), not
+  // plugin hexes: a retheme or a light/dark switch recolours the pill with the
+  // rest of the window. The hexes are fallbacks for a shell that defines
+  // neither, and deliberately sit beside the upstream opencode-go picks.
+  pillTierOk: "var(--dsw-alias-state-success-primary, #22c55e)",
+  pillTierWarn: "var(--dsw-alias-state-warn-primary, #eab308)",
+  pillTierExhausted: "var(--dsw-alias-state-error-primary, #ef4444)",
+  // "Unknown" is not a state — it is the ABSENCE of a reading, so it borrows
+  // the tertiary label ink rather than inventing a fourth state colour.
+  pillTierUnknown: "var(--dsw-alias-label-tertiary, #9ca3af)",
+  // A window that is actually spent is an alarm, not a meter, so it is the one
+  // tier that tints the reading as well as the dot — same ruling as
+  // `statError` above: an exhausted quota must not read as a calm 100%.
+  pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" }
 };

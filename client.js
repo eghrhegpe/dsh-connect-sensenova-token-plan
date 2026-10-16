@@ -1204,7 +1204,38 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				borderRadius: 12,
 				background: "var(--dsw-alias-bg-layer-1)",
 				padding: "12px 14px"
-			}
+			},
+			pillTrigger: {
+				appearance: "none",
+				display: "inline-flex",
+				alignItems: "center",
+				gap: 5,
+				height: 28,
+				padding: "0 6px",
+				flexShrink: 0,
+				background: "none",
+				borderStyle: "none",
+				color: "inherit",
+				fontFamily: "inherit",
+				fontSize: 12,
+				lineHeight: "20px",
+				whiteSpace: "nowrap",
+				userSelect: "none",
+				cursor: "default"
+			},
+			pillDot: {
+				width: 7,
+				height: 7,
+				borderRadius: 999,
+				flexShrink: 0
+			},
+			pillReading: { fontVariantNumeric: "tabular-nums" },
+			pillStale: { color: "var(--dsw-alias-label-tertiary)" },
+			pillTierOk: "var(--dsw-alias-state-success-primary, #22c55e)",
+			pillTierWarn: "var(--dsw-alias-state-warn-primary, #eab308)",
+			pillTierExhausted: "var(--dsw-alias-state-error-primary, #ef4444)",
+			pillTierUnknown: "var(--dsw-alias-label-tertiary, #9ca3af)",
+			pillTierExhaustedText: { color: "var(--dsw-alias-state-error-primary)" }
 		};
 	}));
 
@@ -4089,24 +4120,31 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			className: "dsh-sensenova-composer-pill",
 			title,
 			"aria-label": title,
-			style: { color: TIER_COLOR[tier] }
+			style: S.pillTrigger
 		}, h("span", {
 			className: "dsh-sensenova-composer-pill-dot",
 			"aria-hidden": "true",
-			style: { background: TIER_COLOR[tier] }
-		}), " ", h("span", { className: "dsh-sensenova-composer-pill-text" }, label(tt("composer.pool5h"), p5), " · ", label(tt("composer.pool7d"), p7), stale ? ` · ${tt("composer.stale")}` : ""));
+			style: {
+				...S.pillDot,
+				background: TIER_INK[tier]
+			}
+		}), h("span", {
+			className: "dsh-sensenova-composer-pill-text",
+			style: tier === "exhausted" ? S.pillTierExhaustedText : void 0
+		}, h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)), " · ", h("span", { style: S.pillReading }, label(tt("composer.pool7d"), p7)), stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null));
 	}
-	var PROVIDER_IDS, TOKEN_PLAN, TIER_COLOR, STALE_AFTER_MS;
+	var PROVIDER_IDS, TOKEN_PLAN, TIER_INK, STALE_AFTER_MS;
 	var init_composer_usage_pill = __esmMin((() => {
 		init_runtime();
+		init_styles();
 		init_use_snapshot_polling();
 		PROVIDER_IDS = /* @__PURE__ */ new Set(["sensenova-token-plan", "sensenova-raccoon"]);
 		TOKEN_PLAN = "sensenova-token-plan";
-		TIER_COLOR = {
-			ok: "#22c55e",
-			warn: "#eab308",
-			exhausted: "#ef4444",
-			unknown: "#9ca3af"
+		TIER_INK = {
+			ok: S.pillTierOk,
+			warn: S.pillTierWarn,
+			exhausted: S.pillTierExhausted,
+			unknown: S.pillTierUnknown
 		};
 		STALE_AFTER_MS = 9e4;
 	}));

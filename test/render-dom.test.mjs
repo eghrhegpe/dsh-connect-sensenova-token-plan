@@ -554,6 +554,134 @@ function typeInto(input, value) {
   check("unmounting the pill leaves no poller alive", pill.host.childNodes.length === 0);
 }
 
+// === F. the pill wears the TOOLBAR's skin, not a default button (2026-10-16) ===
+// The reported defect: the pill rendered correctly but "样式确实不太不一样" —
+// because it had NOTHING but a `className`, and this plugin injects no
+// stylesheet, so a browser painted its UA button box (grey fill, black border,
+// system font) inside the host's ghost toolbar. A `className` that no
+// stylesheet can match is invisible to the user and permanent to the author.
+//
+// These checks read the REAL inline style react-dom writes, so they fail for
+// exactly the defect a screenshot would show: a dropped property, a re-spelled
+// literal, or a revert to the unstyled shape. They assert the SHAPE (a property
+// is present and carries the host's scale), never the rendered colour — jsdom
+// resolves no `var()`, and hard-coding a colour is how a tone swap slips past
+// (the same ruling as `render.test.mjs` §C).
+{
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const okSnapshot = {
+    ok: true,
+    pools: {
+      pools: [{
+        id: "p1", name: "通用池", poolType: "default",
+        window5h: { limit: 1000, used: 200, remaining: 800, resetAt: Date.now() + 3_600_000 },
+        window7d: { limit: 10000, used: 100, remaining: 9900 }
+      }]
+    },
+    trend: { hours: 24, models: [] }
+  };
+  win.fetch = () => Promise.resolve({ ok: true, status: 200, json: async () => okSnapshot });
+  const selection = { next: { provider: "sensenova-token-plan", model: "deepseek-v4-flash" } };
+  const useProjection = () => { React.useState(selection); return selection; };
+  const pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+
+  const button = pill.host.querySelector("button.dsh-sensenova-composer-pill");
+  const css = (el, prop) => (el?.style?.[prop] ?? "");
+  check("the pill reaches the DOM as a styled element, not a bare className",
+    button !== null && typeof button.getAttribute("style") === "string"
+      && button.getAttribute("style").length > 0,
+    `style=${button?.getAttribute("style") ?? "(absent)"}`);
+
+  // The UA button box has to be gone in BOTH of its spellings: `background`
+  // (the fill) and `border-style` (the frame). `border: 0` was tried first and
+  // jsdom parses it as `medium`, which would have left the frame standing.
+  check("the browser's default button chrome is removed (fill and frame)",
+    css(button, "background") === "none" && css(button, "borderStyle") === "none",
+    `background=${css(button, "background")} border-style=${css(button, "borderStyle")}`);
+
+  // The host's toolbar neighbours are 28px tall 12px ghost controls; a pill
+  // drawn at the plugin card's 13px/30px scale reads as a foreign widget.
+  check("the pill is the host's 28px / 12px toolbar scale, not the card's",
+    css(button, "height") === "28px" && css(button, "fontSize") === "12px",
+    `height=${css(button, "height")} font-size=${css(button, "fontSize")}`);
+
+  // `color: inherit` (not a literal ink) is what lets the shell's theme own the
+  // reading, and `fontFamily: inherit` stops a plugin default from changing the
+  // digits' width under a CJK-capable host font.
+  check("the reading inherits the shell's ink and font rather than hard-coding them",
+    css(button, "color") === "inherit" && css(button, "fontFamily") === "inherit",
+    `color=${css(button, "color")} font-family=${css(button, "fontFamily")}`);
+
+  // The tier colour must be a HOST TOKEN. `#22c55e` in the source looked fine
+  // on this machine's light theme and wrong on every other one — a retheme
+  // recolours the window and leaves the pill behind.
+  const dot = pill.host.querySelector(".dsh-sensenova-composer-pill-dot");
+  const dotBackground = css(dot, "background");
+  check("a healthy tier's dot wears the shell's state token, not a plugin hex",
+    dotBackground.startsWith("var(--dsw-alias-state-success-primary"),
+    `dot background=${dotBackground}`);
+
+  // The reading stays in the host's label ink while things are fine — a tier
+  // colour on the text would make a routine 1% as loud as the model picker.
+  const reading = pill.host.querySelector(".dsh-sensenova-composer-pill-text");
+  check("a healthy reading keeps the host's label ink (only the dot carries the tier)",
+    reading !== null && reading.getAttribute("style") === null,
+    `text style=${reading?.getAttribute("style") ?? "(absent)"}`);
+
+  // Polling makes the percentages change in place; proportional digits would
+  // twitch the whole toolbar every cadence.
+  check("the percentages use tabular figures so polling does not reflow the row",
+    [...pill.host.querySelectorAll("span")].filter((el) => css(el, "fontVariantNumeric") === "tabular-nums").length === 2,
+    `tabular spans=${[...pill.host.querySelectorAll("span")].filter((el) => css(el, "fontVariantNumeric") === "tabular-nums").length}`);
+
+  // An EXHAUSTED window is the one tier that tints the READING as well as the
+  // dot. Same ruling as `statError`: a spent quota must not read as a calm
+  // 100%. The healthy frame above is the control — identical shape, no ink on
+  // the text — so this cannot pass by the reading simply always wearing colour.
+  win.fetch = () => Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      ok: true,
+      pools: {
+        pools: [{
+          id: "p1", name: "通用池", poolType: "default",
+          window5h: { limit: 1000, used: 1000, remaining: 0, resetAt: Date.now() + 3_600_000 },
+          window7d: { limit: 10000, used: 100, remaining: 9900 }
+        }]
+      },
+      trend: { hours: 24, models: [] }
+    })
+  });
+  const spentPill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  const spentDot = spentPill.host.querySelector(".dsh-sensenova-composer-pill-dot");
+  const spentReading = spentPill.host.querySelector(".dsh-sensenova-composer-pill-text");
+  check("an exhausted window moves BOTH the dot and the reading to the error token",
+    css(spentDot, "background").startsWith("var(--dsw-alias-state-error-primary")
+      && css(spentReading, "color").startsWith("var(--dsw-alias-state-error-primary"),
+    `dot=${css(spentDot, "background")} reading=${css(spentReading, "color")}`);
+  spentPill.unmount();
+
+  // The stale frame: the reading failed, so the numbers on screen are old. The
+  // mark is a footnote in tertiary ink — if it wore tier colour it would read
+  // as a fifth quota window instead of a caveat about the two beside it.
+  win.fetch = () => Promise.reject(new Error("snapshot unreachable"));
+  const stalePill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  // The stale mark's own leaf span, not the reading wrapper that also contains
+  // the word (textContent matches ancestors too).
+  const staleMark = [...stalePill.host.querySelectorAll("span")]
+    .find((el) => el.children.length === 0 && el.textContent?.includes("composer.stale"));
+  check("the stale mark is a tertiary footnote, not a fifth reading",
+    staleMark !== undefined && css(staleMark, "color").startsWith("var(--dsw-alias-label-tertiary"),
+    `stale span style=${staleMark?.getAttribute("style") ?? "(absent)"} text=${stalePill.host.textContent.slice(0, 120)}`);
+  stalePill.unmount();
+
+  pill.unmount();
+}
+
 console.log(JSON.stringify(results, null, 2));
 const failed = results.filter((r) => !r.pass);
 if (failed.length > 0) {

@@ -7,6 +7,14 @@
  * tooltip，不进胶囊正文——正文密度与 opencode-go 对齐（它也是只在展开面板里给
  * 重置时间，pill 本体只有两档百分比 + 标记）。
  *
+ * **样式**：本组件不注入样式表（见 `toggle-switch.ts` 的同名裁定），所以胶囊的
+ * 全部外观是 inline style，取自 `styles.ts` 的 `S.pill*` 一族——那一族按**宿主
+ * 工具栏**的尺度定（28px 高 / 12px 字 / 无框 / 透明底），不按本插件卡片自己的
+ * 13px 框按钮尺度。2026-10-15 用户报「样式确实不太一样」，根因是当时只有
+ * `className`（无样式表 ⇒ 无效）+ 四个写死 hex，于是渲染成浏览器默认按钮；
+ * 现在分级色走宿主 token（`--dsw-alias-state-*`），换肤 / 明暗随之走。
+ * `className` 保留为测试选择器（`render-dom.test.mjs` 查询它）。
+ *
  * **两层结构**（本组件不「切模型即消失」的关键）：归属门控发生在**组件边界**——
  * 外层 `ComposerUsagePill` 只决定内层 `ActiveComposerPill` 的挂/摘，轮询 hook
  * `useSnapshotPolling` 全在内层调用，hook 顺序恒定。若在同一组件里先调 hook 再
@@ -34,6 +42,7 @@
  * 塞进百分比会混淆「窗口消耗」与「可用余额」——它属于插件卡「积分额度」tab。
  */
 import { h } from "./runtime.ts";
+import { S } from "./styles.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
 import type { Tt } from "./runtime.ts";
 import type { PoolData, QuotaWindowData } from "./wire.ts";
@@ -147,11 +156,11 @@ export function percentOf(window: QuotaWindowData | null | undefined): number | 
   return Math.round((used / limit) * 100);
 }
 
-const TIER_COLOR: Record<Tier, string> = {
-  ok: "#22c55e",
-  warn: "#eab308",
-  exhausted: "#ef4444",
-  unknown: "#9ca3af",
+const TIER_INK: Record<Tier, string> = {
+  ok: S.pillTierOk,
+  warn: S.pillTierWarn,
+  exhausted: S.pillTierExhausted,
+  unknown: S.pillTierUnknown,
 };
 
 /**
@@ -231,18 +240,34 @@ function ActiveComposerPill({ tt, provider, model }: ActivePillProps) {
     "button",
     {
       type: "button",
+      // The class survives as the test selector (`render-dom.test.mjs` queries
+      // it) — and as nothing else: this plugin injects no stylesheet, so a
+      // className is a hook for tests and an eyesore for the author. Everything
+      // the pill LOOKS like is the inline style below.
       className: "dsh-sensenova-composer-pill",
       title,
       "aria-label": title,
-      style: { color: TIER_COLOR[tier] }
+      style: S.pillTrigger
     },
-    h("span", { className: "dsh-sensenova-composer-pill-dot", "aria-hidden": "true", style: { background: TIER_COLOR[tier] } }),
-    " ",
-    h("span", { className: "dsh-sensenova-composer-pill-text" },
-      label(tt("composer.pool5h"), p5),
+    h("span", {
+      className: "dsh-sensenova-composer-pill-dot",
+      "aria-hidden": "true",
+      style: { ...S.pillDot, background: TIER_INK[tier] }
+    }),
+    h(
+      "span",
+      {
+        className: "dsh-sensenova-composer-pill-text",
+        // Only an EXHAUSTED window tints the text. Everything else stays in
+        // the host's label ink, which is what makes a 1% pill quiet: if the
+        // percentages wore tier colour, a healthy reading would be as loud as
+        // the model picker's own chrome.
+        style: tier === "exhausted" ? S.pillTierExhaustedText : undefined
+      },
+      h("span", { style: S.pillReading }, label(tt("composer.pool5h"), p5)),
       " · ",
-      label(tt("composer.pool7d"), p7),
-      stale ? ` · ${tt("composer.stale")}` : ""
+      h("span", { style: S.pillReading }, label(tt("composer.pool7d"), p7)),
+      stale ? h("span", { style: S.pillStale }, ` · ${tt("composer.stale")}`) : null
     )
   );
 }

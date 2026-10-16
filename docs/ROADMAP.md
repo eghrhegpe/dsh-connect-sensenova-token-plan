@@ -572,6 +572,17 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 
 配套裁定：小浣熊模型**不**回落 Token Plan 通用池（画灰「—」，tooltip 说明，其余额在小浣熊 tab 读）；重置时间进 tooltip 不进胶囊正文（正文密度对齐 opencode-go：两档百分比 + 标记）。
 
+**样式裁定（2026-10-16）**：用户报「只能说样式确实不太一样」——内容对、外观错。根因不是配色偏好，是**胶囊没有任何样式可生效**：初版只有 `className`，而本插件不注入样式表（见 `toggle-switch.ts` 的同名裁定：inline style 是唯一手段），于是浏览器把它画成默认按钮（灰底、黑框、系统字体），塞进宿主一排 ghost 控件里自然像异物。落地形态：
+
+- 外观全部走 `styles.ts` 新增的 `S.pill*` 一族 inline style，按**宿主工具栏**尺度定（28px 高 / 12px 字 / 无框 / 透明底 / `color`+`font-family` 均 `inherit`），不按本插件卡片的 13px 框按钮尺度——胶囊是工具栏里的客人，不是卡片内容。
+- 分级色改走宿主 token（`--dsw-alias-state-success-primary` / `-warn-` / `-error-`，`unknown` 借 `--dsw-alias-label-tertiary`），hex 只作 fallback。换肤 / 明暗随之走，不再留下写死的 `#22c55e`。
+- **只有耗尽档给正文上色**，其余档只染 7px 圆点：日常 1% 不该和模型选择器一样响。stale 标记是三级灰脚注，不是第五个窗口。
+- UA 按钮底与框必须显式摘掉：`background: "none"` + `borderStyle: "none"`（不用 `border: 0`——jsdom 解析成 `medium`，等于框还在）。
+- MVP 胶囊**只读不点**（展开面板是下一阶段），所以 `cursor: "default"`：不给一个点不动的按钮承诺指针。
+- 百分比用 tabular figures：快照按 cadence 轮询，比例数字会让整行工具栏每几秒抖一下。
+
+以上由 `test/render-dom.test.mjs` F 段钉住（断言**属性形状**而非渲染色——jsdom 不解 `var()`，写死颜色正是换色漏网的路径，同 `render.test.mjs` C 段的纪律）；实测旧形状 6 条红、新形状 56 条全绿。
+
 ## 7. 优先级与时间盒
 
 | 优先级 | 项 | 侵入性 | 门禁 |
