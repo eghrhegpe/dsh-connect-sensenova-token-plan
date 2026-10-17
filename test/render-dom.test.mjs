@@ -1379,6 +1379,28 @@ function typeInto(input, value) {
       && sharedRead.text.includes("7 / 1000") && !sharedRead.text.includes("500 / 1000"),
     `panel text=${sharedRead.text.slice(0, 240)}`);
 
+  // ...and when the dedicated pool is SPENT while the general one still has
+  // credit, the pill follows the pool that actually keeps the model selectable.
+  // The Host keeps the model in the picker while ANY covering pool has credit;
+  // pointing the pill at the spent one would draw a full meter for a model the
+  // picker still offers — two panels disagreeing about one fact. Same fixture as
+  // above with the two windows swapped, so only the spent/live discrimination
+  // can produce the expected reading.
+  const spillRead = await openPanelFor({
+    ok: true,
+    pools: {
+      pools: [
+        planPool(windowOf(500, 1000, inHours(1)), windowOf(10, 1000)),
+        planPool(windowOf(1000, 1000, inHours(1)), windowOf(9, 1000, inHours(1)), { id: "p2", name: "Flash-Lite 专属池", poolType: "dedicated" })
+      ]
+    },
+    trend: { hours: 24, models: [] }
+  });
+  check("a spent dedicated pool hands the pill back to the pool that still covers the model",
+    spillRead.text.includes("通用池 · pool.default · composer.poolHit")
+      && spillRead.text.includes("500 / 1000") && !spillRead.text.includes("1000 / 1000"),
+    `panel text=${spillRead.text.slice(0, 240)}`);
+
   // A spent deadline must not shadow a live one. `w5?.resetAt ?? w7?.resetAt` took
   // the first NON-NULL, so with the 5h reset already past (mid-reset, or a
   // snapshot that lagged) the tooltip worded NO reset at all while the weekly one

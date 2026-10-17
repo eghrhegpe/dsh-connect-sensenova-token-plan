@@ -4220,13 +4220,34 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	* belongs to the Raccoon gateway's own credit universe, so it never borrows a
 	* Token Plan pool — it renders through {@link RaccoonPill}, which reads that
 	* gateway's balance.
+	*
+	* A covering pool that is ALREADY DRAINED loses to a covering pool that still
+	* has credit: the Host keeps the model selectable while ANY covering pool has
+	* credit (the all-pools rule), so pointing the pill at the spent one would show
+	* a full meter for a model the picker still offers — a disagreement between two
+	* panels about one fact. Dedicated-first decides only among pools that can still
+	* serve, and still decides by itself when every covering pool is spent (then the
+	* earliest reset clock is what the reader needs).
 	*/
 	function poolFor(pools, modelId, provider) {
 		const covering = modelId !== void 0 ? (pools ?? []).filter((p) => Array.isArray(p.modelIds) && p.modelIds.includes(modelId)) : [];
+		const live = covering.filter((pool) => !poolSpent(pool));
+		const preferred = live.find((p) => p.poolType === "dedicated") ?? live[0];
+		if (preferred !== void 0) return preferred;
 		const dedicated = covering.find((p) => p.poolType === "dedicated");
 		if (dedicated !== void 0) return dedicated;
 		if (covering.length > 0) return covering[0];
 		return provider === TOKEN_PLAN ? pools?.[0] : void 0;
+	}
+	/**
+	* Whether either window of a pool reads as fully spent.
+	*
+	* Deliberately `tierOf` (the pill's one colour rule) rather than a second
+	* `remaining <= 0` comparison: `limit` unknown must stay "unknown", never
+	* "spent", and the pill already owns exactly one implementation of that.
+	*/
+	function poolSpent(pool) {
+		return tierOf(pool.window5h) === "exhausted" || tierOf(pool.window7d) === "exhausted";
 	}
 	/** The colour for a window, by share of its limit already spent. */
 	function tierOf(window) {
