@@ -525,6 +525,52 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     { window5h: { limit: 0, used: 0, remaining: 0, resetAt: null }, window7d: { limit: 0, used: 0, remaining: 0, resetAt: null } }
   ] }, tt: ttZh });
   check("a window with an unknown limit is not reported as exhausted", drift.length === 0, drift.join("\n"));
+
+  // The banner answers "which models can I not pick", and under the all-pools
+  // rule that is NO LONGER the same question as "which meters read zero": the
+  // host also lists a model in its dedicated pool, so a drained general pool can
+  // block nothing at all. `llm.quotaBlockedModelIds` is the authoritative answer
+  // and the only thing that may raise the banner when it is present.
+  const SOON = 1800003600;
+  const LATE = 1800007200;
+  const drainedGeneral = {
+    modelIds: ["m1", "m2"],
+    window5h: { limit: 100, used: 100, remaining: 0, resetAt: SOON },
+    window7d: { limit: 100, used: 1, remaining: 99, resetAt: null }
+  };
+  const silent = rendered(render.PoolExhaustionNotice, {
+    pools: { pools: [drainedGeneral] }, tt: ttZh, blockedModelIds: []
+  });
+  check("a drained pool that blocks no model raises no banner",
+    silent.length === 0, silent.join("\n"));
+
+  const loud = rendered(render.PoolExhaustionNotice, {
+    pools: { pools: [drainedGeneral] }, tt: ttZh, blockedModelIds: ["m1"]
+  });
+  check("the banner follows the host's blocked set, not the meters alone",
+    loud.some((line) => line.includes("部分积分池已耗尽") && line.includes(when(SOON))),
+    loud.join("\n"));
+
+  // Blocked ids that belong to OTHER pools must not resurrect this pool's
+  // banner: the drained meter says nothing about a model it does not name.
+  const foreign = rendered(render.PoolExhaustionNotice, {
+    pools: { pools: [drainedGeneral] }, tt: ttZh, blockedModelIds: ["elsewhere"]
+  });
+  check("a drained pool raises nothing when the blocked models belong to another pool",
+    foreign.length === 0, foreign.join("\n"));
+
+  // And the reset clock must come from a pool that actually blocks something —
+  // quoting the earliest drained meter would promise recovery at a time that
+  // does nothing for the model the banner is about.
+  const twoDrained = rendered(render.PoolExhaustionNotice, {
+    pools: { pools: [
+      { modelIds: ["a"], window5h: { limit: 100, used: 100, remaining: 0, resetAt: LATE }, window7d: { limit: 100, used: 1, remaining: 99, resetAt: null } },
+      { modelIds: ["b"], window5h: { limit: 100, used: 100, remaining: 0, resetAt: SOON }, window7d: { limit: 100, used: 1, remaining: 99, resetAt: null } }
+    ] }, tt: ttZh, blockedModelIds: ["a"]
+  });
+  check("the quoted reset belongs to the pool that blocks the model, not the earliest drained one",
+    twoDrained.some((line) => line.includes(when(LATE))) && !twoDrained.some((line) => line.includes(when(SOON))),
+    twoDrained.join("\n"));
 }
 
 // === G6. a zeroed quota window is labelled "已耗尽", not just 0 ============

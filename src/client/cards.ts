@@ -181,37 +181,60 @@ export function PoolCard({ pool, tt, catalogAvailable }: { pool: PoolData; tt: T
 
 /**
  * A top-of-section notice for the "transient exhaustion" case: when one or
- * more credit pools have hit zero, the picker (host side) drops those pools'
- * models, so the reader sees models vanish with no explanation. This line
- * says WHY they vanished and WHEN they are expected back — the earliest
- * `resetAt` among the exhausted windows — so a zeroed pool reads as
- * "recovers at HH:MM", never as a mystery.
+ * more credit pools have hit zero AND some model has no other pool left to
+ * draw on, the picker (host side) drops that model, so the reader sees it
+ * vanish with no explanation. This line says WHY it vanished and WHEN it is
+ * expected back — the earliest `resetAt` among the pools that actually block
+ * something — so a zeroed pool reads as "recovers at HH:MM", never as a
+ * mystery.
  *
- * Hook-free: it only reads the snapshot's `pools` array, so the render suite
- * drives the exact component the browser draws. Returns null when nothing is
- * exhausted (the common case stays silent). It does not guess whether a zero
- * came from a true quota drain or a rate-limit blip — the panel never sees
- * the 429 class — it only reports the pool's own reset clock, which is the
- * one honest recovery signal available here.
+ * Hook-free: it reads two plain snapshot fields — the `pools` array and, when
+ * the Host publishes it, `llm.quotaBlockedModelIds` — so the render suite drives
+ * the exact component the browser draws. Returns null when nothing is
+ * exhausted (the common case stays silent), and also when the Host says the
+ * drained pools block no model. It does not guess whether a zero came from a
+ * true quota drain or a rate-limit blip — the panel never sees the 429 class —
+ * it only reports the pool's own reset clock, which is the one honest recovery
+ * signal available here.
  */
-export function PoolExhaustionNotice({ pools, tt }: { pools?: PoolsData | null; tt: Tt }): unknown {
+export function PoolExhaustionNotice({ pools, tt, blockedModelIds }: { pools?: PoolsData | null; tt: Tt; blockedModelIds?: string[] }): unknown {
   const list = Array.isArray(pools?.pools) ? pools.pools : [];
+  // The banner is about MODELS, not meters. Under the all-pools rule a drained
+  // pool can sit beside a live one that still covers every model it names — then
+  // nothing is unselectable and a red banner would be a false alarm. The Host
+  // already publishes the authoritative blocked set (`llm.quotaBlockedModelIds`);
+  // when the snapshot carries it, it decides, and a drained pool that blocks
+  // nothing neither raises the banner nor contributes its reset clock.
+  //
+  // `undefined` (an old Host, or a snapshot without the llm block) keeps the
+  // pool-level reading — the only signal available — rather than silently
+  // dropping the notice.
+  const blocked = Array.isArray(blockedModelIds) ? new Set(blockedModelIds.map(String)) : null;
   let earliest = 0;
-  let anyExhausted = false;
+  let anyBlocked = false;
   for (const pool of list) {
+    let drained = false;
+    let poolEarliest = 0;
     for (const key of ["window5h", "window7d"] as const) {
       const win = pool?.[key] as QuotaWindow | undefined;
       // A missing/zero limit is UNKNOWN, not drained — the same rule the host
       // applies in `exhaustedModelIds`. Reporting exhaustion from a shape
       // drift would put a red banner over a pool the platform never quantified.
       if (win && Number(win.limit) > 0 && Number(win.remaining) <= 0) {
-        anyExhausted = true;
+        drained = true;
         const reset = Number(win.resetAt) || 0;
-        if (reset > 0 && (earliest === 0 || reset < earliest)) earliest = reset;
+        if (reset > 0 && (poolEarliest === 0 || reset < poolEarliest)) poolEarliest = reset;
       }
     }
+    if (!drained) continue;
+    if (blocked !== null) {
+      const ids = Array.isArray(pool?.modelIds) ? pool.modelIds : [];
+      if (!ids.some((id) => blocked.has(String(id)))) continue;
+    }
+    anyBlocked = true;
+    if (poolEarliest > 0 && (earliest === 0 || poolEarliest < earliest)) earliest = poolEarliest;
   }
-  if (!anyExhausted) return null;
+  if (!anyBlocked) return null;
   // `when`, not `clock`: the earliest reset may belong to the weekly window
   // and sit days out, and a bare HH:MM would promise recovery in hours.
   const time = earliest > 0 ? when(earliest) : "—";

@@ -2702,32 +2702,46 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	}
 	/**
 	* A top-of-section notice for the "transient exhaustion" case: when one or
-	* more credit pools have hit zero, the picker (host side) drops those pools'
-	* models, so the reader sees models vanish with no explanation. This line
-	* says WHY they vanished and WHEN they are expected back — the earliest
-	* `resetAt` among the exhausted windows — so a zeroed pool reads as
-	* "recovers at HH:MM", never as a mystery.
+	* more credit pools have hit zero AND some model has no other pool left to
+	* draw on, the picker (host side) drops that model, so the reader sees it
+	* vanish with no explanation. This line says WHY it vanished and WHEN it is
+	* expected back — the earliest `resetAt` among the pools that actually block
+	* something — so a zeroed pool reads as "recovers at HH:MM", never as a
+	* mystery.
 	*
-	* Hook-free: it only reads the snapshot's `pools` array, so the render suite
-	* drives the exact component the browser draws. Returns null when nothing is
-	* exhausted (the common case stays silent). It does not guess whether a zero
-	* came from a true quota drain or a rate-limit blip — the panel never sees
-	* the 429 class — it only reports the pool's own reset clock, which is the
-	* one honest recovery signal available here.
+	* Hook-free: it reads two plain snapshot fields — the `pools` array and, when
+	* the Host publishes it, `llm.quotaBlockedModelIds` — so the render suite drives
+	* the exact component the browser draws. Returns null when nothing is
+	* exhausted (the common case stays silent), and also when the Host says the
+	* drained pools block no model. It does not guess whether a zero came from a
+	* true quota drain or a rate-limit blip — the panel never sees the 429 class —
+	* it only reports the pool's own reset clock, which is the one honest recovery
+	* signal available here.
 	*/
-	function PoolExhaustionNotice({ pools, tt }) {
+	function PoolExhaustionNotice({ pools, tt, blockedModelIds }) {
 		const list = Array.isArray(pools?.pools) ? pools.pools : [];
+		const blocked = Array.isArray(blockedModelIds) ? new Set(blockedModelIds.map(String)) : null;
 		let earliest = 0;
-		let anyExhausted = false;
-		for (const pool of list) for (const key of ["window5h", "window7d"]) {
-			const win = pool?.[key];
-			if (win && Number(win.limit) > 0 && Number(win.remaining) <= 0) {
-				anyExhausted = true;
-				const reset = Number(win.resetAt) || 0;
-				if (reset > 0 && (earliest === 0 || reset < earliest)) earliest = reset;
+		let anyBlocked = false;
+		for (const pool of list) {
+			let drained = false;
+			let poolEarliest = 0;
+			for (const key of ["window5h", "window7d"]) {
+				const win = pool?.[key];
+				if (win && Number(win.limit) > 0 && Number(win.remaining) <= 0) {
+					drained = true;
+					const reset = Number(win.resetAt) || 0;
+					if (reset > 0 && (poolEarliest === 0 || reset < poolEarliest)) poolEarliest = reset;
+				}
 			}
+			if (!drained) continue;
+			if (blocked !== null) {
+				if (!(Array.isArray(pool?.modelIds) ? pool.modelIds : []).some((id) => blocked.has(String(id)))) continue;
+			}
+			anyBlocked = true;
+			if (poolEarliest > 0 && (earliest === 0 || poolEarliest < earliest)) earliest = poolEarliest;
 		}
-		if (!anyExhausted) return null;
+		if (!anyBlocked) return null;
 		const time = earliest > 0 ? when(earliest) : "—";
 		return h("div", {
 			style: {
@@ -3967,7 +3981,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				marginBottom: 10
 			} }, pools.plan.name) : null, h(PoolExhaustionNotice, {
 				pools,
-				tt
+				tt,
+				blockedModelIds: data.llm?.quotaBlockedModelIds
 			}), h("div", { style: S.poolsGrid }, (pools?.pools || []).map((pool) => h(PoolCard, {
 				key: pool.id,
 				pool,

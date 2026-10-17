@@ -199,7 +199,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
               pools?.plan?.name
                 ? h("div", { style: { ...S.muted, fontSize: 12, marginBottom: 10 } }, pools.plan.name)
                 : null,
-              h(PoolExhaustionNotice, { pools, tt }),
+              h(PoolExhaustionNotice, { pools, tt, blockedModelIds: data.llm?.quotaBlockedModelIds }),
               h(
                 "div",
                 { style: S.poolsGrid },
