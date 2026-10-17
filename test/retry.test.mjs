@@ -176,11 +176,13 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       JSON.stringify(exhaustedModelIds(allDrained)));
 
     // "Drained + unknown" is the edge the ALL-POOLS rule deliberately keeps out
-    // of the blocked set: a pool whose limit nobody declared is NOT evidence of
-    // credit (the shape-drift guard above), so it cannot be the pool that keeps
-    // a model alive either — the model is only blocked when the pools that DO
-    // declare a limit are all spent. Old union rule blocked it; the new one does
-    // not, and that is the contract, not an accident of Map arithmetic.
+    // of the blocked set. Be precise about WHY, because the arithmetic is easy to
+    // misread: the undeclared pool contributes NO credit, yet it still counts in
+    // the denominator (`pools`), so `exhausted < pools` and the model stays
+    // selectable. An undeclared limit is therefore read as "not evidence of
+    // exhaustion" rather than "no coverage at all" — the conservative direction,
+    // matching the shape-drift guard above. Old union rule blocked it; keeping
+    // the unknown pool OUT of the denominator instead would block it too.
     const drainedPlusUnknown = {
       pools: [
         {
@@ -195,7 +197,7 @@ const BASE_URL = "https://token.sensenova.cn/v1";
         }
       ]
     };
-    check("an undeclared-limit pool neither funds nor blocks a model covered by a drained one",
+    check("an undeclared-limit pool still counts as coverage, so one drained pool alone does not block",
       JSON.stringify(exhaustedModelIds(drainedPlusUnknown)) === JSON.stringify([]),
       JSON.stringify(exhaustedModelIds(drainedPlusUnknown)));
 
