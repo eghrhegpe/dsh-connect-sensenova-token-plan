@@ -27,7 +27,7 @@ import { CODE, isAuthFailure } from "./codes.ts";
 import { fetchConsole, fetchModelCatalog } from "./console-client.ts";
 import { MAX_CACHE_AGE_MS } from "./coalesced-fetch.ts";
 import { parsePools, parseTrend, checkShape, identifyVisionModel } from "./parsers.ts";
-import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
+import { summarizeCatalog, filterByEnabled, rosterWithAvailability, exhaustedModelIds, drainedPoolsWithoutModels, LLM_PROVIDER_ID, DEFAULT_REASONING_EFFORT } from "./llm-models.ts";
 import { catalogSignature, syncSignaturesAfterPublish, quotaSignatureOf } from "./provider-publish.ts";
 import type { PublishResult } from "./provider-publish.ts";
 import { imageGenModelIds, pickDrawModel } from "./draw.ts";
@@ -155,7 +155,8 @@ export async function buildSnapshotBody({
   panelSwitch,
   drawSwitch,
   drawModelId,
-  drawToolNote
+  drawToolNote,
+  onShapeDrift
 }: {
   settings: import("./host-config.ts").ResolvedSettings;
   cache: Map<string, { body: unknown; at: number; gen: number }>;
@@ -178,6 +179,13 @@ export async function buildSnapshotBody({
   drawSwitch?: () => Promise<boolean | null>;
   drawModelId?: () => Promise<string | null>;
   drawToolNote?: () => DrawToolAbsentReason | null;
+  /**
+   * Called when the quota payload is READABLE but a drained pool names no
+   * usable models — the one drift that silently disables quota protection
+   * at both ends (nothing is blocked, nothing is bannered). A parameter,
+   * not an import: the aggregator stays pure and the call site owns the logger.
+   */
+  onShapeDrift?: (message: string) => void;
 }): Promise<SnapshotData> {
   const providerState = publisher.state;
   const resolveApiKey = async () => (await apiKeyStore.resolve()).value;
@@ -287,6 +295,18 @@ export async function buildSnapshotBody({
   // successful poll corrects it — the cost of being wrong meanwhile is a model
   // still hidden one poll too long, which is the direction to err in.
   const unavailableModelIds = poolResult.error === null ? exhaustedModelIds(pools) : null;
+  // A drained pool that names no models is INVISIBLE at both ends: nothing gets
+  // blocked (`exhaustedModelIds` sees an empty coverage list) and the panel's
+  // banner stays silent (it needs a model in the blocked set). Both behaviours
+  // are right; only the SILENCE is the hazard — a renamed `model_ids` would
+  // disable quota protection while every visible reading still looked correct.
+  // So the caller's logger gets told, once per readable poll that hits it.
+  if (poolResult.error === null) {
+    const drifted = drainedPoolsWithoutModels(pools);
+    if (drifted.length > 0) {
+      onShapeDrift?.(`pools: ${drifted.length} drained pool(s) declare no usable modelIds (${drifted.join(", ")}); quota blocking is inactive for them`);
+    }
+  }
   const effectiveUnavailable = unavailableModelIds ?? providerState.unavailableIds;
   // Which of the callable models can take image input — step one of the
   // vision plan (ARCHITECTURE.md §5.1): the info, not the execution.

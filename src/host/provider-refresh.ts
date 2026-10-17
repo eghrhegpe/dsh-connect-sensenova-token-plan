@@ -104,7 +104,10 @@ export function armProviderRefresher(wiring: Wiring, minutes: number): ProviderR
         apiKeyStore,
         publisher,
         catalogStore,
-        panelSwitch: () => providerStore.enabled().catch(() => null)
+        panelSwitch: () => providerStore.enabled().catch(() => null),
+        // The background tick discards the body but must not discard the one
+        // signal the body cannot carry to a reader — see `onShapeDrift`.
+        onShapeDrift: (message: string) => degrade(message, null, wiring.logger, null)
       });
     } catch (error) {
       // A throwing tick is REPORTED, and the clock survives: a transient

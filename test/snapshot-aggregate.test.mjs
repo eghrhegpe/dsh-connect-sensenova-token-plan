@@ -411,6 +411,73 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
     JSON.stringify(h4.published[0]?.unavailableModelIds));
 }
 
+// --- H. a drained pool that names no models is REPORTED --------------------
+// The hazard this covers: `model_ids` renamed upstream → the pool still reads
+// "exhausted" but covers no models, so nothing is blocked AND nothing is
+// bannered. Both those behaviours are correct; with no report the protection
+// would be off while every visible reading still looked right. Note the second
+// half of H2 — the sample block must stay empty, or a "fix" that blocks
+// something would be a different (wrong) change being tested here.
+{
+  const H = harness({
+    // Seed a PREVIOUS blocked set so the empty set below is a real transition —
+    // otherwise the quota signature does not change and no publish is attempted,
+    // which would make H2 vacuously pass.
+    stateOverrides: { unavailableIds: ["glm-5.2"], quotaSignature: quotaSignatureOf(["glm-5.2"]) }
+  });
+  const drifts = [];
+  H.params.onShapeDrift = (message) => drifts.push(message);
+  const net = stubFetch({
+    "pool-usage": {
+      plan: { id: "free", name: "Free Plan" },
+      pools: [{
+        id: "pool-ghost",
+        name: "Ghost pool",
+        pool_type: "default",
+        window_5h: { limit: "100", remaining: "0", reset_at: "1" },
+        window_7d: { limit: "500", remaining: "400", reset_at: "2" }
+      }]
+    },
+    "credit-usage-trend": TREND_OK
+  });
+  let body;
+  try {
+    body = await buildSnapshotBody(H.params);
+  } finally {
+    net.restore();
+  }
+  check("H1 a drained pool with no model ids is reported to the caller",
+    drifts.length === 1 && drifts[0].includes("pool-ghost"),
+    JSON.stringify(drifts));
+  check("H2 …and it still blocks nothing (the report is not a silent widening)",
+    JSON.stringify(H.published[0]?.unavailableModelIds) === JSON.stringify([]),
+    JSON.stringify(H.published[0]?.unavailableModelIds));
+  void body;
+}
+
+{
+  const Q = harness();
+  const seen = [];
+  Q.params.onShapeDrift = (message) => seen.push(message);
+  const net = stubFetch({
+    "pool-usage": {
+      plan: { id: "free", name: "Free Plan" },
+      pools: [{
+        id: "pool-ok", name: "Fine", pool_type: "default", model_ids: ["glm-5.2"],
+        window_5h: { limit: "100", remaining: "5", reset_at: "1" },
+        window_7d: { limit: "500", remaining: "400", reset_at: "2" }
+      }]
+    },
+    "credit-usage-trend": TREND_OK
+  });
+  try {
+    await buildSnapshotBody(Q.params);
+  } finally {
+    net.restore();
+  }
+  check("H3 a readable, non-drained quota reports nothing", seen.length === 0, JSON.stringify(seen));
+}
+
 // --- report ----------------------------------------------------------------
 const passed = results.filter((result) => result.pass).length;
 const failed = results.filter((result) => !result.pass);

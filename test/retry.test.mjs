@@ -19,6 +19,7 @@ import {
 } from "../src/host/llm-retry.ts";
 import {
   exhaustedModelIds,
+  drainedPoolsWithoutModels,
   buildDescriptors,
   rosterWithAvailability,
   supportedThinkingLevels
@@ -218,6 +219,26 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     check("a pool's duplicate / non-string model ids collapse to the one real id",
       JSON.stringify(exhaustedModelIds(noisy)) === JSON.stringify(["dup"]),
       JSON.stringify(exhaustedModelIds(noisy)));
+
+    // The one drift where quota protection fails INVISIBLY: the pool says "no
+    // credit left" but names no usable models, so it blocks nothing and the
+    // panel's banner says nothing. `exhaustedModelIds` covering nothing is the
+    // correct rule; the query below exists so the caller can REPORT it instead
+    // of a renamed `model_ids` quietly disabling protection for good.
+    const ghost = { pools: [{ id: "ghost", window5h: { limit: 100, remaining: 0, resetAt: 1 } }] };
+    check("a drained pool with no model ids is reported as unreadable",
+      JSON.stringify(drainedPoolsWithoutModels(ghost)) === JSON.stringify(["ghost"])
+        && exhaustedModelIds(ghost).length === 0,
+      JSON.stringify(drainedPoolsWithoutModels(ghost)));
+    check("a live pool with no model ids is not reported (nothing is unreadable about it)",
+      drainedPoolsWithoutModels({ pools: [{ id: "ok", window5h: { limit: 100, remaining: 5, resetAt: 1 } }] }).length === 0);
+    check("unusable ids count as no ids, and a nameless pool is labelled by name",
+      JSON.stringify(drainedPoolsWithoutModels({
+        pools: [{ name: "Flash-Lite", modelIds: [42, "", null], window7d: { limit: 500, remaining: 0, resetAt: 2 } }]
+      })) === JSON.stringify(["Flash-Lite"]),
+      JSON.stringify(drainedPoolsWithoutModels({
+        pools: [{ name: "Flash-Lite", modelIds: [42, "", null], window7d: { limit: 500, remaining: 0, resetAt: 2 } }]
+      })));
   } catch (error) {
     fail("exhaustedModelIds", error);
   }

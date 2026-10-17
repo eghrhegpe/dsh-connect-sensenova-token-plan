@@ -106,6 +106,44 @@ export function exhaustedModelIds(pools: { pools?: unknown }): string[] {
 }
 
 /**
+ * Drained pools that declare no usable `model_ids`.
+ *
+ * This is the one state where the all-pools judgement has nothing to work
+ * with: the pool says "out of credit" but names no models, so `exhaustedModelIds`
+ * blocks nothing — and the panel's banner stays silent for the same reason. The
+ * drift is therefore invisible from BOTH ends, and a platform rename of
+ * `model_ids` would quietly disable quota protection altogether while every
+ * visible reading still looked right.
+ *
+ * A pure query rather than a log: the aggregator must reach the logger through
+ * a parameter (its purity is asserted by the suite), so the caller decides what
+ * to do with these labels. `exhaustedModelIds` deliberately treats the same
+ * shape as "covers nothing" — that behaviour is correct; only its SILENCE was
+ * the gap.
+ *
+ * @param {object} pools - the `parsePools` result (`{ pools: [...] }`).
+ * @returns {string[]} labels (id, else name, else `#index`) of such pools.
+ */
+export function drainedPoolsWithoutModels(pools: { pools?: unknown }): string[] {
+  const list = Array.isArray(pools?.pools) ? pools.pools : [];
+  const out: string[] = [];
+  list.forEach((pool: any, index: number) => {
+    const limit5 = num(pool?.window5h?.limit, 0);
+    const rem5 = num(pool?.window5h?.remaining, 0);
+    const limit7 = num(pool?.window7d?.limit, 0);
+    const rem7 = num(pool?.window7d?.remaining, 0);
+    if (!((limit5 > 0 && rem5 <= 0) || (limit7 > 0 && rem7 <= 0))) return;
+    const ids = Array.isArray(pool?.modelIds) ? pool.modelIds : [];
+    const usable = ids.filter((id: unknown) => typeof id === "string" && id !== "");
+    if (usable.length > 0) return;
+    const id = typeof pool?.id === "string" && pool.id !== "" ? pool.id : "";
+    const name = typeof pool?.name === "string" && pool.name !== "" ? pool.name : "";
+    out.push(id !== "" ? id : name !== "" ? name : `#${index}`);
+  });
+  return out;
+}
+
+/**
  * The provider id this plugin registers under.
  *
  * It must NOT be the bare `"sensenova"`: a hand-written `llm-pi-ai` row using
