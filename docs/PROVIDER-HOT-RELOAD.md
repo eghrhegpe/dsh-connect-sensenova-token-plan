@@ -61,7 +61,7 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 2. **「一个都不推」必须有独立写法**。空清单已经被上一条占用了，所以需要一个不会被任何真实模型命中的哨兵 `__hide_all__`：它让清单非空（因此走严格允许清单分支），同时又匹配不到任何模型。没有它，用户想临时把全部模型收起来就做不到——只能删掉 API Key。
 3. **面板与 Host 各持一份同一字面量**。浏览器侧的 `src/client/` 只能 require 包名，import 不到本仓库的 `llm-models.ts`，所以 `HIDE_ALL_MODELS` 在两侧各写一次。这是一处**故意的重复**：`test/provider.test.mjs` 把两份字面量做相等断言，任一侧改名都会当场红，而不是等上线后静默变成「全部模型都推送」。
 4. **POST 只改清单，不改目录**，并在同一请求内 `publishProvider(当前目录, 新清单)`。同时把 `providerState.signature` 设成新清单的签名——否则每次轮询都会看到「签名变了」而重复发布一次，把一次点击变成每 30 秒一次的注册抖动。
-5. **只推勾选的，目录仍全量可见**。`snapshot.llm.models` 是整份目录（不受过滤影响），`modelCount` / `visionCount` 才是**实际注册**的数量（按清单过滤后）。两者分开，面板才能一边说「注册了 1 个」一边让用户看到还能勾选哪 6 个。
+5. **只推勾选的，目录仍全量可见**。`snapshot.llm.models` 是整份目录（不受过滤影响），`modelCount` / `visionCount` 才是**实际注册**的数量（按清单过滤、再扣掉额度封禁后——注册时 `buildDescriptors` 正是这样把模型剔出 offer 的）。两者分开，面板才能一边说「注册了 1 个」一边让用户看到还能勾选哪 6 个。
 
 ## 7. 0.4.2 增量：出图工具开关（drawEnabled）
 

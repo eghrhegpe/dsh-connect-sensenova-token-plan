@@ -478,6 +478,35 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
   check("H3 a readable, non-drained quota reports nothing", seen.length === 0, JSON.stringify(seen));
 }
 
+// --- I. the counts describe the OFFER, blocked models included -------------
+// The lie this pins: with every allow-listed model quota-blocked the adapter
+// serves an EMPTY model list (the picker answers `no configured model`), while
+// `modelCount` counted the catalogue and the panel said "2 models". The roster
+// still lists them — that is HOW the panel explains the absence — so the count
+// must not be fixed by emptying the roster too.
+{
+  const I = harness({ apiKey: "sk-test" });
+  const CATALOG = { data: [{ id: "glm-5.2" }, { id: "glm-4.6" }] };
+  const net = stubFetch({
+    "pool-usage": EXHAUSTED_POOL,
+    "credit-usage-trend": TREND_OK,
+    "/v1/models": CATALOG
+  });
+  let body;
+  try {
+    body = await buildSnapshotBody(I.params);
+  } finally {
+    net.restore();
+  }
+  check("I1 a fully blocked offer counts zero models, not the catalogue size",
+    body?.llm?.modelCount === 0 && body?.llm?.visionCount === 0,
+    JSON.stringify({ m: body?.llm?.modelCount, v: body?.llm?.visionCount }));
+  check("I2 …while the roster still lists them, tagged as unavailable",
+    Array.isArray(body?.llm?.models) && body.llm.models.length === 2 &&
+      body.llm.models.every((row) => row.available === false),
+    JSON.stringify(body?.llm?.models));
+}
+
 // --- report ----------------------------------------------------------------
 const passed = results.filter((result) => result.pass).length;
 const failed = results.filter((result) => !result.pass);

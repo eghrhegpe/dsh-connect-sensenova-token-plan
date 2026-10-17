@@ -417,7 +417,18 @@ export async function buildSnapshotBody({
   // The counts describe the OFFER, not the catalogue: the adapter is built
   // from the allow-list-filtered entries, so a panel line that quoted the raw
   // count would claim to have registered models that were ticked off.
-  const summary = summarizeCatalog(filterByEnabled(offered, enabledIds));
+  //
+  // ...and "the offer" is what the adapter ACTUALLY serves: a quota-blocked
+  // model is dropped from it (`buildDescriptors`), so counting it would tell
+  // the reader "3 models" while the picker answers `no configured model`. The
+  // blocked set is subtracted here for the same reason it is subtracted there —
+  // one fact, one place it is derived, quoted by both.
+  const blockedForOffer = new Set(effectiveUnavailable.filter((id: string) => typeof id === "string" && id !== ""));
+  const offerForCounts = filterByEnabled(offered, enabledIds).filter((entry) => {
+    const id = str((entry as { id?: unknown })?.id, "");
+    return id === "" || !blockedForOffer.has(id);
+  });
+  const summary = summarizeCatalog(offerForCounts);
   // Secret-free by construction: the store reports booleans/source only, never
   // the key value.
   const llmStatus = {
