@@ -1356,6 +1356,29 @@ function typeInto(input, value) {
       && !dedicatedRead.text.includes("composer.poolFallback"),
     `panel text=${dedicatedRead.text.slice(0, 240)}`);
 
+  // The overlap case the console actually serves: `sensenova-6.8-flash-lite` is
+  // named by the 通用池 AND by its own Flash-Lite pool. First-hit attribution
+  // picked the 通用池 and showed ITS 5h meter (here 500/1000 = 50%) for a model
+  // whose spend never touches that window — live check 2026-10-18 00:00 saw the
+  // dedicated 5h at 3,129 consumed with the general 5h still at 0. Both pools
+  // list the model here, so only the dedicated-preference discriminates: the
+  // numbers asserted (7/1000) exist in the dedicated pool alone and 500/1000 in
+  // the general one alone.
+  const sharedRead = await openPanelFor({
+    ok: true,
+    pools: {
+      pools: [
+        planPool(windowOf(500, 1000, inHours(1)), windowOf(10, 1000)),
+        planPool(windowOf(7, 1000, inHours(1)), windowOf(9, 1000), { id: "p2", name: "Flash-Lite 专属池", poolType: "dedicated" })
+      ]
+    },
+    trend: { hours: 24, models: [] }
+  });
+  check("a model named by BOTH pools is billed to its dedicated pool, not the first hit",
+    sharedRead.text.includes("Flash-Lite 专属池 · pool.dedicated · composer.poolHit")
+      && sharedRead.text.includes("7 / 1000") && !sharedRead.text.includes("500 / 1000"),
+    `panel text=${sharedRead.text.slice(0, 240)}`);
+
   // A spent deadline must not shadow a live one. `w5?.resetAt ?? w7?.resetAt` took
   // the first NON-NULL, so with the 5h reset already past (mid-reset, or a
   // snapshot that lagged) the tooltip worded NO reset at all while the weekly one

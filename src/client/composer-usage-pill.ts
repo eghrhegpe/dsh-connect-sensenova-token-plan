@@ -185,22 +185,40 @@ export function selectedModelOf(projection: ModelSelectionLike | undefined): str
 /**
  * Which pool's windows this model draws from.
  *
- * A pool is model-scoped when it declares `modelIds`; a Token Plan model that
- * names no pool falls back to the first (general) pool — never to an invented
- * aggregate. The fallback is Token Plan only: a Raccoon model belongs to the
- * Raccoon gateway's own credit universe, so it never borrows a Token Plan pool —
- * it renders through {@link RaccoonPill}, which reads that gateway's balance.
+ * A pool is model-scoped when it declares `modelIds`. When SEVERAL pools name
+ * the same model, the dedicated pool wins over the general one: the console
+ * lists `sensenova-6.8-flash-lite` in both, yet its spend lands in the
+ * Flash-Lite pool only (live check 2026-10-18 00:00: the dedicated 5h window
+ * had 3,129 credits consumed while the general 5h window stayed at 0, both
+ * sharing one `resetAt`). Taking the first hit would attribute the model — and
+ * its exhaustion — to the general pool, i.e. show a full meter for a model that
+ * still has an untouched quota behind it.
+ *
+ * That observation does not prove the platform charges the dedicated pool
+ * FIRST: a "general pool until it runs dry, then the dedicated one" rule would
+ * have produced the same numbers. The pill can therefore read healthy while a
+ * request still comes back 429. That is the same bet the Host's all-pools rule
+ * makes (`exhaustedModelIds`), so the pill and the picker never disagree — only
+ * the inference about the console's billing order stays unverified.
+ *
+ * A Token Plan model that names no pool falls back to the first pool — never to
+ * an invented aggregate. The fallback is Token Plan only: a Raccoon model
+ * belongs to the Raccoon gateway's own credit universe, so it never borrows a
+ * Token Plan pool — it renders through {@link RaccoonPill}, which reads that
+ * gateway's balance.
  */
 export function poolFor(
   pools: PoolData[] | undefined,
   modelId: string | undefined,
   provider?: string
 ): PoolData | undefined {
-  const hit =
+  const covering =
     modelId !== undefined
-      ? pools?.find((p) => Array.isArray(p.modelIds) && p.modelIds.includes(modelId))
-      : undefined;
-  if (hit !== undefined) return hit;
+      ? (pools ?? []).filter((p) => Array.isArray(p.modelIds) && p.modelIds.includes(modelId))
+      : [];
+  const dedicated = covering.find((p) => p.poolType === "dedicated");
+  if (dedicated !== undefined) return dedicated;
+  if (covering.length > 0) return covering[0];
   return provider === TOKEN_PLAN ? pools?.[0] : undefined;
 }
 

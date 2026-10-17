@@ -201,7 +201,10 @@ export function PoolExhaustionNotice({ pools, tt }: { pools?: PoolsData | null; 
   for (const pool of list) {
     for (const key of ["window5h", "window7d"] as const) {
       const win = pool?.[key] as QuotaWindow | undefined;
-      if (win && Number(win.remaining) <= 0) {
+      // A missing/zero limit is UNKNOWN, not drained — the same rule the host
+      // applies in `exhaustedModelIds`. Reporting exhaustion from a shape
+      // drift would put a red banner over a pool the platform never quantified.
+      if (win && Number(win.limit) > 0 && Number(win.remaining) <= 0) {
         anyExhausted = true;
         const reset = Number(win.resetAt) || 0;
         if (reset > 0 && (earliest === 0 || reset < earliest)) earliest = reset;

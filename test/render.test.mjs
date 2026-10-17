@@ -517,6 +517,14 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
   check("the earliest of multiple exhausted resets is shown",
     two.some((line) => line.includes(when(1800003600))) && !two.some((line) => line.includes(when(1800007200))),
     two.join("\n"));
+
+  // A window whose limit is unknown is NOT drained: the host skips such a pool
+  // for the same reason (limit 0 is a shape drift, not a reading). A red banner
+  // over an unquantified pool would be a claim the data never made.
+  const drift = rendered(render.PoolExhaustionNotice, { pools: { pools: [
+    { window5h: { limit: 0, used: 0, remaining: 0, resetAt: null }, window7d: { limit: 0, used: 0, remaining: 0, resetAt: null } }
+  ] }, tt: ttZh });
+  check("a window with an unknown limit is not reported as exhausted", drift.length === 0, drift.join("\n"));
 }
 
 // === G6. a zeroed quota window is labelled "已耗尽", not just 0 ============
