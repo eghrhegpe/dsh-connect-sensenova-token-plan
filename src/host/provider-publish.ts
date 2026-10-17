@@ -265,7 +265,12 @@ export function createProviderPublisher(deps: HostDeps = {}) {
         baseUrl: effectiveSettings.apiBase,
         resolveApiKey: effectiveResolveApiKey,
         get: effectiveGetLlm,
-        unavailableModelIds: state.unavailableIds
+        unavailableModelIds: state.unavailableIds,
+        // Read on EVERY publish from the live settings, like `apiBase` above:
+        // editing the map in the row must take effect on the next catalog poll
+        // or switch flip, with no restart. A value captured at mount would make
+        // the knob look dead until the Host was reloaded.
+        maxTokensOverrides: effectiveSettings.maxTokensOverrides
       });
       // The same reason, stated: an adapter is registered Host-wide, so a
       // factory that returns anything else must fail here rather than publish

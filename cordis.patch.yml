@@ -105,6 +105,27 @@
         # with no restart. See docs/PROVIDER-HOT-RELOAD.md.
         registerProvider: false
         # ------------------------------------------------------------------
+        # Per-model OUTPUT CEILING overrides, keyed by EXACT model id (no
+        # substring matching — unlike `trendMultipliers` above this becomes a
+        # request parameter, so a loose key would silently retune models you
+        # never named). Values are positive whole numbers of tokens.
+        #
+        # Why this exists at all: the catalog is FETCHED, not authored, and it
+        # can understate a model. Probed 2026-10-02: `deepseek-v4-flash`
+        # accepts 131072 while the catalog states 65536. Editing the stored
+        # catalog does not stick — the next poll overwrites it — so a
+        # correction has to live here.
+        #
+        # Precedence: this map > the catalog's `max_output_length` >
+        # undeclared (the harness then applies its own `defaultMaxTokens ??
+        # 32768`, so declaring nothing is NOT "no ceiling"). `{}` keeps the
+        # platform authoritative. The panel's「最大输出」badge quotes the SAME
+        # resolution, so the number you read is the number the request sends.
+        # Applies to the directly-registered provider only; the Raccoon hosted
+        # route builds its own descriptors.
+        # maxTokensOverrides: { "deepseek-v4-flash": 131072 }
+        maxTokensOverrides: {}
+        # ------------------------------------------------------------------
         # Draw absorption (docs/ARCHITECTURE.md §5.4, route B): when true AND
         # the Host exposes a tools service, the agent gains a
         # `sensenova_draw_image` tool that POSTs to

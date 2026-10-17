@@ -419,7 +419,7 @@ export async function buildSnapshotBody({
     // the operator's pseudo `×N` under the SAME matcher the trend rows use —
     // the badge and the consumption chart quote one computed fact, and an
     // unmatched model simply gets no badge (never a guessed 1).
-    models: rosterWithAvailability(offered, pools).map((row) => {
+    models: rosterWithAvailability(offered, pools, settings.maxTokensOverrides).map((row) => {
       const multiplier = matchMultiplier(row.id, settings.trendMultipliers);
       return multiplier === undefined ? row : { ...row, multiplier };
     }),

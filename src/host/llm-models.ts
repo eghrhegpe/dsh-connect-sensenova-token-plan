@@ -176,10 +176,16 @@ export function contextWindowOf(entry: CatalogEntry): number {
 /**
  * Read the platform's declared per-request output ceiling, 0 when unknown.
  *
- * This is a DISPLAY fact only. The descriptors deliberately declare no
- * `maxTokens` value (module header, decision 2), so this figure never becomes
- * a request parameter — it says what the platform can emit at most, so the
- * user learns why a long reply can still stop with `finish_reason: length`.
+ * The 0 return is an OUTCOME, not a blank: the descriptor then keeps
+ * `maxTokens` UNDECLARED and the harness's `defaultMaxTokens ?? 32768` applies
+ * — HALF of what flash-lite's catalogue states, so "declaring nothing" is not
+ * "no ceiling" (module header, decision 2). A non-zero return IS a request
+ * parameter: `toPiDescriptor` declares it as `maxTokens`, which is what raises
+ * the cap to what the platform allows.
+ *
+ * The same figure is the picker's display value (`rosterWithAvailability`
+ * carries it as `maxOutputLength` → `llm.metaOutput`), so the number the user
+ * reads is the number the request carries — one source, not two.
  * Same spelling-first policy as {@link contextWindowOf}.
  * @param {object} entry - one normalized catalog entry.
  * @returns {number} the declared ceiling, or 0 when the entry states none.
@@ -190,6 +196,47 @@ export function maxOutputLengthOf(entry: CatalogEntry): number {
     if (value > 0) return value;
   }
   return 0;
+}
+
+/**
+ * The output ceiling a descriptor will ACTUALLY carry for one entry.
+ *
+ * Precedence, and this is the only place the order is stated:
+ * **operator override > the platform's catalogue figure > undeclared**.
+ * The override exists because the catalogue can UNDERSTATE a model: the module
+ * header's probe found `deepseek-v4-flash` accepting 131072 while the
+ * catalogue states 65536. The catalogue is FETCHED, not authored, so an
+ * operator needs a knob that survives the next refresh — and the refresh
+ * overwrites nothing else, which is why this is a separate map rather than a
+ * rewrite of the stored entries (`catalog-store.ts` keeps what the platform
+ * said; disagreeing with it is a setting, not a data edit).
+ *
+ * A 0 return still means UNDECLARED, so the harness's `defaultMaxTokens ??
+ * 32768` applies. An override deliberately cannot *lower* a catalogue figure
+ * into "no ceiling": the map only ever states a positive integer, and guessing
+ * a number where the platform stated none is what decision 2 forbids.
+ *
+ * The panel roster quotes THIS function, not {@link maxOutputLengthOf}, so the
+ * "最大输出" the user reads is the number the request carries. Two callers, one
+ * order — the alternative (roster quoting the catalogue while the descriptor
+ * quotes the override) is how the panel starts lying.
+ * @param {object} entry - one normalized catalog entry.
+ * @param {object} [overrides] - `{ "<model id>": <ceiling> }`; unsanitized input
+ *   is tolerated (each value is re-validated here) but `host-config.ts` already
+ *   sanitized it at the config seam.
+ * @returns {number} the effective ceiling, or 0 when nothing declares one.
+ */
+export function maxTokensFor(entry: CatalogEntry, overrides?: Record<string, number> | null): number {
+  const id = str(entry?.id, "");
+  if (id !== "" && overrides !== null && overrides !== undefined && typeof overrides === "object") {
+    const raw = (overrides as Record<string, unknown>)[id];
+    // Re-validated, not trusted: this is exported and reachable from a
+    // descriptor build, so it must hold even if a caller hands it a raw config
+    // object. `Number.isInteger` excludes NaN/Infinity/fractions, and `> 0`
+    // keeps the "0 means undeclared" contract single-valued.
+    if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) return raw;
+  }
+  return maxOutputLengthOf(entry);
 }
 
 /**
@@ -321,6 +368,10 @@ export function toPiDescriptor(entry: CatalogEntry, options: AdapterConfig = {})
   const id = str(entry?.id, "");
   if (id === "") throw new Error("toPiDescriptor: catalog entry has no id");
   const vision = identifyVisionModel(entry).vision === true;
+  // Resolved ONCE, before the literal: the spread below must not call the
+  // resolver twice (two calls cannot disagree today, but a future override
+  // lookup that logs or warns would then fire twice per descriptor).
+  const effectiveMaxTokens = maxTokensFor(entry, options.maxTokensOverrides);
   return {
     id,
     // Prefer the catalog's own display name; fall back to the id.
@@ -339,11 +390,14 @@ export function toPiDescriptor(entry: CatalogEntry, options: AdapterConfig = {})
     cost: { ...NO_COST },
     contextWindow: contextWindowOf(entry),
     // `supportsDeveloperRole: false` is load-bearing — see the module header.
-    // `maxTokens` carries the catalogue's OWN ceiling when it states one (the
-    // harness would otherwise cap output at 32768 via defaultMaxTokens — see
-    // the module header, decision 2); a catalogue entry without a ceiling
-    // keeps the field UNDECLARED rather than guessing a number.
-    ...(maxOutputLengthOf(entry) > 0 ? { maxTokens: maxOutputLengthOf(entry) } : {}),
+    // `maxTokens` carries the EFFECTIVE ceiling: the operator override when the
+    // settings row states one, else the catalogue's OWN figure (the harness
+    // would otherwise cap output at 32768 via defaultMaxTokens — see the module
+    // header, decision 2). When neither states one the field stays UNDECLARED
+    // rather than guessing a number. {@link maxTokensFor} is the only place
+    // that order lives, and the panel roster quotes the same function, so the
+    // figure the user reads is the figure the request carries.
+    ...(effectiveMaxTokens > 0 ? { maxTokens: effectiveMaxTokens } : {}),
     compat: { maxTokensField: "max_tokens", supportsDeveloperRole: false }
   };
 }
@@ -447,11 +501,11 @@ export function rosterOf(entries: unknown): { id: string; name: string; vision: 
  * and duplicate ids keep the LAST occurrence, matching the catalog store's
  * normalization so the adapter and the persisted catalog can never diverge.
  * @param {object[]} entries - the normalized catalog entries.
- * @param {object} options - `{ providerId, baseUrl, enabledIds }`.
+ * @param {object} options - `{ providerId, baseUrl, enabledIds, maxTokensOverrides }`.
  * @returns {object[]} the pi-ai descriptors, in first-seen order.
  */
 export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
-  const { providerId = LLM_PROVIDER_ID, baseUrl, enabledIds = [], unavailableModelIds = [] } = options;
+  const { providerId = LLM_PROVIDER_ID, baseUrl, enabledIds = [], unavailableModelIds = [], maxTokensOverrides } = options;
   // Image-generation models (`output_modalities: ["image"]`) cannot be
   // addressed as chat models and are excluded BEFORE the allow-list, so a
   // stale id in `enabledIds` matches nothing rather than resurrecting one.
@@ -476,7 +530,7 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
       seen.set(id, out.length);
       out.push(undefined);
     }
-    out[seen.get(id)] = toPiDescriptor({ ...catalogEntry, id }, { providerId, ...(baseUrl !== undefined ? { baseUrl } : {}) });
+    out[seen.get(id)] = toPiDescriptor({ ...catalogEntry, id }, { providerId, ...(maxTokensOverrides !== undefined ? { maxTokensOverrides } : {}), ...(baseUrl !== undefined ? { baseUrl } : {}) });
   }
   // Every `undefined` pushed above is overwritten at that same index before the
   // loop advances (see the comment on `out`), so no hole survives to here. The
@@ -498,9 +552,13 @@ export function buildDescriptors(entries: any[], options: AdapterConfig = {}) {
  * @param {object[]} entries - the normalized catalog entries.
  * @param {object} pools - the `parsePools` result, or anything without a `pools`
  *   array (in which case every row reads as available).
+ * @param {object} [maxTokensOverrides] - the SAME `{ "<model id>": ceiling }` map
+ *   a descriptor build gets. Positionally third and optional, so a caller written
+ *   before the field existed keeps compiling; omitting it makes every row quote
+ *   the catalogue figure, which is what a deployment with no overrides wants.
  * @returns {{id: string, name: string, vision: boolean, available: boolean, quotaExhausted: boolean, contextWindow: number, maxOutputLength: number, thinkingLevels: string[]}[]}
  */
-export function rosterWithAvailability(entries: unknown, pools: { pools?: unknown }) {
+export function rosterWithAvailability(entries: unknown, pools: { pools?: unknown }, maxTokensOverrides?: Record<string, number> | null) {
   const blocked = new Set(exhaustedModelIds(pools));
   const position = new Map();
   const out: { id: string; name: string; vision: boolean; available: boolean; quotaExhausted: boolean; contextWindow: number; maxOutputLength: number; thinkingLevels: string[] }[] = [];
@@ -518,10 +576,13 @@ export function rosterWithAvailability(entries: unknown, pools: { pools?: unknow
       // when the catalog has one, else the same 128k fallback pi-ai gets —
       // so the badge never contradicts the effective behavior.
       contextWindow: contextWindowOf(entry),
-      // The platform's declared output ceiling (0 = unknown). Widening the
-      // projection here is deliberate: the raw entry stays Host-side, and the
-      // panel quotes only these two parameter figures plus the vision verdict.
-      maxOutputLength: maxOutputLengthOf(entry),
+      // The EFFECTIVE output ceiling the descriptor will carry — the operator
+      // override when one names this id, else the platform's figure (0 =
+      // unknown). {@link maxTokensFor} is the one order, so the badge cannot
+      // claim a ceiling the request does not send. Widening the projection here
+      // is deliberate: the raw entry stays Host-side, and the panel quotes only
+      // these two parameter figures plus the vision verdict.
+      maxOutputLength: maxTokensFor(entry, maxTokensOverrides),
       // What the DSH selector will really offer this model (same rule pi-ai
       // applies to the registered descriptor) — the per-model fact worth
       // repeating on a row, unlike the provider-wide default, which the panel

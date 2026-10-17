@@ -15,7 +15,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { resolveSettings, CONFIG_DEFAULTS, resolveAuthOverrides, credentialKey, hostName, isAdmitted, name } from "../src/host/index.ts";
-import { resolveTrendMultipliers } from "../src/host/host-config.ts";
+import { resolveTrendMultipliers, resolveMaxTokensOverrides } from "../src/host/host-config.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const patch = readFileSync(join(here, "..", "cordis.patch.yml"), "utf8");
@@ -288,6 +288,43 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
     JSON.stringify(resolveTrendMultipliers("glm-5.2=10")) === JSON.stringify(CONFIG_DEFAULTS.trendMultipliers), "");
   check("an array falls back to the shipped defaults",
     JSON.stringify(resolveTrendMultipliers([10])) === JSON.stringify(CONFIG_DEFAULTS.trendMultipliers), "");
+}
+
+// --- 7b. the output-ceiling override map --------------------------------
+// `maxTokensOverrides` becomes a REQUEST PARAMETER, not a comparison aid, so
+// its sanitizer is deliberately stricter than `resolveTrendMultipliers`: keys
+// are EXACT model ids (no substring matching) and values are positive INTEGERS
+// (`0` is reserved for "undeclared" in `llm-models.maxTokensFor`, and a
+// fractional token count is a typo). Pin both differences, so a later edit that
+// "simplifies" this into the sibling's shape goes red here rather than silently
+// retuning models the operator never named.
+{
+  const kept = resolveMaxTokensOverrides({ "deepseek-v4-flash": 131072 });
+  check("a well-formed override survives",
+    JSON.stringify(kept) === JSON.stringify({ "deepseek-v4-flash": 131072 }), JSON.stringify(kept));
+
+  const dropped = resolveMaxTokensOverrides({ "": 5, zero: 0, negative: -2, nan: NaN, inf: Infinity, frac: 1.5, text: "10", "glm-5.2": 131072 });
+  check("non-positive / fractional / non-numeric ceilings are dropped",
+    JSON.stringify(dropped) === JSON.stringify({ "glm-5.2": 131072 }), JSON.stringify(dropped));
+
+  const verbatim = resolveMaxTokensOverrides({ flash: 131072 });
+  check("keys are taken verbatim (an exact-id map, never expanded to a substring match)",
+    Object.keys(verbatim).join(",") === "flash", Object.keys(verbatim).join(","));
+
+  check("an explicit {} means the catalogue stays authoritative",
+    Object.keys(resolveMaxTokensOverrides({})).length === 0, JSON.stringify(resolveMaxTokensOverrides({})));
+  check("absent falls back to the shipped default",
+    JSON.stringify(resolveMaxTokensOverrides(undefined)) === JSON.stringify(CONFIG_DEFAULTS.maxTokensOverrides), "");
+  check("a non-object falls back to the shipped default",
+    JSON.stringify(resolveMaxTokensOverrides("deepseek-v4-flash=131072")) === JSON.stringify(CONFIG_DEFAULTS.maxTokensOverrides), "");
+  check("an array falls back to the shipped default",
+    JSON.stringify(resolveMaxTokensOverrides([131072])) === JSON.stringify(CONFIG_DEFAULTS.maxTokensOverrides), "");
+
+  const viaSettings = resolveSettings({ maxTokensOverrides: { "deepseek-v4-flash": 131072, bad: 0 } }).settings.maxTokensOverrides;
+  check("resolveSettings routes the map through the sanitizer",
+    JSON.stringify(viaSettings) === JSON.stringify({ "deepseek-v4-flash": 131072 }), JSON.stringify(viaSettings));
+  check("the shipped default is empty (the platform stays authoritative)",
+    Object.keys(CONFIG_DEFAULTS.maxTokensOverrides).length === 0, JSON.stringify(CONFIG_DEFAULTS.maxTokensOverrides));
 }
 
 // --- 8. numeric field clamping boundaries ----------------------------

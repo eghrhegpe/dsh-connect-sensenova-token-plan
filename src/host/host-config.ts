@@ -103,6 +103,26 @@ export const CONFIG_DEFAULTS = Object.freeze({
    */
   registerProvider: false,
   /**
+   * Per-model OUTPUT CEILING overrides, keyed by EXACT model id.
+   *
+   * The catalogue is FETCHED, not authored, and it can understate a model: the
+   * module header of `llm-models.ts` probed `deepseek-v4-flash` accepting
+   * 131072 while the catalogue states 65536. Without this field the only way to
+   * disagree with the platform was to edit the stored catalogue — which the
+   * next poll overwrites, so the correction silently reverts, and a ceiling
+   * that reverts is worse than one that was never raised.
+   *
+   * Precedence: this map > the catalogue's `max_output_length` > undeclared
+   * (the harness then applies `defaultMaxTokens ?? 32768`). Empty by default,
+   * so the platform stays authoritative until the operator says otherwise.
+   * Read by `llm-models.maxTokensFor`, which BOTH the descriptor build and the
+   * panel roster call — the value sent and the value displayed are one order.
+   * Scope: the DIRECTLY-REGISTERED provider (`registerProvider`) and the panel
+   * roster that mirrors it. The Raccoon hosted route builds its descriptors in
+   * `raccoon-models.ts` and is deliberately unaffected.
+   */
+  maxTokensOverrides: {},
+  /**
    * Draw absorption (ARCHITECTURE §5.4 route B): register the
    * `sensenova_draw_image` agent tool. When true AND the Host exposes a tools
    * service, image-generation requests go to `{apiBase}/images/generations`
@@ -194,6 +214,38 @@ export function resolveProviderRefreshMinutes(raw: unknown): number {
   return Math.min(1440, Math.max(0, Math.floor(raw)));
 }
 
+/**
+ * Sanitize the operator's per-model output-ceiling map.
+ *
+ * Keys are EXACT model ids — deliberately NOT the case-insensitive SUBSTRING
+ * match {@link resolveTrendMultipliers} uses. A multiplier is a comparison aid,
+ * so a loose match is convenient; a ceiling is a REQUEST PARAMETER, so a loose
+ * match would silently retune models the operator never named (the key `flash`
+ * alone would land on five catalogue entries). Values must be positive
+ * INTEGERS: a fractional token count is a typo, and `0` is reserved for
+ * "undeclared" by `llm-models.maxTokensFor`, so it is not an expressible
+ * ceiling here.
+ *
+ * A malformed map falls back to the shipped default (`{}` — the catalogue is
+ * authoritative) instead of throwing: one bad row must not take the panel down,
+ * which is the same shape {@link resolveTrendMultipliers} uses.
+ * Exported so `test/config.test.mjs` drives the same sanitizer the resolve path
+ * uses, instead of a copy that could drift.
+ * @param {unknown} raw - the raw `maxTokensOverrides` config value.
+ * @returns {Record<string, number>} the sanitized map.
+ */
+export function resolveMaxTokensOverrides(raw: unknown): Record<string, number> {
+  const source = raw === undefined || raw === null ? CONFIG_DEFAULTS.maxTokensOverrides : raw;
+  if (source === null || typeof source !== "object" || Array.isArray(source)) return { ...CONFIG_DEFAULTS.maxTokensOverrides };
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof key === "string" && key !== "" && typeof value === "number" && Number.isInteger(value) && value > 0) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 /** The resolved settings shape `resolveSettings` produces and consumers read. */
 export interface ResolvedSettings {
   consoleBase: string;
@@ -210,6 +262,12 @@ export interface ResolvedSettings {
   imageModelIds: string[];
   visionModels: object[];
   registerProvider: boolean;
+  /**
+   * Per-model output-ceiling overrides, keyed by exact model id. Read by
+   * `llm-models.maxTokensFor` at descriptor-build time and quoted by the panel
+   * roster from the same function — one order, two readers.
+   */
+  maxTokensOverrides: Record<string, number>;
   drawEnabled: boolean;
   drawModelId: string;
   drawTimeoutMs: number;
@@ -277,6 +335,12 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         // Step three opt-in: register the OpenAI-compatible LLM provider
         // directly (strict boolean, like writeImageModelIds).
         registerProvider: source.registerProvider === true,
+        // Per-model output-ceiling overrides. Sanitized AT THIS SEAM, not in
+        // `llm-models.ts`: that module is peer-free and reachable from the
+        // offline suite, and the descriptor builder must be able to assume a
+        // well-formed map. `maxTokensFor` re-validates anyway, because it is
+        // exported — two checks, one of them the contract.
+        maxTokensOverrides: resolveMaxTokensOverrides(source.maxTokensOverrides),
         // Draw absorption opt-in (strict boolean, same reasoning as
         // registerProvider) plus its two knobs. The deadline has its own
         // floor: image models regularly take tens of seconds, and a chat-
@@ -315,6 +379,7 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         imageModelIds: CONFIG_DEFAULTS.imageModelIds,
         visionModels: CONFIG_DEFAULTS.visionModels,
         registerProvider: false,
+        maxTokensOverrides: CONFIG_DEFAULTS.maxTokensOverrides,
         drawEnabled: false,
         drawModelId: "",
         drawTimeoutMs: CONFIG_DEFAULTS.drawTimeoutMs,

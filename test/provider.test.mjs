@@ -29,6 +29,8 @@ import {
   filterByEnabled,
   isModelEnabled,
   rosterOf,
+  rosterWithAvailability,
+  maxTokensFor,
   HIDE_ALL_MODELS,
   summarizeCatalog
 } from "../src/host/llm-models.ts";
@@ -1560,6 +1562,57 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       "a publisher grew its own disposed flag — the gate is shared or it is not");
   } catch (error) {
     fail("the publish control plane is shared by both upstreams", error);
+  }
+}
+
+// --- the per-model output-ceiling override (the operator knob) -------------
+// Precedence: override > catalogue `max_output_length` > UNDECLARED. Two things
+// are pinned here that a "just add an option" edit would miss: an override can
+// only RAISE a stated ceiling (it can never invent one where the platform
+// stated none, because guessing is what the module header forbids), and the
+// panel roster must quote the SAME resolution the descriptor gets — a roster
+// that kept quoting the catalogue while the wire carried the override is the
+// exact two-sources drift this plugin pins everywhere else.
+{
+  try {
+    const entry = { id: "deepseek-v4-flash", max_output_length: 65536 };
+    const pools = { pools: [] };
+
+    check("with no override the catalogue ceiling is declared",
+      toPiDescriptor(entry).maxTokens === 65536, String(toPiDescriptor(entry).maxTokens));
+
+    const raised = toPiDescriptor(entry, { maxTokensOverrides: { "deepseek-v4-flash": 131072 } });
+    check("an override WINS over the catalogue figure", raised.maxTokens === 131072, String(raised.maxTokens));
+
+    const sibling = toPiDescriptor({ id: "glm-5.2", max_output_length: 131072 }, { maxTokensOverrides: { "deepseek-v4-flash": 131072 } });
+    check("an override for another id does not leak across models", sibling.maxTokens === 131072, String(sibling.maxTokens));
+
+    const unnamed = toPiDescriptor({ id: "kimi-k3" }, { maxTokensOverrides: { "deepseek-v4-flash": 131072 } });
+    check("an override cannot DECLARE a ceiling the catalogue never stated",
+      !Object.prototype.hasOwnProperty.call(unnamed, "maxTokens"), JSON.stringify(unnamed));
+
+    const junk = toPiDescriptor(entry, { maxTokensOverrides: { "deepseek-v4-flash": 0 } });
+    check("a non-positive override is ignored rather than sent as 0", junk.maxTokens === 65536, String(junk.maxTokens));
+
+    const plain = rosterWithAvailability([entry], pools).find((row) => row.id === "deepseek-v4-flash");
+    const overridden = rosterWithAvailability([entry], pools, { "deepseek-v4-flash": 131072 }).find((row) => row.id === "deepseek-v4-flash");
+    check("the roster badge quotes the catalogue figure when there is no override",
+      plain?.maxOutputLength === 65536, String(plain?.maxOutputLength));
+    check("the roster badge quotes the OVERRIDE (panel and wire cannot disagree)",
+      overridden?.maxOutputLength === 131072, String(overridden?.maxOutputLength));
+
+    const built = buildDescriptors([entry], { enabledIds: [], maxTokensOverrides: { "deepseek-v4-flash": 131072 } });
+    check("buildDescriptors threads the override to the descriptor it emits",
+      built.length === 1 && built[0].maxTokens === 131072, JSON.stringify(built[0]?.maxTokens));
+
+    check("maxTokensFor is the one resolver both readers call",
+      maxTokensFor(entry, { "deepseek-v4-flash": 131072 }) === 131072 &&
+        maxTokensFor(entry, {}) === 65536 &&
+        maxTokensFor({ id: "kimi-k3" }, {}) === 0 &&
+        maxTokensFor({ id: "kimi-k3" }, null) === 0,
+      `override=${maxTokensFor(entry, { "deepseek-v4-flash": 131072 })} catalogue=${maxTokensFor(entry, {})} undeclared=${maxTokensFor({ id: "kimi-k3" }, {})}`);
+  } catch (error) {
+    fail("the per-model output-ceiling override", error);
   }
 }
 

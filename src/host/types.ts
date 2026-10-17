@@ -102,6 +102,14 @@ export interface AdapterConfig {
   enabledIds?: string[];
   unavailableModelIds?: string[];
   baseUrl?: string;
+  /**
+   * `{ "<model id>": ceiling }` — the operator's per-model output ceiling,
+   * already sanitized by `host-config.resolveSettings`. `llm-models.maxTokensFor`
+   * consults it BEFORE the catalogue's own figure and the panel roster quotes
+   * that same function, so the displayed "最大输出" and the `max_tokens` on the
+   * wire cannot disagree. Absent/empty = the catalogue is authoritative.
+   */
+  maxTokensOverrides?: Record<string, number>;
 }
 
 /** Options for the JWKS cache / JWE sealer. */

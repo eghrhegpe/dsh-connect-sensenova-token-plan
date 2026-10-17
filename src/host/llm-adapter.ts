@@ -46,18 +46,23 @@ import { assemblePiAiAdapter } from "./llm-adapter-core.ts";
  *   the image hooks (`attachments`, `fs`).
  * @param {string[]} [options.unavailableModelIds] - model ids whose quota pool
  *   is exhausted; excluded from the offer so no doomed `429` request is sent.
+ * @param {object} [options.maxTokensOverrides] - `{ "<model id>": ceiling }` from
+ *   the settings row. `llm-models.maxTokensFor` consults it BEFORE the
+ *   catalogue figure, so a model the catalogue understates can be raised
+ *   without editing stored catalogue data that the next poll overwrites.
  * @returns {{adapter: object, providerIds: string[]}} the adapter and the ids
  *   it owns.
  */
-export function createSensenovaAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [] }: {
+export function createSensenovaAdapter({ entries, enabledIds = [], baseUrl, resolveApiKey, get, unavailableModelIds = [], maxTokensOverrides }: {
   entries: unknown;
   enabledIds?: string[];
   baseUrl: string;
   resolveApiKey: () => Promise<string>;
   get?: (service: string) => unknown;
   unavailableModelIds?: string[];
+  maxTokensOverrides?: Record<string, number>;
 }) {
-  const models = buildDescriptors(entries as object[], { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds });
+  const models = buildDescriptors(entries as object[], { providerId: LLM_PROVIDER_ID, baseUrl, enabledIds, unavailableModelIds, ...(maxTokensOverrides !== undefined ? { maxTokensOverrides } : {}) });
 
   return assemblePiAiAdapter({
     providerId: LLM_PROVIDER_ID,
