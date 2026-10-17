@@ -213,6 +213,56 @@ for (const model of contract.models) {
     offeredBlocked.every((d) => d.id !== "deepseek-v4-flash") &&
       offeredBlocked.some((d) => d.id === "deepseek-v4-pro"),
     JSON.stringify(offeredBlocked.map((d) => d.id)));
+
+  // Pool membership is not exclusive on the wire: a model with its own
+  // dedicated pool is ALSO named in the general pool. A drained general pool
+  // must not remove it while the dedicated pool still holds credit.
+  const sharedPools = parsePools({
+    plan: { id: "p", name: "Token Plan", type: "monthly" },
+    pools: [
+      {
+        id: "pool-gen", name: "通用积分池", pool_type: "default",
+        model_ids: ["deepseek-v4-flash", "deepseek-v4-pro"],
+        window_5h: { limit: "60000", used: "60000", remaining: "0", reset_at: "1700000000" },
+        window_7d: { limit: "600000", used: "128915", remaining: "471085", reset_at: "1700000000" }
+      },
+      {
+        id: "pool-ded", name: "Flash-Lite积分池", pool_type: "dedicated",
+        model_ids: ["deepseek-v4-flash"],
+        window_5h: { limit: "60000", used: "0", remaining: "60000", reset_at: "1700000000" },
+        window_7d: { limit: "600000", used: "69474", remaining: "530526", reset_at: "1700000000" }
+      }
+    ]
+  });
+  const sharedBlocked = exhaustedModelIds(sharedPools);
+  check("a drained general pool does not block a model its dedicated pool still funds",
+    JSON.stringify(sharedBlocked) === JSON.stringify(["deepseek-v4-pro"]),
+    JSON.stringify(sharedBlocked));
+  check("the picker still offers that model while its dedicated pool has credit",
+    buildDescriptors(allEntries, { baseUrl, enabledIds: [], unavailableModelIds: sharedBlocked })
+      .some((d) => d.id === "deepseek-v4-flash"),
+    JSON.stringify(sharedBlocked));
+
+  const bothDrained = parsePools({
+    plan: { id: "p", name: "Token Plan", type: "monthly" },
+    pools: [
+      {
+        id: "pool-a", name: "通用积分池", pool_type: "default",
+        model_ids: ["deepseek-v4-flash"],
+        window_5h: { limit: "60000", used: "60000", remaining: "0", reset_at: "1700000000" },
+        window_7d: { limit: "600000", used: "1", remaining: "599999", reset_at: "1700000000" }
+      },
+      {
+        id: "pool-b", name: "Flash-Lite积分池", pool_type: "dedicated",
+        model_ids: ["deepseek-v4-flash"],
+        window_5h: { limit: "60000", used: "1", remaining: "59999", reset_at: "1700000000" },
+        window_7d: { limit: "600000", used: "600000", remaining: "0", reset_at: "1700000000" }
+      }
+    ]
+  });
+  check("a model is blocked only once every pool covering it is drained",
+    JSON.stringify(exhaustedModelIds(bothDrained)) === JSON.stringify(["deepseek-v4-flash"]),
+    JSON.stringify(exhaustedModelIds(bothDrained)));
 }
 
 // --- 6. parsers: the contract's numeric/epoch spellings -------------------

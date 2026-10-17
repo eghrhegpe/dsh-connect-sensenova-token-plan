@@ -54,34 +54,55 @@ export interface CatalogEntry {
 }
 
 /**
- * The model ids whose quota pool is exhausted.
+ * The model ids whose EVERY quota pool is exhausted.
  *
  * The panel's `pool-usage` response groups models into pools, each with a
  * 5h and a 7d window carrying `limit`/`remaining`. A pool is "exhausted" when
  * its limit is known (> 0) and its remaining credit has hit zero in EITHER
- * window — at that point every model it covers would answer a chat request
- * with `429 quota_exceeded`, so the picker should not offer them (and the
- * panel should show them greyed). A pool whose limit is 0/unknown is NOT
- * counted as exhausted: `credits()` returns 0 for an absent limit, and we must
- * not mark half the catalogue unavailable on a shape drift.
+ * window — at that point a model funded by that pool AND NOTHING ELSE would
+ * answer a chat request with `429 quota_exceeded`, so the picker should not
+ * offer it (and the panel should show it greyed). A pool whose limit is
+ * 0/unknown is NOT counted as exhausted: `credits()` returns 0 for an absent
+ * limit, and we must not mark half the catalogue unavailable on a shape drift.
+ *
+ * Pool membership is NOT exclusive: the platform also lists a model in the
+ * general pool while it has its own dedicated pool, so one drained pool must
+ * not remove a model that another pool still funds. Blocking is therefore an
+ * ALL-POOLS judgement, not a union — a model leaves the picker only when no
+ * pool covering it is left with credit. (Live 2026-10-17: the general pool's
+ * 5h window hit 0 while the Flash-Lite dedicated pool still held 530k, and the
+ * old union rule emptied the ENTIRE picker offer, including that model.)
  * @param {object} pools - the `parsePools` result (`{ pools: [...] }`).
- * @returns {string[]} the exhausted model ids, de-duplicated, in first-seen order.
+ * @returns {string[]} the blocked model ids, de-duplicated, in first-seen order.
  */
 export function exhaustedModelIds(pools: { pools?: unknown }): string[] {
   const list = Array.isArray(pools?.pools) ? pools.pools : [];
-  const out = new Set<string>();
+  // Per model: how many pools name it, and how many of those are drained.
+  const coverage = new Map<string, { pools: number; exhausted: number }>();
   for (const pool of list) {
     const limit5 = num(pool?.window5h?.limit, 0);
     const rem5 = num(pool?.window5h?.remaining, 0);
     const limit7 = num(pool?.window7d?.limit, 0);
     const rem7 = num(pool?.window7d?.remaining, 0);
     const exhausted = (limit5 > 0 && rem5 <= 0) || (limit7 > 0 && rem7 <= 0);
-    if (!exhausted) continue;
+    // One pool counting the same id twice must not inflate `pools`, or the
+    // "every covering pool" test below could never be satisfied for it.
+    const ids = new Set<string>();
     for (const id of Array.isArray(pool?.modelIds) ? pool.modelIds : []) {
-      if (typeof id === "string" && id !== "") out.add(id);
+      if (typeof id === "string" && id !== "") ids.add(id);
+    }
+    for (const id of ids) {
+      const row = coverage.get(id) ?? { pools: 0, exhausted: 0 };
+      row.pools += 1;
+      if (exhausted) row.exhausted += 1;
+      coverage.set(id, row);
     }
   }
-  return [...out];
+  const out: string[] = [];
+  for (const [id, row] of coverage) {
+    if (row.pools > 0 && row.exhausted === row.pools) out.push(id);
+  }
+  return out;
 }
 
 /**

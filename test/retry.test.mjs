@@ -134,6 +134,88 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       exhaustedModelIds(undefined).length === 0);
     check("a pool missing both windows is not counted as exhausted",
       exhaustedModelIds({ pools: [{ id: "x", modelIds: ["m9"] }] }).length === 0);
+
+    // Pool membership is NOT exclusive: the platform also names a model in the
+    // general pool while it has its own dedicated pool. One drained pool must
+    // not remove a model another pool still funds — the union rule did exactly
+    // that live on 2026-10-17 and emptied the whole picker offer.
+    const shared = {
+      pools: [
+        {
+          id: "gen", modelIds: ["m1", "m2", "shared"],
+          window5h: { limit: 100, remaining: 0, resetAt: 1 },
+          window7d: { limit: 500, remaining: 400, resetAt: 2 }
+        },
+        {
+          id: "ded", modelIds: ["shared", "only-ded"],
+          window5h: { limit: 100, remaining: 100, resetAt: 3 },
+          window7d: { limit: 500, remaining: 500, resetAt: 4 }
+        }
+      ]
+    };
+    const partly = exhaustedModelIds(shared);
+    check("a model kept alive by another pool survives one pool being drained",
+      JSON.stringify(partly) === JSON.stringify(["m1", "m2"]), JSON.stringify(partly));
+
+    const allDrained = {
+      pools: [
+        {
+          id: "gen2", modelIds: ["shared"],
+          window5h: { limit: 100, remaining: 0, resetAt: 1 },
+          window7d: { limit: 500, remaining: 400, resetAt: 2 }
+        },
+        {
+          id: "ded2", modelIds: ["shared"],
+          window5h: { limit: 100, remaining: 50, resetAt: 3 },
+          window7d: { limit: 500, remaining: 0, resetAt: 4 }
+        }
+      ]
+    };
+    check("a model is blocked once EVERY pool covering it is drained",
+      JSON.stringify(exhaustedModelIds(allDrained)) === JSON.stringify(["shared"]),
+      JSON.stringify(exhaustedModelIds(allDrained)));
+
+    // "Drained + unknown" is the edge the ALL-POOLS rule deliberately keeps out
+    // of the blocked set: a pool whose limit nobody declared is NOT evidence of
+    // credit (the shape-drift guard above), so it cannot be the pool that keeps
+    // a model alive either — the model is only blocked when the pools that DO
+    // declare a limit are all spent. Old union rule blocked it; the new one does
+    // not, and that is the contract, not an accident of Map arithmetic.
+    const drainedPlusUnknown = {
+      pools: [
+        {
+          id: "gen3", modelIds: ["edge"],
+          window5h: { limit: 100, remaining: 0, resetAt: 1 },
+          window7d: { limit: 500, remaining: 400, resetAt: 2 }
+        },
+        {
+          id: "nul3", modelIds: ["edge"],
+          window5h: { limit: 0, remaining: 0, resetAt: null },
+          window7d: { limit: 0, remaining: 0, resetAt: null }
+        }
+      ]
+    };
+    check("an undeclared-limit pool neither funds nor blocks a model covered by a drained one",
+      JSON.stringify(exhaustedModelIds(drainedPlusUnknown)) === JSON.stringify([]),
+      JSON.stringify(exhaustedModelIds(drainedPlusUnknown)));
+
+    // Malformed members inside `model_ids` must not become model ids, and a pool
+    // naming one id twice must not count as two pools (per-pool `Set`): the
+    // verdict below is `["dup"]` either way, but a regression that dropped the
+    // type filter would emit `""` / `42` into the blocked set and empty real
+    // entries from the picker by mistake.
+    const noisy = {
+      pools: [
+        {
+          id: "noisy", modelIds: ["dup", "dup", "", 42, null, undefined],
+          window5h: { limit: 100, remaining: 0, resetAt: 1 },
+          window7d: { limit: 500, remaining: 400, resetAt: 2 }
+        }
+      ]
+    };
+    check("a pool's duplicate / non-string model ids collapse to the one real id",
+      JSON.stringify(exhaustedModelIds(noisy)) === JSON.stringify(["dup"]),
+      JSON.stringify(exhaustedModelIds(noisy)));
   } catch (error) {
     fail("exhaustedModelIds", error);
   }

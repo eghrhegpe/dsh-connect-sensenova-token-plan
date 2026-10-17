@@ -126,8 +126,8 @@ per-model 可用性标记即用户要的「清单自带识别」——但它是 
   `buildRetryPolicyConfig()`（显式 `mode:"normal"`、`retryableCodes` 排除 `QUOTA`/`ACCOUNT_QUOTA`、保留
   `RATE_LIMIT` 并略调 backoff 对共享池更温和），`llm-adapter-core.ts:218` 已调用
   `resolveRetryPolicy(buildRetryPolicyConfig(), ...)`。peer 已默认对 `RATE_LIMIT` 退避、对 `QUOTA` 快速失败，本改动是把意图固定下来并防未来 peer 默认漂移。
-- **quota→provider 桥 — 已实现**：快照处理器用 `exhaustedModelIds(pools)`（`llm-models.ts`）算出借尽池覆盖的模型集，经 `publishProvider(entries, enabledIds, unavailableModelIds)` 透传给 `createSensenovaAdapter`，由 `buildDescriptors` 在 picker 侧排除（避免发出必 429 的请求）；另以 `quotaSignature`（`index.ts`）去抖，仅在额度跨越零点时触发一次重注册（memoize 约束下唯一生效路径）。
-- **per-model 可用性（「清单自带识别」）— 已实现**：`buildDescriptors`（`llm-models.ts`）按 `pool.remaining<=0` 在 picker 侧排除借尽模型；面板则通过 `rosterWithAvailability(entries, pools)` 列出全部 chat 模型并附 `available`/`quotaExhausted` 标记（始终可见、灰色显示原因）。不依赖 peer 钩子，随 `publishProvider` 重建即生效。
+- **quota→provider 桥 — 已实现**：快照处理器用 `exhaustedModelIds(pools)`（`llm-models.ts`）算出「覆盖它的每个池都已耗尽」的模型集，经 `publishProvider(entries, enabledIds, unavailableModelIds)` 透传给 `createSensenovaAdapter`，由 `buildDescriptors` 在 picker 侧排除（避免发出必 429 的请求）；另以 `quotaSignature`（`index.ts`）去抖，仅在额度跨越零点时触发一次重注册（memoize 约束下唯一生效路径）。
+- **per-model 可用性（「清单自带识别」）— 已实现**：`buildDescriptors`（`llm-models.ts`）按「覆盖该模型的每个池都已耗尽」在 picker 侧排除模型——单池耗尽不算，因为平台会把同一模型同时列进通用池与它自己的专属池，一个池空了不代表它没处可花（并集规则曾把专属池仍有 53 万时的 Flash-Lite 一并下架）；面板则通过 `rosterWithAvailability(entries, pools)` 列出全部 chat 模型并附 `available`/`quotaExhausted` 标记（始终可见、灰色显示原因）。不依赖 peer 钩子，随 `publishProvider` 重建即生效。
 
 ### 3.3 spike 结论（已查证）：memoize → 走 re-registration
 
