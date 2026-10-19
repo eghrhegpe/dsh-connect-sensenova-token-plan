@@ -334,6 +334,11 @@ const watchdog = setTimeout(() => {
   check("the e2e run finished inside its budget", false,
     `exceeded ${RUN_TIMEOUT_MS}ms; the last check reached was: ${last}`);
   host?.child && killHostTree(host.child);
+  // The `finally` below does NOT run on this path — process.exit skips it — so
+  // every timed-out run left its isolated home behind. The fake platform is
+  // in-process and dies with us; the directory on disk is the one thing that
+  // outlives the process.
+  try { rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
   console.log(JSON.stringify(results, null, 2));
   console.error(
     `\nthe e2e run exceeded ${RUN_TIMEOUT_MS}ms — failing rather than hanging forever.` +
@@ -381,6 +386,32 @@ try {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(value)
   });
+  /**
+   * The same deadline and no-reuse transport as `call`, WITHOUT its cookie and
+   * origin injection.
+   *
+   * The Origin-fence probes below must send exactly the headers they name —
+   * including the ABSENCE of a cookie (a refused request with no session is a
+   * different assertion from a refused request with one) — so they cannot go
+   * through `call`. They still should not be the only requests in the run with
+   * no deadline and no name on failure: undici will hand back a pooled socket
+   * the Host has already closed, and the bare `fetch failed` says nothing
+   * about which probe died.
+   *
+   * Takes an ABSOLUTE url, unlike `call` (which takes a path): the probes below
+   * write the whole thing out, and a helper that silently re-prefixed it
+   * produced `http://127.0.0.1:PORThttp://…` — ERR_INVALID_URL, not a refused
+   * request, so the fence would have looked broken while the fence was fine.
+   */
+  const rawFetch = (url, init = {}) => fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    headers: { connection: "close", ...init.headers }
+  }).catch((error) => {
+    throw new Error(
+      `${init.method ?? "GET"} ${url} failed: ${error?.cause?.code ?? error?.message ?? error}`
+    );
+  });
 
   // === the panel is reachable and honest about having no account ==========
   {
@@ -397,7 +428,7 @@ try {
   // is reached. (A bare local request with no Origin IS admitted — the Host
   // treats it as same-origin — so the fence is about the Origin header.)
   {
-    const res = await readJson(await fetch(`http://127.0.0.1:${PORT}/api/dsh-connect-sensenova-token-plan/snapshot`, {
+    const res = await readJson(await rawFetch(`http://127.0.0.1:${PORT}/api/dsh-connect-sensenova-token-plan/snapshot`, {
       headers: { origin: "https://evil.test" }
     }));
     check("a foreign origin is refused by the Host", res.status === 401 || res.status === 403, String(res.status));
@@ -405,7 +436,7 @@ try {
 
   // === the cross-origin fence is the plugin's own ========================
   {
-    const res = await readJson(await fetch(`http://127.0.0.1:${PORT}/api/dsh-connect-sensenova-token-plan/account`, {
+    const res = await readJson(await rawFetch(`http://127.0.0.1:${PORT}/api/dsh-connect-sensenova-token-plan/account`, {
       method: "POST",
       headers: { cookie: session.cookie, origin: "https://evil.test", "content-type": "application/json" },
       body: JSON.stringify({ username: "attacker", password: "x" })
@@ -764,7 +795,7 @@ try {
       JSON.stringify({ m: forget.body?.drawModelId, s: forget.body?.drawModelSource }));
 
     // -- the fence, on the mutation paths ----------------------------------
-    const evilProvider = await readJson(await fetch(`http://127.0.0.1:${PORT}${NS}/provider`, {
+    const evilProvider = await readJson(await rawFetch(`http://127.0.0.1:${PORT}${NS}/provider`, {
       method: "POST",
       headers: { cookie: session.cookie, origin: "https://evil.test", "content-type": "application/json" },
       body: JSON.stringify({ enabled: false })
@@ -774,7 +805,7 @@ try {
     check("the refused flip left the switch where the panel left it",
       stillOn.body?.registerProvider === true && stillOn.body?.providerRegistered === true,
       JSON.stringify(stillOn.body ?? {}).slice(0, 200));
-    const evilModels = await readJson(await fetch(`http://127.0.0.1:${PORT}${NS}/models`, {
+    const evilModels = await readJson(await rawFetch(`http://127.0.0.1:${PORT}${NS}/models`, {
       method: "POST",
       headers: { cookie: session.cookie, origin: "https://evil.test", "content-type": "application/json" },
       body: JSON.stringify({ enabledModelIds: ["SenseNova-Lite"] })
@@ -830,7 +861,7 @@ try {
         after.body?.registerProvider === true,
       JSON.stringify({ before: before.body?.providerRegistered, after: after.body?.providerRegistered }));
 
-    const evil = await readJson(await fetch(`http://127.0.0.1:${PORT}${NS}/raccoon`, {
+    const evil = await readJson(await rawFetch(`http://127.0.0.1:${PORT}${NS}/raccoon`, {
       headers: { cookie: session.cookie, origin: "https://evil.test" }
     }));
     check("a foreign origin is refused on the raccoon route", evil.status === 403, String(evil.status));
