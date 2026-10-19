@@ -107,6 +107,52 @@ export function envSkip(name, missing, coverage = []) {
 }
 
 /**
+ * A SKIP that fires MID-SUITE, after real checks have already been pushed.
+ *
+ * Unlike {@link envSkip} this does NOT exit: the caller still holds genuine
+ * `results` it must print and count honestly, so `process.exit(0)` at the skip
+ * point would discard work the suite already did. Instead it writes the SAME
+ * canonical `[skip] <name> — <reason>` sentinel to stdout (so `test/run-all.mjs`
+ * recognizes the coverage gap and lists it as SKIPPED, never as a pass — the
+ * non-negotiable half above) and returns whether {@link STRICT} demands a hard
+ * failure, so the suite can fold that verdict into its normal end-of-file gate
+ * after emitting its results.
+ *
+ * Use it only for in-branch skips. A suite that SKIPs before doing anything
+ * should call {@link envSkip} directly and let it exit — there is nothing to
+ * preserve.
+ *
+ * @param {string} name suite name, as the roster spells it.
+ * @param {string} missing one line naming what is unavailable.
+ * @param {string[]} coverage what this run therefore did NOT verify.
+ * @returns {boolean} true when STRICT mode requires the run to fail.
+ */
+export function branchSkip(name, missing, coverage = []) {
+  const headline = `[skip] ${name} — ${missing}`;
+  process.stdout.write(`${headline}\n`);
+  if (STRICT) {
+    process.stderr.write(
+      `\n${headline.replace("[skip]", "[skip refused]")}\n` +
+        `[skip refused]   STRICT mode (${
+          process.env.DSH_TEST_STRICT_SKIP === "1" ? "DSH_TEST_STRICT_SKIP=1" : "CI"
+        }): on CI these dependencies are installed by the job, so a miss here is\n` +
+        `[skip refused]   a REGRESSION, not an environment gap (AGENTS.md: "那里报同一句 = 真回归").\n` +
+        (coverage.length > 0 ? coverage.map((line) => `[skip refused]   ${line}`).join("\n") + "\n" : "") +
+        `\n`
+    );
+    return true;
+  }
+  process.stderr.write(
+    `\n${headline}\n` +
+      coverage.map((line) => `[skip]   ${line}`).join("\n") +
+      (coverage.length > 0 ? "\n" : "") +
+      `[skip]   This is an environment gap, NOT a regression. Reproduce CI's stricter\n` +
+      `[skip]   verdict with: DSH_TEST_STRICT_SKIP=1 npm test\n\n`
+  );
+  return false;
+}
+
+/**
  * Turn a failed peer resolution into a skip, leaving every other error fatal.
  *
  * Only {@link isPeerMissing} errors are absorbed: swallowing a genuine throw

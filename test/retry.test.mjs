@@ -24,8 +24,10 @@ import {
   rosterWithAvailability,
   supportedThinkingLevels
 } from "../src/host/llm-models.ts";
+import { branchSkip } from "./env-skip.mjs";
 
 const results = [];
+let strictRefused = false;
 function check(name, condition, detail = "") {
   results.push({ name, pass: Boolean(condition), detail });
 }
@@ -380,7 +382,11 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     } else {
       // Same semantics as peer-contract.test.mjs: a SKIP must not push a fake
       // pass into the totals — say it loudly and leave the check count honest.
-      console.log("SKIP: peer @deepseek-ai/dsh-llm not resolvable here; the resolveRetryPolicy integration is covered by test/e2e.mjs");
+      strictRefused = branchSkip(
+        "retry.test.mjs",
+        "peer @deepseek-ai/dsh-llm not resolvable here; the resolveRetryPolicy integration is covered by test/e2e.mjs",
+        ["peer resolveRetryPolicy accepts our config + excludes QUOTA / includes RATE_LIMIT did NOT run (covered by test/e2e.mjs on a real runtime)"]
+      );
     }
   } catch (error) {
     fail("peer resolveRetryPolicy integration", error);
@@ -391,6 +397,13 @@ console.log(JSON.stringify(results, null, 2));
 const failedChecks = results.filter((r) => !r.pass);
 if (failedChecks.length > 0) {
   console.error(`\n${failedChecks.length}/${results.length} check(s) FAILED`);
+  process.exit(1);
+}
+if (strictRefused) {
+  console.error(
+    `\n[skip refused] retry.test.mjs left a coverage gap that STRICT mode treats as a regression ` +
+      `(DSH_TEST_STRICT_SKIP=1 / CI). Re-run with the @deepseek-ai/dsh-llm peer resolvable.`
+  );
   process.exit(1);
 }
 console.log(`\nall ${results.length} checks passed`);

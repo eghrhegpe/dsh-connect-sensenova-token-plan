@@ -42,7 +42,7 @@ import { findPeerRoot, installNetworkGuard } from "./peer-roots.mjs";
 import { pathToFileURL } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { envSkip } from "./env-skip.mjs";
+import { envSkip, branchSkip } from "./env-skip.mjs";
 import {
   extractStructuredType,
   shouldReclassifyQuotaToRate,
@@ -51,6 +51,7 @@ import {
 } from "../src/host/llm-error-fix.ts";
 
 const results = [];
+let strictRefused = false;
 function check(name, condition, detail = "") {
   results.push({ name, pass: Boolean(condition), detail: String(detail ?? "") });
 }
@@ -224,7 +225,11 @@ for (const message of misjudgedMessages) {
         "按 §3.3②/③ 收紧 peer 范围并更新本契约与本层注释）"
     );
   } else {
-    console.log("SKIP: 未找到 peer `dsh-llm-pi-ai/lib/index.js`——结构护栏跳过（不红）。");
+    strictRefused = branchSkip(
+      "peer-contract.test.mjs",
+      "未找到 peer `dsh-llm-pi-ai/lib/index.js`——结构护栏跳过（不红）。",
+      ["peer classifyPiAiError 的源码级结构护栏（函数名 + isQuotaExceededError 先于 rate.?limit 的相对顺序）did NOT run"]
+    );
   }
 }
 
@@ -232,6 +237,13 @@ console.log(JSON.stringify(results, null, 2));
 const failed = results.filter((r) => !r.pass);
 if (failed.length > 0) {
   console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
+  process.exit(1);
+}
+if (strictRefused) {
+  console.error(
+    `\n[skip refused] peer-contract.test.mjs left a coverage gap that STRICT mode treats as a regression ` +
+      `(DSH_TEST_STRICT_SKIP=1 / CI). Re-run with the Host runtime available.`
+  );
   process.exit(1);
 }
 console.log(`\nall ${results.length} checks passed`);

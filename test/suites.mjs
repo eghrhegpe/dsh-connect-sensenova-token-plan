@@ -66,7 +66,7 @@
  */
 export const SUITES = Object.freeze([
   // ── the 28 *.test.mjs suites (this exact set is what package.test.mjs pins
-  //    against disk; the four gate files below are exempt there, as e2e-gate
+  //    against disk; the five gate files below are exempt there, as e2e-gate
   //    has been since it stopped being a *.test.mjs) ───────────────────────
   { name: "auth.test.mjs", kind: "suite", note: "login / PKCE / JWE / throttle classification" },
   { name: "store.test.mjs", kind: "suite", note: "token store behaviour (peer-dependent)" },
@@ -97,7 +97,7 @@ export const SUITES = Object.freeze([
   { name: "raccoon-web.test.mjs", kind: "suite", note: "search selection takeover/restore" },
   { name: "state-segmentation.test.mjs", kind: "suite", note: "per-profile state directories" },
 
-  // ── the four gate files. Not *.test.mjs, so the three-way roster pin
+  // ── the five gate files. Not *.test.mjs, so the three-way roster pin
   //    exempts them (same exemption e2e-gate has always had) — but they are
   //    still part of the default gate and still have to EXIST, which
   //    package.test.mjs now checks against this list. ───────────────────────
