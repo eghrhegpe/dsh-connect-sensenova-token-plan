@@ -32,6 +32,7 @@ import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
+import { results, check } from "./harness.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = JSON.parse(
@@ -57,10 +58,6 @@ function fingerprint(value) {
   return createHash("sha256").update(value, "utf8").digest("hex").slice(0, 12);
 }
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 const PROBE_BACKOFF_MS = 500;
 const TIMEOUT_MS = 30_000;

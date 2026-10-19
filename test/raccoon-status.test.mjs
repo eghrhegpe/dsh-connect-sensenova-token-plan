@@ -27,17 +27,11 @@ import { installNetworkGuard } from "./peer-roots.mjs";
 import { surface } from "./client-surface.js";
 import { statedCadenceMs } from "../src/client/format.ts";
 import { readFileSync } from "node:fs";
+import { results, check, fail, finish } from "./harness.mjs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 // --- fixtures ---------------------------------------------------------------
 // A realistic-length token: a real one is a long JWT, and the point of the
@@ -678,10 +672,4 @@ try {
 const unstubbed = releaseNetworkGuard();
 check("no check escaped its stub to the network", unstubbed.length === 0, unstubbed.join(", "));
 
-console.log(JSON.stringify(results, null, 2));
-const failedChecks = results.filter((r) => !r.pass);
-if (failedChecks.length > 0) {
-  console.error(`\n${failedChecks.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

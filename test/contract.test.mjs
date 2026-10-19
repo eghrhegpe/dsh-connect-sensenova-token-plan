@@ -30,6 +30,7 @@ import {
 import { credits, epochSeconds, parsePools, parseTrend, checkShape, identifyVisionModel } from "../src/host/parsers.ts";
 import { retryableCodes, QUOTA_CODES } from "../src/host/llm-retry.ts";
 import { isCredentialRefusal, CODE } from "../src/host/codes.ts";
+import { results, check, fail } from "./harness.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = JSON.parse(
@@ -37,13 +38,6 @@ const contract = JSON.parse(
 );
 const baseUrl = contract.meta.baseUrl;
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 // --- 1. catalog entry shape from the contract ----------------------------
 // The contract's `models` entries are the normalized catalog rows

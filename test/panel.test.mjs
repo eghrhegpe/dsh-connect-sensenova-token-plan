@@ -14,14 +14,8 @@ import { readFile, readdir } from "node:fs/promises";
 import { decidePanelView, dictionaries, interpretSnapshot, tables, RENDER } from "./panel-decision.js";
 import { AUTH_FAILURE_CODES, CODE, CREDENTIAL_REFUSALS, NO_LOGIN_CODES } from "../src/host/codes.ts";
 import { CONFIG_DEFAULTS } from "../src/host/host-config.ts";
+import { results, check, fail, finish } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 /**
  * Drive a raw Host response through the panel's own pipeline.
@@ -692,12 +686,4 @@ const healthy = {
   check("a failed body is read as an error", interpretSnapshot({ ok: false, code: "x" }).data === null);
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failedChecks = results.filter((r) => !r.pass);
-if (failedChecks.length > 0) {
-  console.error(`\n${failedChecks.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
-
-
+finish();

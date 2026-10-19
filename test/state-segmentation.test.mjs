@@ -19,6 +19,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { results, check } from "./harness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = (name) => readFileSync(join(here, "..", "src", "host", name), "utf8");
@@ -32,10 +33,6 @@ const throttleStore = src("throttle-store.ts");
 const indexTs = src("index.ts");
 const doctorTs = src("doctor.ts");
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 // --- 1. the primitive: profileStateDir falls back to the SHARED dir on null --
 // `null` profile must mean "today's single shared directory", never a broken

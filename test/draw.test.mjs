@@ -35,14 +35,8 @@ import {
   normalizeDrawOutputFormat,
   normalizeDrawWatermark
 } from "../src/host/draw.ts";
+import { results, check, fail, finish } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 async function rejects(fn) {
   try {
     await fn();
@@ -593,10 +587,4 @@ async function rejects(fn) {
     "routes/snapshot.ts injection");
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failedChecks = results.filter((r) => !r.pass);
-if (failedChecks.length > 0) {
-  console.error(`\n${failedChecks.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

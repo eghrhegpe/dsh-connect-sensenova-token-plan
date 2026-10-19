@@ -29,11 +29,8 @@
 import { buildSnapshotBody } from "../src/host/snapshot-aggregate.ts";
 import { resolveSettings } from "../src/host/host-config.ts";
 import { catalogSignature, syncSignaturesAfterPublish, quotaSignatureOf } from "../src/host/provider-publish.ts";
+import { results, check, finishVerbose } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 const { settings } = resolveSettings({});
 
@@ -508,10 +505,4 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
 }
 
 // --- report ----------------------------------------------------------------
-const passed = results.filter((result) => result.pass).length;
-const failed = results.filter((result) => !result.pass);
-for (const result of failed) {
-  console.error(`  FAIL  ${result.name}${result.detail ? ` — ${result.detail}` : ""}`);
-}
-console.log(`\nsnapshot-aggregate.test.mjs: ${passed}/${results.length} passed`);
-if (failed.length > 0) process.exitCode = 1;
+finishVerbose({ suite: "snapshot-aggregate.test.mjs" });

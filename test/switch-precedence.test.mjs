@@ -12,14 +12,8 @@
  * that read is a named call rather than a caller's bare comparison.
  */
 import { resolveSwitchEnabled, resolveSwitchValue, switchSource, resolveSwitchOff } from "../src/host/switch-precedence.ts";
+import { results, check, fail, finish } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 try {
   // The boolean dialect: panel wins, else config rules, strict boolean out.
@@ -62,10 +56,4 @@ try {
   fail("switch-precedence", error);
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

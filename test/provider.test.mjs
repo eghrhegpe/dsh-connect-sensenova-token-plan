@@ -52,16 +52,10 @@ import { syncSignaturesAfterPublish, catalogSignature, quotaSignatureOf, seedPub
 import { surface as clientSurface } from "./client-surface.js";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
+import { results, check, fail, finish } from "./harness.mjs";
 
 const HOST_SRC = join(dirname(dirname(fileURLToPath(import.meta.url))), "src", "host");
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 const BASE_URL = "https://token.sensenova.cn/v1";
 
@@ -1621,10 +1615,4 @@ const BASE_URL = "https://token.sensenova.cn/v1";
   }
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failedChecks = results.filter((r) => !r.pass);
-if (failedChecks.length > 0) {
-  console.error(`\n${failedChecks.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

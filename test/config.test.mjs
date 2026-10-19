@@ -16,14 +16,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { resolveSettings, CONFIG_DEFAULTS, resolveAuthOverrides, credentialKey, hostName, isAdmitted, name } from "../src/host/index.ts";
 import { resolveTrendMultipliers, resolveMaxTokensOverrides } from "../src/host/host-config.ts";
+import { results, check, finish } from "./harness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const patch = readFileSync(join(here, "..", "cordis.patch.yml"), "utf8");
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 // --- 1. resolveSettings({}) returns the single-source defaults -----------
 {
@@ -411,10 +408,4 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
     `claims "${claimed}", facade registers ${assembled.length}`);
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

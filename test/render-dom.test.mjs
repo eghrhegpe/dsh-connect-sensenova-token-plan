@@ -46,11 +46,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { envSkip } from "./env-skip.mjs";
+import { results, check, finish } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 // React's missing-`key` warning, collected for the WHOLE run.
 //
@@ -1474,10 +1471,4 @@ function typeInto(input, value) {
   pill.unmount();
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

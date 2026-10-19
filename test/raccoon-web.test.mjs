@@ -22,14 +22,8 @@ import { join } from "node:path";
 import { registerWebSearchProvider, applyWebSearchSelection, webSearchSelection, reconcileWebSearch, teardown } from "../src/host/lifecycle.ts";
 import { RACCOON_SEARCH_PROVIDER_ID as PROVIDER_ID } from "../src/host/raccoon-search.ts";
 import { createFileRaccoonWebStore, RACCOON_WEB_SWITCH_VERSION } from "../src/host/raccoon-web-store.ts";
+import { results, check, failGroup as fail } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: !!condition, detail });
-}
-function fail(group, error) {
-  results.push({ name: `${group}: threw ${error?.name ?? "Error"}`, pass: false, detail: String(error?.message ?? error) });
-}
 
 /** A minimal `ctx.web` runtime that records registrations. */
 function makeWeb(prior = undefined) {

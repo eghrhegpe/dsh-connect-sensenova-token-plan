@@ -15,11 +15,8 @@
  */
 import { render, styles as S, texts, findElement, findAll } from "./panel-render.js";
 import { h, surface, reactStandin } from "./client-surface.js";
+import { results, check, finish } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 /** Identity dictionary: assertions are about WHICH key applies, not its text. */
 const tt = (key) => key;
@@ -1571,10 +1568,4 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
   }
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

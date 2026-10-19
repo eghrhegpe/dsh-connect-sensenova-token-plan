@@ -39,17 +39,11 @@ const { Context } = await loadPeer("cordis").catch(skipMissingPeer);
 import { createFileRaccoonStore } from "../src/host/raccoon-switch-store.ts";
 import { RACCOON_CREDENTIAL_REF, serializeRaccoonCredential } from "../src/host/raccoon-store.ts";
 import { RACCOON_PROVIDER_ID } from "../src/host/raccoon-models.ts";
+import { results, check, fail, finish } from "./harness.mjs";
 
 /** After the peers are found: mounting must not write into the real Home. */
 const restoreStateDir = isolateStateDir();
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 /** A webServer service that records what a plugin registers with it. */
 function makeWebServer() {
@@ -776,10 +770,4 @@ const unstubbed = releaseNetworkGuard();
 restoreHostEnv();
 check("no check escaped its stub to the network", unstubbed.length === 0, unstubbed.join(", "));
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

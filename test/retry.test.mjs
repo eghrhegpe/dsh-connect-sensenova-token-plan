@@ -25,15 +25,9 @@ import {
   supportedThinkingLevels
 } from "../src/host/llm-models.ts";
 import { branchSkip } from "./env-skip.mjs";
+import { results, check, fail } from "./harness.mjs";
 
-const results = [];
 let strictRefused = false;
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 const BASE_URL = "https://token.sensenova.cn/v1";
 

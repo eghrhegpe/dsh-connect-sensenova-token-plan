@@ -25,14 +25,8 @@ import {
   RaccoonSearchProvider,
   RaccoonSearchError
 } from "../src/host/raccoon-search.ts";
+import { results, check, failGroup as fail } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: !!condition, detail });
-}
-function fail(group, error) {
-  results.push({ name: `${group}: threw ${error?.name ?? "Error"}`, pass: false, detail: String(error?.message ?? error) });
-}
 
 /** A scripted MCP-over-HTTP fetch: dispatches on the jsonrpc `method`. */
 function scriptedFetch(script) {

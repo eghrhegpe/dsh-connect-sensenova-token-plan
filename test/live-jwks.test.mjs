@@ -17,15 +17,12 @@
  * kid is a platform change, and the fix belongs in sensenova-crypto.js.
  */
 import { sealPassword } from "../src/host/sensenova-crypto.ts";
+import { results, check } from "./harness.mjs";
 
 const JWKS_ENDPOINT = "https://signin.sensecore.cn/.well-known/jwks.json";
 /** The kid the console seals the password under. */
 const ENC_KEY_ID = "public:hydra.openid.id-token";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 let jwks;
 try {

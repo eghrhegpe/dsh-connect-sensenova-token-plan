@@ -68,17 +68,11 @@ import { createRaccoonWalk, LOGIN_STATUS } from "../src/host/raccoon-walk.ts";
 import { createFileRaccoonStore, normalizeRaccoonEnabled, RACCOON_SWITCH_VERSION } from "../src/host/raccoon-switch-store.ts";
 import { installNetworkGuard } from "./peer-roots.mjs";
 import { surface as clientSurface } from "./client-surface.js";
+import { results, check, fail, finishVerbose } from "./harness.mjs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 function section(title) {
   console.log(`\n— ${title}`);
 }
@@ -1356,10 +1350,4 @@ function section(title) {
 
 // --- report ------------------------------------------------------------------
 releaseNetworkGuard();
-const passed = results.filter((result) => result.pass).length;
-const failed = results.filter((result) => !result.pass);
-for (const result of failed) {
-  console.error(`  FAIL  ${result.name}${result.detail ? ` — ${result.detail}` : ""}`);
-}
-console.log(`\nraccoon.test.mjs: ${passed}/${results.length} passed`);
-if (failed.length > 0) process.exitCode = 1;
+finishVerbose({ suite: "raccoon.test.mjs" });

@@ -32,14 +32,11 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { SUITES, CI_FLAGS, EXEMPT } from "./suites.mjs";
+import { results, check, finish } from "./harness.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 /** The published whitelist, as bare paths. */
 const shipped = new Set((manifest.files ?? []).map((entry) => entry.replace(/^\.\//, "")));
@@ -324,10 +321,4 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
     `status=${emptyRun.status} stderr=${(emptyRun.stderr ?? "").slice(0, 80)}`);
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

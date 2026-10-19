@@ -17,6 +17,7 @@ import { createFileThrottleStore } from "../src/host/throttle-store.ts";
 import { RACCOON_CREDENTIAL_REF, serializeRaccoonCredential } from "../src/host/raccoon-store.ts";
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { results, check, fail, finish } from "./harness.mjs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -38,13 +39,6 @@ const { interpretSnapshot, decidePanelView } = await import("./panel-decision.js
 /** After the peers are found: the throttle is real state, kept off the real Home. */
 const restoreStateDir = isolateStateDir();
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 const SNAPSHOT_PATH = "/api/dsh-connect-sensenova-token-plan/snapshot";
 const ACCOUNT_PATH = "/api/dsh-connect-sensenova-token-plan/account";
@@ -1605,10 +1599,4 @@ const unstubbed = releaseNetworkGuard();
 restoreHostEnv();
 check("no check escaped its stub to the network", unstubbed.length === 0, unstubbed.join(", "));
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

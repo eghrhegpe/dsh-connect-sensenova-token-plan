@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { results, check, fail, finish } from "./harness.mjs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -37,13 +38,6 @@ const yaml = await import(pathToFileURL(
 /** After the peers are found: nothing else may touch the real Home. */
 const restoreStateDir = isolateStateDir();
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 const KEY = credentialKey("dsh-connect-sensenova-token-plan", "sensenova-console");
 /** The sign-in throttle lives beside the grant, in its own record. */
@@ -1199,10 +1193,4 @@ async function withNetwork(stub, body) {
 const unstubbed = releaseNetworkGuard();
 check("no check escaped its stub to the network", unstubbed.length === 0, unstubbed.join(", "));
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

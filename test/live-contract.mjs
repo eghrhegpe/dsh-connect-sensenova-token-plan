@@ -27,6 +27,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { results, check } from "./harness.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = JSON.parse(
@@ -43,10 +44,6 @@ const BASE_URL = contract.meta.baseUrl;
  *  teach. */
 const apiKey = process.env.SENSENOVA_API_KEY ?? "";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 if (apiKey === "") {
   console.log("SKIP test:live:contract — SENSENOVA_API_KEY is not set in this environment.");

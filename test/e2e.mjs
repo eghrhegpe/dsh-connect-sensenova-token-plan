@@ -34,6 +34,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cliRuntimeModules } from "./peer-roots.mjs";
+import { results, check } from "./harness.mjs";
 
 /**
  * Where this plugin lives, derived from the running file — never hard-coded.
@@ -69,10 +70,6 @@ function freePort() {
   });
 }
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 function note(text) {
   process.stdout.write(`  ${text}\n`);
 }

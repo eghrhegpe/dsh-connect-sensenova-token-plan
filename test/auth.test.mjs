@@ -15,6 +15,7 @@ import {
   AUTH_FAILURE_CODES, CODE, CREDENTIAL_REFUSALS,
   IAM_REASON_CODES, isAuthFailure, isCredentialRefusal
 } from "../src/host/codes.ts";
+import { results, check, fail, finish } from "./harness.mjs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -25,13 +26,6 @@ const TEST_JWKS_ENDPOINT = "https://signin.sensecore.cn/.well-known/jwks.json";
 const TEST_ENC_KEY_ID = "public:hydra.openid.id-token";
 const sealOptions = { jwksEndpoint: TEST_JWKS_ENDPOINT, encKeyId: TEST_ENC_KEY_ID };
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
-function fail(name, error) {
-  results.push({ name, pass: false, detail: String(error?.message ?? error) });
-}
 
 /** Decrypt a compact JWE, verifying the AAD binding, to prove well-formedness. */
 async function decryptJwe(jwe, privateJwk) {
@@ -870,10 +864,4 @@ check("empty token yields null expiry", readJwtExpiry("") === null);
 const unstubbed = releaseNetworkGuard();
 check("no check escaped its stub to the network", unstubbed.length === 0, unstubbed.join(", "));
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();

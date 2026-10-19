@@ -25,11 +25,8 @@
 import { armProviderRefresher } from "../src/host/provider-refresh.ts";
 import { resolveSettings } from "../src/host/host-config.ts";
 import { catalogSignature } from "../src/host/provider-publish.ts";
+import { results, check, finishVerbose } from "./harness.mjs";
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 const EXHAUSTED_POOL = {
   plan: { id: "p1", name: "TokenPlan", type: "token_plan" },
@@ -293,8 +290,4 @@ function makeWiring({ registerProvider = true, panelEnabled = null, storeThrows 
 }
 
 // --- report -------------------------------------------------------------------
-const passed = results.filter((r) => r.pass).length;
-const failed = results.filter((r) => !r.pass);
-for (const row of failed) console.error(`  FAIL  ${row.name}${row.detail ? ` — ${row.detail}` : ""}`);
-console.log(`\nprovider-refresh.test.mjs: ${passed}/${results.length} passed`);
-if (failed.length > 0) process.exitCode = 1;
+finishVerbose({ suite: "provider-refresh.test.mjs" });

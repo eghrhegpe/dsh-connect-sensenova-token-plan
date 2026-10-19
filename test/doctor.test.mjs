@@ -27,14 +27,11 @@ import {
 } from "../src/host/doctor.ts";
 import { SYMPTOM, SYMPTOM_HINT } from "../src/host/codes.ts";
 import { name as PLUGIN_NAME } from "../src/host/host-config.ts";
+import { results, check, finish } from "./harness.mjs";
 
 /** Shorthand: derive symptom ids for a hand-built scope list. */
 const derive = (scopes) => deriveSymptoms(scopes);
 
-const results = [];
-function check(name, condition, detail = "") {
-  results.push({ name, pass: Boolean(condition), detail });
-}
 
 // --- 1. parseProviderPayload ------------------------------------------------
 {
@@ -350,10 +347,4 @@ function check(name, condition, detail = "") {
   }
 }
 
-console.log(JSON.stringify(results, null, 2));
-const failed = results.filter((r) => !r.pass);
-if (failed.length > 0) {
-  console.error(`\n${failed.length}/${results.length} check(s) FAILED`);
-  process.exit(1);
-}
-console.log(`\nall ${results.length} checks passed`);
+finish();
