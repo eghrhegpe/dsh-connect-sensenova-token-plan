@@ -31,18 +31,18 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { envSkip } from "./env-skip.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TS_PKG = join(root, "node_modules", "typescript", "package.json");
 
 if (!existsSync(TS_PKG)) {
-  process.stderr.write(
-    `\n[typecheck-gate] SKIPPED — typescript is not installed in this project's node_modules.\n` +
-    `[typecheck-gate]   Bootstrap dev deps with: npm install --legacy-peer-deps\n` +
-    `[typecheck-gate]   (a GLOBAL tsc is deliberately NOT a fallback: the gate must run the\n` +
-    `[typecheck-gate]    version pinned in devDependencies, or its verdict is not reproducible).\n\n`
-  );
-  process.exit(0);
+  envSkip("typecheck-gate", "typescript is not installed in this project's node_modules.",
+    [
+      "the TypeScript strict-flag checks did NOT run",
+      "(a GLOBAL tsc is deliberately NOT a fallback: the gate must run the version pinned in devDependencies, or its verdict is not reproducible)",
+      "Bootstrap dev deps with: npm install --legacy-peer-deps",
+    ]);
 }
 
 const pinned = JSON.parse(readFileSync(TS_PKG, "utf8")).version;

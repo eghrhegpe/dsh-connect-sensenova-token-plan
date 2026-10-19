@@ -45,6 +45,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { envSkip } from "./env-skip.mjs";
 
 const results = [];
 function check(name, condition, detail = "") {
@@ -82,14 +83,13 @@ const missing = HEAVY.filter((specifier) => {
   }
 });
 if (missing.length > 0) {
-  process.stderr.write(
-    `\n[render-dom] SKIPPED — ${missing.join(", ")} not installed in this project's node_modules.\n` +
-    `[render-dom]   Bootstrap dev deps with: npm install --legacy-peer-deps\n` +
-    `[render-dom]   (CI's offline job installs them, so CI always runs this suite for real;\n` +
-    `[render-dom]    a GLOBAL react is deliberately not a fallback — the verdict must match\n` +
-    `[render-dom]    the version pinned in devDependencies.)\n\n`
-  );
-  process.exit(0);
+  envSkip("render-dom", `${missing.join(", ")} not installed in this project's node_modules.`,
+    [
+      "the SHIPPED client.js was NOT evaluated against REAL React",
+      "(CI's offline job installs them, so CI always runs this suite for real)",
+      "a GLOBAL react is deliberately not a fallback — the verdict must match the version pinned in devDependencies",
+      "Bootstrap dev deps with: npm install --legacy-peer-deps",
+    ]);
 }
 
 const { JSDOM } = await import("jsdom");
@@ -220,6 +220,25 @@ function typeInto(input, value) {
 
   card.unmount();
   check("unmounting the quota card empties the container", card.host.childNodes.length === 0);
+}
+
+// === A2. an unknown-limit window must NOT render "0 / 0" =================
+// The headline and bar already guard `limit > 0` (rendering "—" / empty);
+// the used/limit caption sat one line below them behind no such guard, so a
+// pool the platform declined to cap was shown as "已用 0 / 0". Regression
+// surface for the cards.ts:101 fix.
+{
+  const unknown = { label: "pool.window5h", window: { used: 0, limit: 0, remaining: undefined }, tt };
+  const card = mount(React.createElement(panel.components.QuotaCard, unknown));
+  const text = card.host.textContent;
+  check("an unknown-limit window's caption reads \"—\", not \"0 / 0\"",
+    !text.includes("0 / 0") && text.includes("—"), text);
+  const bareUnknown = { label: "pool.window5h", window: { used: undefined, limit: undefined }, tt };
+  const card2 = mount(React.createElement(panel.components.QuotaCard, bareUnknown));
+  check("a completely absent window still shows no fake ratio",
+    !card2.host.textContent.includes("/"), card2.host.textContent);
+  card.unmount();
+  card2.unmount();
 }
 
 // === B. AccountForm: the hook contract, REAL for the first time ============

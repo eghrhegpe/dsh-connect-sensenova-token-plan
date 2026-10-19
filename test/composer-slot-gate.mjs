@@ -43,6 +43,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { envSkip } from "./env-skip.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
@@ -228,9 +229,11 @@ function assertScope(scope, label) {
 // ── run ──────────────────────────────────────────────────────────────────────
 const scopes = collectScopes();
 if (scopes.length === 0) {
-  console.log("SKIP: 本机没有可解析的 DSH client 副本（dsh-client-ui-conversation 未安装）。");
-  console.log("SKIP: composer 用量胶囊的 peer 契约无法验证；CI 需装好运行时才会真跑（同 store.test.mjs 的 peer 缺席范式）。");
-  process.exit(0);
+  envSkip("composer-slot-gate", "本机没有可解析的 DSH client 副本（dsh-client-ui-conversation 未安装）。",
+    [
+      "composer 用量胶囊的 peer 契约无法验证（同 store.test.mjs 的 peer 缺席范式）",
+      "CI 需装好运行时才会真跑——那里出现则说明 workflow 的运行时安装步骤没生效",
+    ]);
 }
 
 for (const { scope, version } of scopes) {

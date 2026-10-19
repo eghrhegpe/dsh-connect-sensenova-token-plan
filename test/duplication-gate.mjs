@@ -37,6 +37,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { envSkip } from "./env-skip.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -45,11 +46,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // readFileSync below (an uncaught ENOENT is a red gate that says nothing about
 // the code — the §30 failure shape). CI installs dev deps, so it still runs.
 if (!existsSync(join(root, "node_modules", "jscpd", "package.json"))) {
-  process.stderr.write(
-    `\n[duplication-gate] SKIPPED — jscpd is not installed in this project's node_modules.\n` +
-    `[duplication-gate]   Bootstrap dev deps with: npm install --legacy-peer-deps\n\n`
-  );
-  process.exit(0);
+  envSkip("duplication-gate", "jscpd is not installed in this project's node_modules.",
+    ["the duplicate-code scan did NOT run (jscpd is a devDependency; bootstrap with: npm install --legacy-peer-deps)"]);
 }
 
 const results = [];

@@ -42,6 +42,7 @@ import { findPeerRoot, installNetworkGuard } from "./peer-roots.mjs";
 import { pathToFileURL } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { envSkip } from "./env-skip.mjs";
 import {
   extractStructuredType,
   shouldReclassifyQuotaToRate,
@@ -62,9 +63,11 @@ installNetworkGuard();
 
 const root = findPeerRoot();
 if (root === undefined) {
-  console.log("SKIP: 未找到 Host peer 根——契约无法验证，跳过且不红（本地干净检出属正常；CI 里出现则说明 workflow 的运行时安装步骤没生效，见 .github/workflows/ci.yml）。");
-  console.log("SKIP: 需 $DSH_HOME / 已解包的桌面运行时 / npm 全局 CLI 的运行时树才会真跑（见 test/peer-roots.mjs 的候选根）。");
-  process.exit(0);
+  envSkip("peer-contract.test.mjs", "未找到 Host peer 根——契约无法验证（本地干净检出属正常；CI 里出现则说明 workflow 的运行时安装步骤没生效，见 .github/workflows/ci.yml）。",
+    [
+      "需 $DSH_HOME / 已解包的桌面运行时 / npm 全局 CLI 的运行时树才会真跑（见 test/peer-roots.mjs 的候选根）",
+      "the 429 纠正端到端契约（isQuotaExceededError / message 拼接格式 / type 回捞）did NOT run",
+    ]);
 }
 
 // --- 装载真实 peer（root 在却装不上 = 环境不完整，按失败处理，不是 SKIP）-----------

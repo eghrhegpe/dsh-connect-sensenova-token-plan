@@ -35,6 +35,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
+import { envSkip } from "./env-skip.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ARTIFACT = join(root, "client.js");
@@ -122,14 +123,13 @@ if (existsSync(HOST_BUNDLE)) {
 
 // Everything past this point needs a build toolchain.
 if (!existsSync(join(root, "node_modules", "tsdown", "package.json"))) {
-  process.stderr.write(
-    `\n[build-gate] SKIPPED — tsdown is not installed.\n` +
-    `[build-gate]   Bootstrap dev deps with: npm i -D tsdown --legacy-peer-deps\n` +
-    `[build-gate]   (the repo's peerDependencies are Host-runtime packages and do not\n` +
-    `[build-gate]   resolve from a registry, so a plain npm install cannot run here).\n` +
-    `[build-gate]   The zero-dependency artifact checks above DID run.\n\n`
-  );
-  console.log(JSON.stringify(results, null, 2));
+  envSkip("build-gate", "tsdown is not installed in this project's node_modules.",
+    [
+      "the artifact build + freshness + shape checks did NOT run",
+      "(the repo's peerDependencies are Host-runtime packages and do not resolve from a registry, so a plain npm install cannot run here)",
+    ]);
+  // envSkip exits; the lines below are unreachable but keep the early-return
+  // shape the rest of the file relied on for its `results` tally.
   const failed = results.filter((r) => !r.pass);
   process.exit(failed.length > 0 ? 1 : 0);
 }

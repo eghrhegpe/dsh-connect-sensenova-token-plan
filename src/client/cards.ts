@@ -98,7 +98,12 @@ export function QuotaCard({ label, window, tt }: { label: string; window: QuotaW
     h(
       "div",
       { style: S.quotaTop },
-      h("span", { style: S.quotaUsed }, `${tt("pool.used")} ${count(used)} / ${count(limit)}`),
+      // Same guard as the headline/bar above: an absent or zero `limit` is
+      // UNKNOWN, not "0 / 0". Printing two numbers the platform never sent
+      // (here, a fake used/limit ratio) contradicts the "—" headline and
+      // the empty bar sitting directly above this row.
+      h("span", { style: S.quotaUsed },
+        limit > 0 ? `${tt("pool.used")} ${count(used)} / ${count(limit)}` : `—`),
       // `when` not `clock`: the weekly reset can land on another day, and
       // a bare HH:MM reads as "later today" — wrong and alarming.
       typeof remaining === "number" && remaining > 0 && resetAt ? h("span", { style: S.quotaReset }, format(tt("pool.reset"), { time: when(resetAt) })) : null
