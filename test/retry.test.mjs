@@ -25,6 +25,7 @@ import {
   supportedThinkingLevels
 } from "../src/host/llm-models.ts";
 import { branchSkip } from "./env-skip.mjs";
+import { loadPeer } from "./peer-roots.mjs";
 import { results, check, fail } from "./harness.mjs";
 
 let strictRefused = false;
@@ -363,9 +364,16 @@ const BASE_URL = "https://token.sensenova.cn/v1";
 // Guarded: a clean checkout (no Host peer) must still pass; a real runtime
 // additionally proves `resolveRetryPolicy` accepts our config and excludes
 // the quota codes exactly as the snapshot-driven re-registration expects.
+//
+// `loadPeer`, not a bare `import("@deepseek-ai/dsh-llm")`: only `require` can
+// be rooted at an arbitrary `node_modules`, and this suite must reach the CLI's
+// tree on a runner that has no dev-checkout peers. The bare specifier resolved
+// on a developer machine and NOT on CI, where `npm install -g @deepseek-ai/dsh`
+// is the only runtime present — so the block read as a coverage gap and
+// `branchSkip` correctly failed the suite instead of passing it silently.
 {
   try {
-    const mod = await import("@deepseek-ai/dsh-llm").catch(() => null);
+    const mod = await loadPeer("dsh-llm").catch(() => null);
     if (mod && typeof mod.resolveRetryPolicy === "function") {
       const resolved = mod.resolveRetryPolicy(buildRetryPolicyConfig(), "retry.test");
       check("peer resolveRetryPolicy accepts our config", resolved != null && resolved.mode === "normal");
