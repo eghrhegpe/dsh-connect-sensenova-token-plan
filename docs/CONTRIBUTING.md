@@ -87,18 +87,11 @@ git commit -m "chore: stop tracking DSH internal _asar_extract dump"
 
 **不要看错仓库**：投稿是向 `awesome-dsh-plugin/awesome-dsh-plugin` 提 PR，加且仅加一个文件
 `data/plugins/eghrhegpe__dsh-connect-sensenova-token-plan.yml`；不要手工编辑对方仓库生成出来的
-README，也不要把条目文件建在本仓库。一个 PR 最多 3 条。
+README。一个 PR 最多 3 条。
 
-本插件的拟稿（描述只能陈述功能、不带营销词，每句都会被对照代码核对）：
-
-```yaml
-url: https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan
-name: eghrhegpe/dsh-connect-sensenova-token-plan
-category: usage
-description:
-  en: 'SenseNova Token Plan credit panel rendered as a config card on the Harness Plugins page: per-pool quota windows (5h and weekly), grant balance and per-model consumption from the SenseNova console API, with in-panel login and automatic token renewal. Three opt-in switches, off by default, register SenseNova models and the Xiaohuanxiong upstream as LLM providers and expose an image-generation tool to the agent.'
-  zh: '在 Harness 的 Plugins 页以插件卡显示商汤 SenseNova 控制台的 Token Plan 积分用量：各积分池额度窗口（5 小时与每周）、返赠余额与每模型消耗，支持面板内登录与令牌自动续期。另有三个默认关闭的可选开关，用于把商汤模型与小浣熊上游注册为 DSH 提供方，并向 agent 暴露出图工具。'
-```
+本仓库只放**拟稿镜像**：[`awesome-dsh-plugin-submission/eghrhegpe__dsh-connect-sensenova-token-plan.yml`](../awesome-dsh-plugin-submission/eghrhegpe__dsh-connect-sensenova-token-plan.yml)。
+提 PR 时把这份文件原样复制到对方仓库的 `data/plugins/` 下即可——不要在这里再维护第二份 yaml（两处一定会漂移）。
+描述只能陈述功能、不带营销词，每句都会被维护者对照代码核对；逐条溯源写在拟稿的注释里。
 
 含 `: ` 的描述必须加引号，否则 YAML 解析失败；`en` 必填且以句号结尾，`zh` 可选。
 

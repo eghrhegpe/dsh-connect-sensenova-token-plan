@@ -27,6 +27,11 @@ function collectMd(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
+    // `awesome-dsh-plugin-submission/` holds a verbatim copy of the upstream
+    // contributing guide. Its relative links (`data/screenshots.json`, `data/plugins/…`)
+    // resolve inside THAT repository, not this one — scanning it can only produce
+    // false reds, the same reason `upstream/` and `tmp/` are skipped below.
+    if (name === "awesome-dsh-plugin-submission") continue;
     if (name === "upstream" || name === ".git" || name === "node_modules") continue;
     // `tmp/` is SCRATCH and gitignored, but this walk is on disk, so whatever a
     // working session parks there gets checked. The release procedure
