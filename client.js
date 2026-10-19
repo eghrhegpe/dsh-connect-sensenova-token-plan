@@ -2579,6 +2579,37 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	}));
 
 //#endregion
+//#region src/client/quota-bar.ts
+/**
+	* A progress bar: a track, an optional fill, and the ARIA triple.
+	*
+	* @param props.track - the track style (the full-width background).
+	* @param props.fill - the fill style, or `null` to draw NO fill child at all.
+	*   A caller with an unknown share passes `null` rather than a 0-width child,
+	*   which a stray `min-width` in some engine could paint as a nub (the pill's
+	*   comment owns that reasoning; the card passes a style and keeps its shape).
+	* @param props.widthPct - the fill width percentage; ignored when `fill` is null.
+	* @param props.valueNow - the value assistive tech reads: ALWAYS a number.
+	* @param props.label - the accessible label.
+	*/
+	function QuotaBar(props) {
+		return h("div", {
+			style: props.track,
+			role: "progressbar",
+			"aria-label": props.label,
+			"aria-valuenow": props.valueNow,
+			"aria-valuemin": 0,
+			"aria-valuemax": 100
+		}, props.fill === null ? null : h("div", { style: {
+			...props.fill,
+			width: `${props.widthPct}%`
+		} }));
+	}
+	var init_quota_bar = __esmMin((() => {
+		init_runtime();
+	}));
+
+//#endregion
 //#region src/client/cards.ts
 /** The bar fill and figure tone for a usage percentage: 70 warn / 90 danger. */
 	function usageTone(pct) {
@@ -2624,17 +2655,13 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		} }, tt("pool.exhausted")) : null), h("div", { style: {
 			...S.quotaRemaining,
 			color: pctColor
-		} }, headline), h("div", {
-			style: S.bar,
-			role: "progressbar",
-			"aria-label": `${label} ${tt("pool.used")} ${pct === null ? "—" : `${pct.toFixed(1)}%`}`,
-			"aria-valuenow": pct === null ? 0 : pct.toFixed(1),
-			"aria-valuemin": 0,
-			"aria-valuemax": 100
-		}, h("div", { style: {
-			...tone.fill,
-			width: `${pct ?? 0}%`
-		} })), h("div", { style: S.quotaTop }, h("span", { style: S.quotaUsed }, limit > 0 ? `${tt("pool.used")} ${count(used)} / ${count(limit)}` : `—`), typeof remaining === "number" && remaining > 0 && resetAt ? h("span", { style: S.quotaReset }, format(tt("pool.reset"), { time: when(resetAt) })) : null));
+		} }, headline), QuotaBar({
+			track: S.bar,
+			fill: tone.fill,
+			widthPct: pct ?? 0,
+			valueNow: pct === null ? 0 : Number(pct.toFixed(1)),
+			label: `${label} ${tt("pool.used")} ${pct === null ? "—" : `${pct.toFixed(1)}%`}`
+		}), h("div", { style: S.quotaTop }, h("span", { style: S.quotaUsed }, limit > 0 ? `${tt("pool.used")} ${count(used)} / ${count(limit)}` : `—`), typeof remaining === "number" && remaining > 0 && resetAt ? h("span", { style: S.quotaReset }, format(tt("pool.reset"), { time: when(resetAt) })) : null));
 	}
 	/**
 	* One pool card. The open state is intentionally tiny: name, type chip,
@@ -2768,17 +2795,13 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			}, row.model, typeof row.multiplier === "number" && row.multiplier !== 1 ? h("span", {
 				style: S.chip,
 				title: tt("trend.multiplierLegend")
-			}, `×${row.multiplier}`) : null), h("span", { style: S.trendCredits }, count(credits))), drawsBar ? h("div", {
-				style: S.trendBar,
-				role: "progressbar",
-				"aria-label": `${row.model} ${Math.round(pct)}%`,
-				"aria-valuenow": Math.round(pct),
-				"aria-valuemin": 0,
-				"aria-valuemax": 100
-			}, h("div", { style: {
-				...S.barFill,
-				width: `${pct}%`
-			} })) : null);
+			}, `×${row.multiplier}`) : null), h("span", { style: S.trendCredits }, count(credits))), drawsBar ? QuotaBar({
+				track: S.trendBar,
+				fill: S.barFill,
+				widthPct: pct,
+				valueNow: Math.round(pct),
+				label: `${row.model} ${Math.round(pct)}%`
+			}) : null);
 		}), h("div", { style: S.trendLegend }, tt("trend.legend")), anyMultiplier ? h("div", { style: S.trendLegend }, tt("trend.multiplierLegend")) : null);
 	}
 	/**
@@ -2817,6 +2840,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	}
 	var init_cards = __esmMin((() => {
 		init_format();
+		init_quota_bar();
 		init_runtime();
 		init_styles();
 	}));
@@ -4345,18 +4369,16 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const share = limit > 0 ? Math.min(100, used / limit * 100) : null;
 		const tier = tierOf(window);
 		const resetAt = resetFor(window?.resetAt ?? null, Date.now());
-		return h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, label), h("span", { style: S.pillPopoverFigure }, Number.isFinite(limit) && limit > 0 ? `${count(used)} / ${count(limit)}` : "—")), h("div", {
-			style: S.pillPopoverBar,
-			role: "progressbar",
-			"aria-label": `${label} ${tt("pool.used")}`,
-			"aria-valuenow": share === null ? 0 : Math.round(share),
-			"aria-valuemin": 0,
-			"aria-valuemax": 100
-		}, share === null ? null : h("div", { style: {
-			...S.pillPopoverFill,
-			width: `${share}%`,
-			background: TIER_INK[tier]
-		} })), resetAt === null ? null : h("div", { style: S.pillPopoverFoot }, h("span", { style: S.pillPopoverReset }, format(tt("pool.reset"), { time: when(resetAt) }))));
+		return h("div", { style: S.pillPopoverRow }, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, label), h("span", { style: S.pillPopoverFigure }, Number.isFinite(limit) && limit > 0 ? `${count(used)} / ${count(limit)}` : "—")), QuotaBar({
+			track: S.pillPopoverBar,
+			fill: share === null ? null : {
+				...S.pillPopoverFill,
+				background: TIER_INK[tier]
+			},
+			widthPct: share ?? 0,
+			valueNow: share === null ? 0 : Math.round(share),
+			label: `${label} ${tt("pool.used")}`
+		}), resetAt === null ? null : h("div", { style: S.pillPopoverFoot }, h("span", { style: S.pillPopoverReset }, format(tt("pool.reset"), { time: when(resetAt) }))));
 	}
 	/**
 	* The Raccoon gateway's balance reader: the same polling core the panel's
@@ -4689,6 +4711,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_const();
 		init_use_remote_read();
 		init_use_snapshot_polling();
+		init_quota_bar();
 		TOKEN_PLAN = "sensenova-token-plan";
 		RACCOON = "sensenova-raccoon";
 		RACCOON_POLL_MS = 6e4;

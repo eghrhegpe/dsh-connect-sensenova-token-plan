@@ -12,6 +12,7 @@
  * the icon a user actually sees is `icon.svg` at the repo root.
  */
 import { clockLong, count, format, when } from "./format.ts";
+import { QuotaBar } from "./quota-bar.ts";
 import { h } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
 import { S } from "./styles.ts";
@@ -86,12 +87,16 @@ export function QuotaCard({ label, window, tt }: { label: string; window: QuotaW
     ),
     h("div", { style: { ...S.quotaRemaining, color: pctColor } }, headline),
     // The bar and the headline both carry the used percentage: one number,
-    // one shape, no room for the two to disagree.
-    h(
-      "div",
-      { style: S.bar, role: "progressbar", "aria-label": `${label} ${tt("pool.used")} ${pct === null ? "—" : `${pct.toFixed(1)}%`}`, "aria-valuenow": pct === null ? 0 : pct.toFixed(1), "aria-valuemin": 0, "aria-valuemax": 100 },
-      h("div", { style: { ...tone.fill, width: `${pct ?? 0}%` } })
-    ),
+    // one shape, no room for the two to disagree. `valueNow` is a NUMBER
+    // (`Number(pct.toFixed(1))`), not the old `pct.toFixed(1)` string: an ARIA
+    // value is a number, and the DOM's own coercion was hiding the type error.
+    QuotaBar({
+      track: S.bar,
+      fill: tone.fill,
+      widthPct: pct ?? 0,
+      valueNow: pct === null ? 0 : Number(pct.toFixed(1)),
+      label: `${label} ${tt("pool.used")} ${pct === null ? "—" : `${pct.toFixed(1)}%`}`
+    }),
     // One quiet footer row: the only raw figures (used/limit) on the left,
     // the reset clock on the right. Both are supporting detail; keeping
     // them off the top row leaves the window label alone up there.
@@ -297,11 +302,13 @@ export function TrendTable({ trend, tt }: { trend?: TrendData | null; tt: Tt }):
           h("span", { style: S.trendCredits }, count(credits))
         ),
         drawsBar
-          ? h(
-              "div",
-              { style: S.trendBar, role: "progressbar", "aria-label": `${row.model} ${Math.round(pct)}%`, "aria-valuenow": Math.round(pct), "aria-valuemin": 0, "aria-valuemax": 100 },
-              h("div", { style: { ...S.barFill, width: `${pct}%` } })
-            )
+          ? QuotaBar({
+              track: S.trendBar,
+              fill: S.barFill,
+              widthPct: pct,
+              valueNow: Math.round(pct),
+              label: `${row.model} ${Math.round(pct)}%`
+            })
           : null
       );
     }),

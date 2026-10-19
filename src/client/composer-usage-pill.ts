@@ -97,6 +97,7 @@ import { count, format, when } from "./format.ts";
 import { RACCOON_PATH } from "./const.ts";
 import { useRemoteRead, type RemoteRead, type RemoteRoute } from "./use-remote-read.ts";
 import { useSnapshotPolling } from "./use-snapshot-polling.ts";
+import { QuotaBar } from "./quota-bar.ts";
 import type { Tt } from "./runtime.ts";
 import type { PoolData, QuotaWindowData } from "./wire.ts";
 import type { RaccoonState } from "../shared/wire.ts";
@@ -395,20 +396,15 @@ function QuotaRow({ label, window, tt }: { label: string; window: QuotaWindowDat
         Number.isFinite(limit) && limit > 0 ? `${count(used)} / ${count(limit)}` : "—"
       )
     ),
-    h(
-      "div",
-      {
-        style: S.pillPopoverBar,
-        role: "progressbar",
-        "aria-label": `${label} ${tt("pool.used")}`,
-        "aria-valuenow": share === null ? 0 : Math.round(share),
-        "aria-valuemin": 0,
-        "aria-valuemax": 100
-      },
+    QuotaBar({
+      track: S.pillPopoverBar,
       // A bar with no known share draws no fill at all, rather than a 0-width
       // child that a stray `min-width` in some engine would paint as a nub.
-      share === null ? null : h("div", { style: { ...S.pillPopoverFill, width: `${share}%`, background: TIER_INK[tier] } })
-    ),
+      fill: share === null ? null : { ...S.pillPopoverFill, background: TIER_INK[tier] },
+      widthPct: share ?? 0,
+      valueNow: share === null ? 0 : Math.round(share),
+      label: `${label} ${tt("pool.used")}`
+    }),
     // `when`, not a bare clock: the weekly reset can land on another day, and
     // "重置 08:00" reads as later today — wrong, and alarming next to a 1% pill.
     resetAt === null
