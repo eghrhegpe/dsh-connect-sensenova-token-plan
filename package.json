@@ -3,7 +3,7 @@
   "displayName": "DSH Connect SenseNova Token Plan",
   "icon": "./icon.svg",
   "version": "0.8.1",
-  "description": "Bring SenseNova into DSH: opt-in registration of SenseNova language models and the draw tool as an OpenAI-compatible provider (model list follows your key, vision models take images automatically), a Token Plan quota panel — credit pools, per-model consumption, self-renewing console token — that works without registering, QR-code sign-in for Xiaohuanxiong, and host-side 429 back-off so a rate limit never reads as an exhausted quota.",
+  "description": "One-tap connect SenseNova Token Plan language and image models into DSH (off by default), with image recognition and thinking level filled in automatically. On a rate limit it backs off and retries on its own instead of misreading it as an exhausted quota. After signing in to the SenseNova console you can see the usage pill, credit pools and per-model consumption. Xiaohuanxiong can also be signed in by QR code, bringing in its models and their consumption multipliers, and taking over DSH web search.",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",

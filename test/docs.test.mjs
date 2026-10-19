@@ -519,6 +519,34 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
       }
     }
   }
+
+  // 反向：assets/ 里每张图都必须被按名字引用（清单或 README），不留孤儿资产。
+  // 现象（2026-10-19）：新增一张截图放进 assets/，README 与 screenshots.json 都没提，
+  // git 也未跟踪——上面那段只验「声明了就必须在盘上」，反方向没有检查，于是全绿。
+  // 市场对无声明条目会回落到从 README 抽图，所以 README 里引用同样算「会被展示」。
+  const ASSETS = join(ROOT, "assets");
+  if (existsSync(ASSETS)) {
+    const IMG = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+    const declared = new Set();
+    if (existsSync(manifest)) {
+      try {
+        const list = JSON.parse(readFileSync(manifest, "utf8"));
+        if (Array.isArray(list)) for (const e of list) if (typeof e === "string") declared.add(basename(e.trim()));
+      } catch {
+        /* JSON 坏掉已在上文报过，这里不重复 */
+      }
+    }
+    const readmePath = join(ROOT, "README.md");
+    const readme = existsSync(readmePath) ? readFileSync(readmePath, "utf8") : "";
+    let orphans = 0;
+    for (const name of readdirSync(ASSETS)) {
+      if (!IMG.has(extname(name).toLowerCase())) continue;
+      if (declared.has(name) || readme.includes(name)) continue;
+      orphans++;
+      bad(`assets/${name} 是孤儿资产——screenshots.json 与 README 都没按名字引用它，市场与 README 都不会展示它（要么加进清单并在 README 补上下文，要么删掉）`);
+    }
+    if (orphans === 0) note(`assets/ 的 ${readdirSync(ASSETS).filter((n) => IMG.has(extname(n).toLowerCase())).length} 张图全部被 screenshots.json 或 README 引用（无孤儿资产）`);
+  }
 }
 
 // 12) 考古纪律：现行文档不许盖「修订（日期）」式内联补丁——决策沿革只进账本
