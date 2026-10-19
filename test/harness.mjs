@@ -89,6 +89,7 @@ export function section(title) {
  *   pass line, so the output still says who is reporting.
  */
 export function finishVerbose({ suite }) {
+  requireNonEmptyLedger();
   const passed = results.filter((r) => r.pass).length;
   const bad = failed();
   for (const row of bad) {
@@ -101,6 +102,34 @@ export function finishVerbose({ suite }) {
 /** The failed subset of {@link results}. */
 export function failed() {
   return results.filter((r) => !r.pass);
+}
+
+/**
+ * Refuse to report a suite green when its ledger is EMPTY.
+ *
+ * `all 0 checks passed` is a true statement and a useless one: the runner reads
+ * the exit code, so a suite whose assertions were deleted (or never reached)
+ * would report ✓ while verifying nothing — the coverage equivalent of the
+ * `contract.models` floor, one level up. No suite reaches this today; that is
+ * exactly why it needs a guard rather than an inspection.
+ *
+ * Recorded as a failed ASSERTION rather than its own `process.exit`, so both
+ * tail conventions keep behaving as documented: {@link finish} hard-exits on
+ * it, {@link finishVerbose} reports it softly with the other rows. A separate
+ * exit path would have made the verbose tail's "fail soft" promise a lie.
+ *
+ * Legitimate zero-check states are not a thing here: a suite with nothing to
+ * assert should not be in the roster (`test/suites.mjs`) at all, and one that
+ * cannot run its assertions should say so loudly via `envSkip`.
+ */
+function requireNonEmptyLedger() {
+  if (results.length > 0) return;
+  results.push({
+    name: "the suite asserted something",
+    pass: false,
+    detail: "0 checks ran — a suite that verifies nothing must not report green " +
+      "(assert unconditionally, or skip loudly via env-skip)"
+  });
 }
 
 /**
@@ -120,6 +149,7 @@ export function failed() {
  *   `live checks`).
  */
 export function finish({ noun = "checks" } = {}) {
+  requireNonEmptyLedger();
   console.log(JSON.stringify(results, null, 2));
   const bad = failed();
   if (bad.length > 0) {
