@@ -19,7 +19,7 @@ P0 两条已修 + P1 writePayload 收编后的**剩余结构性欠账**，逐项
 
 | 项 | 现状 | 为什么没动 / 出手条件 |
 |---|---|---|
-| `web.searchProviderId` 全局写本身 | P0-1 只补了「归还路径」（dispose 竞态不再永久顶掉别的插件），但「由本插件改写 DSH 全局搜索路由」这一架构事实仍在 | 架构级，等拍板（P0 提案里已列）。选项 B（接管前检查占用、冲突则拒绝）只是防御性补丁；根子是「凭什么由我改全局」 |
+| ~~`web.searchProviderId` 全局写本身~~ **P0-1** | P0-1 只补了「归还路径」（dispose 竞态不再永久顶掉别的插件），但「由本插件改写 DSH 全局搜索路由」这一架构事实仍在 | ✅ 已处理（Option B，2026-10-19）：`applyWebSearchSelection` 只在**空槽或自持**时接管；**外来 provider 占用时拒绝**（模块缺席，不顶替兄弟）。`web-search.ts` JSDoc + `raccoon-web.test.mjs` 全部 happy-path 用例从 foreign prior 改到 empty prior + 新增 refuse-case 断言。根子「凭什么由我改全局」仍开放 —— 真正解法是宿主提供 plugin-owned 选择面 |
 | ~~`types.ts` `HostDeps` 袋装两拨人~~ **已收窄** | 20 字段袋（台账原记 18）实际消费面极窄：`apply`(index.ts) 只读 4、`createProviderPublisher`(provider-publish.ts) 解构 7，其余是历史残留 | ✅ 已处理：拆成 `HostDeps`(4，apply 的 lazy-load 缝) + `ProviderPublisherDeps`(7，publisher 的 settings/llm/emit 袋)，删 10 个无消费者死字段（credential/onTrace/timeoutMs/headers/jwksEndpoint/encKeyId/baseUrl/cache/maxHops/requestTimeoutMs）；纯类型面、运行时零变化（字段本就全 optional、各有默认回落），typecheck-gate 双 config 0 错 |
 | `shared/wire.ts` 104 行 raccoon 专属 state 声明 | 搬去 `raccoon-status.ts` 或在 shared 内分组 | 纯搬文件收益低、风险中等，留到重构轮 |
 | token-store 十三包装 / 假依赖注入 | 拆分边界干净，收益被注释放大 | 同 P0 提案：**砍注释（48% 占比里大量「当初为什么没这么写」是 git/ADR 的活）比拆文件划算得多** |

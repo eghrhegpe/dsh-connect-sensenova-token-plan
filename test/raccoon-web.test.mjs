@@ -64,21 +64,33 @@ function makeWiring(overrides = {}) {
 try {
   // --- 1. applyWebSearchSelection ----------------------------------------
   {
+    // Option B: a FOREIGN-occupied global is refused — no takeover, the
+    // sibling keeps its working selection, and nothing is remembered to hand
+    // back. (Before B this block displaced "deepseek-official".)
     const web = makeWeb("deepseek-official");
     const state = webSearchSelection();
     applyWebSearchSelection(web, state, true);
-    check("enable takes the selection over and remembers the displaced id",
-      web.searchProviderId === PROVIDER_ID && state.owner === true && state.displaced === "deepseek-official" && state.preexisting === false, JSON.stringify({ web: web.searchProviderId, state }));
+    check("a foreign-occupied slot is refused: no takeover, sibling keeps its selection",
+      web.searchProviderId === "deepseek-official" && state.owner === false && state.displaced === undefined && state.preexisting === false, JSON.stringify({ web: web.searchProviderId, state }));
+
+    applyWebSearchSelection(web, state, false);
+    check("a hand-back with nothing owned is a no-op", web.searchProviderId === "deepseek-official" && state.owner === false, JSON.stringify({ id: web.searchProviderId, state }));
+  }
+
+  {
+    // An EMPTY slot IS taken over; its hand-back clears it back to unconfigured.
+    const web = makeWeb();
+    const state = webSearchSelection();
+    applyWebSearchSelection(web, state, true);
+    check("an empty slot is taken over and remembered as nothing displaced",
+      web.searchProviderId === PROVIDER_ID && state.owner === true && state.displaced === undefined && state.preexisting === false, JSON.stringify({ web: web.searchProviderId, state }));
 
     applyWebSearchSelection(web, state, true);
-    check("a re-assert keeps the remembered displaced id", state.displaced === "deepseek-official", JSON.stringify(state));
+    check("a re-assert on an empty slot keeps the owner with nothing displaced", state.owner === true && state.displaced === undefined, JSON.stringify(state));
 
     applyWebSearchSelection(web, state, false);
-    check("hand-back restores the displaced backend and clears owner",
-      web.searchProviderId === "deepseek-official" && state.owner === false, JSON.stringify({ id: web.searchProviderId, state }));
-
-    applyWebSearchSelection(web, state, false);
-    check("a non-owner hand-back is a no-op", web.searchProviderId === "deepseek-official", web.searchProviderId);
+    check("hand-back clears the empty slot we took over",
+      web.searchProviderId === undefined && state.owner === false, JSON.stringify({ id: web.searchProviderId, state }));
   }
 
   {
@@ -127,7 +139,7 @@ try {
     await registerWebSearchProvider({ get: (n) => (n === "web" ? noMethod : null) }, noMethodWiring);
     check("a web service without registerSearchProvider is treated as absent", noMethodWiring.webSearchRestore.current === null);
 
-    const web = makeWeb("deepseek-official");
+    const web = makeWeb();
     const wiring = makeWiring({
       settings: { webSearchEnabled: true },
       webSearchStore: { enabled: async () => true }
@@ -135,11 +147,23 @@ try {
     await registerWebSearchProvider({ get: (n) => (n === "web" ? web : null) }, wiring);
     check("on: one provider is registered under the raccoon id",
       web.registered.length === 1 && web.registered[0].id === PROVIDER_ID && web.registered[0].available() === true, JSON.stringify(web.registered.map((p) => p.id)));
-    check("on: the selection is taken over and the restore is armed",
+    check("on: an empty slot is taken over and the restore is armed",
       web.searchProviderId === PROVIDER_ID && typeof wiring.webSearchRestore.current === "function", web.searchProviderId);
 
     wiring.webSearchRestore.current();
-    check("the armed restore hands the selection back", web.searchProviderId === "deepseek-official", web.searchProviderId);
+    check("the armed restore hands the empty slot back to unconfigured", web.searchProviderId === undefined, web.searchProviderId);
+
+    // Option B: a foreign-occupied slot is refused — the module goes ABSENT
+    // (no provider registered, no restore armed) instead of displacing it.
+    const foreignWeb = makeWeb("deepseek-official");
+    const foreignWiring = makeWiring({
+      settings: { webSearchEnabled: true },
+      webSearchStore: { enabled: async () => true }
+    });
+    await registerWebSearchProvider({ get: (n) => (n === "web" ? foreignWeb : null) }, foreignWiring);
+    check("a foreign-occupied slot is refused: no provider, sibling keeps its selection, no restore",
+      foreignWeb.registered.length === 0 && foreignWeb.searchProviderId === "deepseek-official" && foreignWiring.webSearchRestore.current === null,
+      JSON.stringify({ registered: foreignWeb.registered.length, id: foreignWeb.searchProviderId }));
 
     // Panel OFF beats config ON (the adjudicator's job, but it must hold here).
     const panelOffWeb = makeWeb();
@@ -159,15 +183,17 @@ try {
     // `searchProviderId` stays hijacked by Raccoon after the plugin exits.
     // Under the verified-selection order the provider IS registered (the
     // selection landed), but the takeover is handed back and no restore arms.
-    const disposedWeb = makeWeb("deepseek-official");
+    // Option B: the race is exercised on an EMPTY slot (a foreign one is
+    // refused before any takeover, so the P0-1 hand-back path is unreachable).
+    const disposedWeb = makeWeb();
     const disposedWiring = makeWiring({
       settings: { webSearchEnabled: true },
       webSearchStore: { enabled: async () => true },
       publisher: { isDisposed: () => true }
     });
     await registerWebSearchProvider({ get: (n) => (n === "web" ? disposedWeb : null) }, disposedWiring);
-    check("disposed mid-flight: selection is NOT hijacked",
-      disposedWeb.searchProviderId === "deepseek-official", disposedWeb.searchProviderId);
+    check("disposed mid-flight: the empty slot is handed straight back (no hijack)",
+      disposedWeb.searchProviderId === undefined, disposedWeb.searchProviderId);
     check("disposed mid-flight: no unreachable restore is armed",
       disposedWiring.webSearchRestore.current === null, typeof disposedWiring.webSearchRestore.current);
   }
@@ -177,9 +203,11 @@ try {
   // swallows the selection write must leave NO provider registered —
   // "registered but unselected" is the live ambiguity, not a degradation.
   {
-    // A runtime whose setter silently swallows writes.
+    // A runtime whose setter silently swallows writes. Option B: the write is
+    // attempted on an EMPTY slot (a foreign slot would be refused instead);
+    // the swallowed write leaves the read-back empty → the module bails.
     const stubbornRegistered = [];
-    let stubbornId = "deepseek-official";
+    let stubbornId = undefined;
     const stubborn = {
       registered: stubbornRegistered,
       registerSearchProvider: (p) => stubbornRegistered.push(p),
@@ -194,7 +222,7 @@ try {
     });
     await registerWebSearchProvider({ get: (n) => (n === "web" ? stubborn : null) }, stubbornWiring);
     check("a swallowed selection write registers NOTHING (no registered-but-unselected ambiguity)",
-      stubbornRegistered.length === 0 && stubbornId === "deepseek-official",
+      stubbornRegistered.length === 0 && stubbornId === undefined,
       `registered=${stubbornRegistered.length} id=${stubbornId}`);
     check("the failed verification arms no restore",
       stubbornWiring.webSearchRestore.current === null);
@@ -218,9 +246,10 @@ try {
     check("a frozen runtime registers nothing either", frozenRegistered.length === 0, `registered=${frozenRegistered.length}`);
 
     // The happy path keeps its ORDER: the takeover write lands (and reads
-    // back) strictly before registerSearchProvider fires.
+    // back) strictly before registerSearchProvider fires. Option B: on an
+    // EMPTY slot (a foreign slot is refused, so there is no write to order).
     const events = [];
-    let liveId = "deepseek-official";
+    let liveId = undefined;
     const ordered = {
       registerSearchProvider: () => events.push("register"),
       get searchProviderId() { return liveId; },
@@ -234,7 +263,7 @@ try {
     check("selection is taken over and verified BEFORE registering (exactly select→register)",
       events.length === 2 && events[0] === "select" && events[1] === "register", JSON.stringify(events));
     check("the normal path registers exactly once and arms the restore",
-      typeof orderedWiring.webSearchRestore.current === "function" && liveId !== "deepseek-official");
+      typeof orderedWiring.webSearchRestore.current === "function" && liveId === PROVIDER_ID);
   }
 
   // --- 2b. the restore SLOT (reconcile / teardown) ------------------------
@@ -250,8 +279,8 @@ try {
   // default is false (that combination reads as ON, and the first draft of
   // this section got it backwards and armed instead of draining).
   {
-    // Flip ON: reconcile arms the slot and takes the selection over.
-    const onWeb = makeWeb("deepseek-official");
+    // Flip ON: reconcile arms the slot and takes the (empty) selection over.
+    const onWeb = makeWeb();
     const onWiring = makeWiring({
       settings: { webSearchEnabled: true },
       webSearchStore: { enabled: async () => true }
@@ -263,7 +292,7 @@ try {
 
     // Flip ON → OFF in-session: the panel store now says false.
     let switchOn = true;
-    const web = makeWeb("deepseek-official");
+    const web = makeWeb();
     const wiring = makeWiring({
       settings: { webSearchEnabled: true },
       webSearchStore: { enabled: async () => switchOn }
@@ -278,8 +307,8 @@ try {
     check("a flip to OFF drains the slot",
       wiring.webSearchRestore.current === null,
       `current=${String(wiring.webSearchRestore.current)}`);
-    check("a flip to OFF hands the displaced backend back",
-      web.searchProviderId === "deepseek-official", web.searchProviderId);
+    check("a flip to OFF clears the empty slot we took over",
+      web.searchProviderId === undefined, web.searchProviderId);
 
     // A second reconcile over the drained slot: nothing held, so nothing is
     // handed back and nothing throws. (Under the old shape this was the same
@@ -311,8 +340,8 @@ try {
     check("teardown still disposes the publisher and releases the provider",
       disposed === 1 && released === 1, `disposed=${disposed} released=${released}`);
 
-    // And the armed case: teardown hands the selection back exactly once.
-    const armedWeb = makeWeb("deepseek-official");
+    // And the armed case: teardown hands the (empty) selection back exactly once.
+    const armedWeb = makeWeb();
     const armedWiring = makeWiring({
       settings: { webSearchEnabled: true },
       webSearchStore: { enabled: async () => true }
@@ -323,8 +352,8 @@ try {
       publisher: { isDisposed: () => false, dispose: () => {} },
       releaseProvider: () => {}
     }), []);
-    check("teardown hands an armed selection back to the displaced backend",
-      armedWeb.searchProviderId === "deepseek-official", armedWeb.searchProviderId);
+    check("teardown clears an armed empty-slot takeover",
+      armedWeb.searchProviderId === undefined, armedWeb.searchProviderId);
   }
 
   // --- 3. raccoon-web-store ---------------------------------------------

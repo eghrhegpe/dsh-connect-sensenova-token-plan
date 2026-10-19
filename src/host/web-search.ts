@@ -72,6 +72,9 @@ export function webSearchSelection(): WebSearchSelection {
 /**
  * Reach one end of the web-search selection without trampling siblings.
  * Never throws: a hardened runtime shape degrades to registered-but-unselected.
+ * Option B (P1 backlog): take over only an EMPTY slot or one we already own;
+ * a FOREIGN provider's selection is refused, so the module goes ABSENT
+ * (caller registers nothing) rather than displacing the sibling.
  * @param {WebSearchRuntime} web - the `ctx.web` runtime.
  * @param {WebSearchSelection} state - the tracked selection.
  * @param {boolean} enable - take the selection over, or hand it back.
@@ -86,7 +89,14 @@ export function applyWebSearchSelection(web: WebSearchRuntime, state: WebSearchS
       }
       const prior = web.searchProviderId;
       state.preexisting = prior === RACCOON_SEARCH_PROVIDER_ID;
-      state.displaced = state.preexisting ? undefined : prior;
+      // Option B (P1 backlog "接管前检查占用、冲突则拒绝"): take over ONLY an
+      // empty slot or a selection we already own. A FOREIGN provider occupying
+      // the global is refused — we never displace a sibling's working
+      // selection. The caller's read-back below then judges the selection as
+      // not ours, so this whole module stays absent (no registration, no
+      // restore) rather than stomping the global `searchProviderId`.
+      if (!state.preexisting && prior !== undefined) return; // foreign-owned: refuse
+      state.displaced = undefined; // we only ever hold an empty slot or ours
       web.searchProviderId = RACCOON_SEARCH_PROVIDER_ID;
       state.owner = true;
       return;
@@ -120,7 +130,10 @@ export type WebSearchToolWiring = Pick<Wiring,
  * selection over when the switch is on. Off → the provider is never registered
  * and the selection is never touched; a late `web` service that finally
  * registers is picked up by {@link resolveServiceWithRetry}, never by a
- * duplicate registration.
+ * duplicate registration. Option B: the take-over only proceeds when the
+ * global slot is EMPTY or already ours — a foreign provider's selection is
+ * refused, so the module goes ABSENT (nothing registered) rather than
+ * displacing a sibling.
  * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context (reads `ctx.get("web")`).
  * @param {WebSearchToolWiring} wiring - the fields listed in that type.
  * @returns {Promise<void>}
