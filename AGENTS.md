@@ -146,6 +146,13 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
   或分两次提交（第二次专门补产物，提交信息写明是补漏）。
   复核姿势：`git status --short` 应为空；再 `git ls-files <产物目录>` 数一遍文件数，
   对得上构建输出才对。
+- ⚠️ **构建产物是整包的：`npm run build` 会把工作树里所有 `src/` 改动编进 `client.js` / `lib/`**，
+  包括别人还没提交的那半（2026-10-19 撞过：另一会话正在改 `src/client/cards.ts`，我 build 一次，
+  产物里就多出了对方的逻辑）。所以产物不属于任何单个会话，**路径限定提交隔离不了它**：
+  带上 `client.js` = 替对方提交了他的实现；不带 = 产物与源码不一致，build-freshness 门禁红。
+  处置顺序：build 前先看 `git status --short` 里有没有别人的 `src/` 改动 → **有就等对方提交再 build**
+  （这次就是这么解开的：对方先落了 `2783d55`，我再 build，产物才只含已提交的源码）；
+  实在等不了，build 后核对 `git diff -- client.js`，并在提交信息里写明产物含对方哪一处改动。
 
 ## 去哪查（docs/ 地图）
 
@@ -160,7 +167,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 查某条事实「当初从哪来」 / 要落盘新参照件 | `docs/REFERENCES.md`（`upstream/` 容器清单：来源 / 版本 / 许可 / 承重在哪） |
 | 加配置字段 / 改路由 | `docs/API.md`、`docs/SETUP.md`；提供方开关见 `docs/PROVIDER-HOT-RELOAD.md` |
 | 改测试前 | `docs/TESTING.md` |
-| 改任何代码前扫一眼 | `docs/PITFALLS.md`（42 条现象→根因→修法） |
+| 改任何代码前扫一眼 | `docs/PITFALLS.md`（44 条现象→根因→修法） |
 | **测试全绿或变异全被杀死，但其实没测到你改的那行** | `docs/PITFALLS.md` §41（`render-dom.test.mjs` 等套件 eval 的是产物根 `client.js`，改 `src/` 后必须先 `npm run build`） |
 | **测试只在深夜红、白天自己绿**（红与运行时刻有关）| `docs/PITFALLS.md` §42（期望值挂 `Date.now()`+相对偏移、形状取决于日历日归属的断言必在 23:00–24:00 窗内翻车；改用运行时刻不变的日历锚或冻时钟） |
 | **改文件时工具「什么都没做」**（`replace` 不匹配、`Edit` 反复失败、多半是行尾）| `docs/PITFALLS.md` §38（工作树 CRLF/LF 分布用 `git ls-files --eol` 自明，**别写死数字**——`i/lf` 与 `w/crlf` 各计一遍再下锚点；`replace` 后必须断言变化） |
@@ -175,7 +182,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 这条顺序是 2026-10-02 全库审查后的复盘：先建坐标系，再读代码。
 
 1. **先文档，后代码**：本文件 → `docs/README.md` 索引 → `docs/ARCHITECTURE.md` §5
-   （三条不变量 + §5.5 双上游裁定）→ `docs/PITFALLS.md` 42 条扫一遍。这些是判断
+   （三条不变量 + §5.5 双上游裁定）→ `docs/PITFALLS.md` 44 条扫一遍。这些是判断
    「代码对不对」的坐标系；跳过它们 = 把 `index.ts` 里已写清的接线重新验证一遍。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，
    「刚提交的文件」（尤其 `client/` 与 `sensenova-auth.ts`）最可能有新鲜改动或未

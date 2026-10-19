@@ -92,6 +92,12 @@ DSH 插件是一段在 **Host**（桌面版或 `dsh web`）进程内运行的代
 - **`dsh.client`** 声明 Client 半边跑在 `web` 平台、立即注入，并依赖两套 Host 提供的客户端模块（locale / renderer；`dsh-client-ui-layout` 已移出 `inject`，仅在 peerDependencies 中）。
 - **`peerDependencies`** 是 DSH 运行时（`@deepseek-ai/dsh`、`@deepseek-ai/dsh-credentials`、`react`，以及第三步注册 provider 用的 `@earendil-works/pi-ai` / `@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-llm-pi-ai`）——**由 Host 在运行时提供**，不在公共 registry 上。这与 `dsh-connect-qoder` 的处境完全一致：它的 `.npmrc` 里有 `legacy-peer-deps=true` 正是因为 peer 装不到。本插件同理，不要试图 `npm install` 这些 peer；但**它们必须能从插件文件所在目录解析到**（Node 的裸模块解析只向上找 `node_modules`）：npm 装进 profile 的插件天然满足，开发期 symlink/junction 进 profile 的检出不满足——见 [PITFALLS.md](./PITFALLS.md) §16。
 - **`exports`** 把 Host/Client 各半边与工具模块都暴露出来，`index.js` 的 `apply/name/inject` 是 Host 入口约定。
+- **卡面文案（`locale/<lang>.json` 的 `meta.title` / `meta.description`）是插件在市场上的门面**，三条规矩：
+  ① 标题写「做什么」（「商汤模型接入」「魔搭模型接入」），不写内部代号——「全家桶」对没读过
+  [ARCHITECTURE.md](./ARCHITECTURE.md) 的人是零信息；② 描述第一句**不复述标题**，直接说装上能得到什么：
+  接入能力在前，额度面板作为「不注册也能用」的退路；③ 卡内**不复述卡名**——外壳已经把标题、版本、
+  包名、描述印在插件区上方 32px 处（[PITFALLS.md](./PITFALLS.md) 第 43 条）。中英两份 locale 的
+  `title` / `description` 要成对写全，别只写一半。
 
 ---
 
