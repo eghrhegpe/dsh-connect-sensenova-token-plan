@@ -720,6 +720,13 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       firstFrame.join("\n"));
     check("the first frame does NOT show the sign-in form", !firstFrame.includes("auth.title"),
       firstFrame.join("\n"));
+    // The plugin's name is printed by the SHELL, 32px above this card's own
+    // section (`.detailSections`' margin-top). The card used to print it a
+    // second time in its header, so the same string appeared twice on one
+    // screen with a gap in between. `tt` is the identity here, so a surviving
+    // call site shows up as the literal key.
+    check("the card body does not restate the plugin name",
+      !firstFrame.includes("panel.title"), firstFrame.join("\n"));
     check("the tab bar renders before the first snapshot lands",
       firstFrame.includes("tab.quota") && firstFrame.includes("tab.api") && firstFrame.includes("tab.raccoon"),
       firstFrame.join("\n"));

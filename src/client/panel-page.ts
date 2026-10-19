@@ -121,7 +121,7 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
       // and the form never disagree about why.
       ? h("span", { style: S.chip, title: auth.error || guidance || "" }, tt("auth.needsLogin"))
       : h("span", { style: S.chip }, tt("auth.selfRenew"));
-  // The right-hand cluster of the pinned header, owned by the ACTIVE tab.
+  // The right-hand cluster of the TAB ROW, owned by the ACTIVE tab.
   // Extracted into a hook-free {@link HeaderStatus} so the render suite can
   // mount it directly and pin that quota-only copy (the renewal chip, the
   // stale-data banner) never reaches the api/raccoon tabs.
@@ -294,12 +294,27 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
   const body = h(
     "div",
     null,
+    // One row: the tab strip on the left, the ACTIVE tab's own status cluster
+    // on the right. The strip used to be alone (its right half empty) under a
+    // separate header bar that held nothing but this cluster — the bar is
+    // gone, and the cluster moved here, where the row had room for it. The
+    // row owns the rule under the tabs, so the cluster's 更新于 / 刷新 sit ON
+    // the row rather than on a line of their own.
     h(
       "div",
-      { style: S.tabBar, role: "tablist" },
-      h("button", { type: "button", role: "tab", "aria-selected": activeTab === "quota", style: { ...S.tab, ...(activeTab === "quota" ? S.tabActive : {}) }, onClick: () => setActiveTab("quota") }, tt("tab.quota")),
-      h("button", { type: "button", role: "tab", "aria-selected": activeTab === "api", style: { ...S.tab, ...(activeTab === "api" ? S.tabActive : {}) }, onClick: () => setActiveTab("api") }, tt("tab.api")),
-      h("button", { type: "button", role: "tab", "aria-selected": activeTab === "raccoon", style: { ...S.tab, ...(activeTab === "raccoon" ? S.tabActive : {}) }, onClick: () => setActiveTab("raccoon") }, tt("tab.raccoon"))
+      { style: S.tabRow },
+      h(
+        "div",
+        { style: S.tabBar, role: "tablist" },
+        h("button", { type: "button", role: "tab", "aria-selected": activeTab === "quota", style: { ...S.tab, ...(activeTab === "quota" ? S.tabActive : {}) }, onClick: () => setActiveTab("quota") }, tt("tab.quota")),
+        h("button", { type: "button", role: "tab", "aria-selected": activeTab === "api", style: { ...S.tab, ...(activeTab === "api" ? S.tabActive : {}) }, onClick: () => setActiveTab("api") }, tt("tab.api")),
+        h("button", { type: "button", role: "tab", "aria-selected": activeTab === "raccoon", style: { ...S.tab, ...(activeTab === "raccoon" ? S.tabActive : {}) }, onClick: () => setActiveTab("raccoon") }, tt("tab.raccoon"))
+      ),
+      h("span", { style: S.spacer }),
+      // The cluster stays outside the tablist: `role="tablist"` may only
+      // contain tabs, and 刷新 / 更新于 are not tabs.
+      headerStatus,
+      onClose ? h("button", { type: "button", style: { ...S.button, alignSelf: "center" }, onClick: () => onClose() }, tt("panel.back")) : null
     ),
     // The shape-drift banner belongs with the daily reading: it warns
     // about the numbers themselves, not about the wiring below.
@@ -316,30 +331,12 @@ export function PanelPage({ onClose, tt, localeSubscribe }: {
   return h(
     "div",
     { style: S.page, "data-dsh-plugin": PANEL_ID },
-    // The bar is pinned (flex:none); everything below scrolls inside
-    // `S.scroll` instead of being clipped by the shell's center column. The
-    // bar is a SHELL: a plugin-identity title on the left, and the ACTIVE
-    // tab's own status cluster on the right — never a quota-only label that
-    // pretends to be the global title.
-    h(
-      "div",
-      { style: S.headerBar },
-      h(
-        "div",
-        { style: S.header },
-        h("h1", { style: S.title }, tt("panel.title")),
-        h("span", { style: S.spacer }),
-        // The right side is the active tab's cluster (更新于 / chip / banner /
-        // 刷新), built above so each tab owns only its own facts.
-        headerStatus,
-        onClose ? h("button", { type: "button", style: S.button, onClick: () => onClose() }, tt("panel.back")) : null
-      )
-    ),
-    h(
-      "div",
-      { style: S.scroll },
-      h("div", { style: S.content }, body)
-    )
+    // No header row and no padding of our own: the shell prints the plugin
+    // name, version, package id and description 32px above this section
+    // (`.detailSections`' margin-top) and closes the page with 48px, so the
+    // card contributes layout only where it has something to say. The status
+    // cluster rides the tab row, which had the room.
+    h("div", { style: S.scroll }, body)
   );
 }
 

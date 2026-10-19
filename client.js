@@ -33,7 +33,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	var zh, en;
 	var init_i18n = __esmMin((() => {
 		zh = {
-			"panel.title": "商汤 Token Plan 接入全家桶",
 			"panel.back": "返回会话",
 			"panel.refresh": "刷新",
 			"panel.updated": "更新于 {time}",
@@ -242,7 +241,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.error": "小浣熊操作失败：{error}"
 		};
 		en = {
-			"panel.title": "SenseNova Token Plan Connect",
 			"panel.back": "Back to conversation",
 			"panel.refresh": "Refresh",
 			"panel.updated": "Updated {time}",
@@ -756,30 +754,22 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				fontSize: 14,
 				lineHeight: "22px"
 			},
-			headerBar: {
-				flex: "none",
-				background: "var(--dsw-alias-bg-base)",
-				position: "relative",
-				zIndex: 1
-			},
-			header: {
-				display: "flex",
-				alignItems: "center",
-				gap: 12,
-				padding: "16px 0 12px"
-			},
 			scroll: {
 				flex: 1,
 				minHeight: 0,
 				overflowY: "auto",
 				overflowX: "hidden"
 			},
-			content: { padding: "6px 0 56px" },
-			tabBar: {
+			tabRow: {
 				display: "flex",
-				gap: 4,
+				alignItems: "stretch",
+				gap: 12,
 				borderBottom: "1px solid var(--dsw-alias-border-l1)",
 				marginBottom: 4
+			},
+			tabBar: {
+				display: "flex",
+				gap: 4
 			},
 			tab: {
 				appearance: "none",
@@ -790,18 +780,14 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				fontSize: 13,
 				color: "var(--dsw-alias-label-secondary)",
 				cursor: "pointer",
-				outline: "none"
+				outline: "none",
+				display: "flex",
+				alignItems: "center"
 			},
 			tabActive: {
 				color: "var(--dsw-alias-label-primary)",
 				fontWeight: 600,
 				borderBottom: `2px solid ${BRAND}`
-			},
-			title: {
-				margin: 0,
-				fontSize: 20,
-				fontWeight: 600,
-				lineHeight: "28px"
 			},
 			updated: {
 				color: "var(--dsw-alias-label-secondary)",
@@ -813,7 +799,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				alignItems: "center",
 				gap: 12,
 				flexWrap: "wrap",
-				justifyContent: "flex-end"
+				justifyContent: "flex-end",
+				alignSelf: "center"
 			},
 			button: BUTTON,
 			sectionTitle: {
@@ -2647,7 +2634,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		}, h("div", { style: {
 			...tone.fill,
 			width: `${pct ?? 0}%`
-		} })), h("div", { style: S.quotaTop }, h("span", { style: S.quotaUsed }, `${tt("pool.used")} ${count(used)} / ${count(limit)}`), typeof remaining === "number" && remaining > 0 && resetAt ? h("span", { style: S.quotaReset }, format(tt("pool.reset"), { time: when(resetAt) })) : null));
+		} })), h("div", { style: S.quotaTop }, h("span", { style: S.quotaUsed }, limit > 0 ? `${tt("pool.used")} ${count(used)} / ${count(limit)}` : `—`), typeof remaining === "number" && remaining > 0 && resetAt ? h("span", { style: S.quotaReset }, format(tt("pool.reset"), { time: when(resetAt) })) : null));
 	}
 	/**
 	* One pool card. The open state is intentionally tiny: name, type chip,
@@ -4060,7 +4047,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			tt,
 			onReportStatus: setRaccoonStatus
 		})));
-		const body = h("div", null, h("div", {
+		const body = h("div", null, h("div", { style: S.tabRow }, h("div", {
 			style: S.tabBar,
 			role: "tablist"
 		}, h("button", {
@@ -4090,18 +4077,21 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				...activeTab === "raccoon" ? S.tabActive : {}
 			},
 			onClick: () => setActiveTab("raccoon")
-		}, tt("tab.raccoon"))), activeTab === "quota" && data && shapeWarnings.length > 0 ? h("div", {
+		}, tt("tab.raccoon"))), h("span", { style: S.spacer }), headerStatus, onClose ? h("button", {
+			type: "button",
+			style: {
+				...S.button,
+				alignSelf: "center"
+			},
+			onClick: () => onClose()
+		}, tt("panel.back")) : null), activeTab === "quota" && data && shapeWarnings.length > 0 ? h("div", {
 			style: S.formError,
 			role: "status"
 		}, format(tt("panel.shapeDrift"), { detail: shapeWarnings.map((entry) => `${tt("shape.api")} ${entry.api} ${tt("shape.missing")} ${entry.missing}`).join("; ") })) : null, activeTab === "quota" ? quotaBody() : activeTab === "raccoon" ? raccoonBody() : apiBody());
 		return h("div", {
 			style: S.page,
 			"data-dsh-plugin": PANEL_ID
-		}, h("div", { style: S.headerBar }, h("div", { style: S.header }, h("h1", { style: S.title }, tt("panel.title")), h("span", { style: S.spacer }), headerStatus, onClose ? h("button", {
-			type: "button",
-			style: S.button,
-			onClick: () => onClose()
-		}, tt("panel.back")) : null)), h("div", { style: S.scroll }, h("div", { style: S.content }, body)));
+		}, h("div", { style: S.scroll }, body));
 	}
 	/**
 	* The right-hand cluster of the pinned header.

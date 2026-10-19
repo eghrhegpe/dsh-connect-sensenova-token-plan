@@ -9,22 +9,19 @@ import type { Tt } from "./runtime.ts";
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  // NOTE: there is deliberately NO `entry.label` key here. It used to carry the
-  // Plugins-page card name ("积分面板" → "商汤接入") and had no call site for
-  // two releases: the Plugins page names the card from `package.json` +
-  // `locale/<lang>.json` (PITFALLS §27), not from this dictionary, and the
-  // in-card heading reads `panel.title` below. It was maintained in two
-  // languages with no consumer. If the card name ever needs to change, the one
-  // source is `locale/zh.json`'s `meta.title`.
-  // The in-card page title: the plugin identity, never a quota-only label. With
-  // the pinned header demoted to a shell whose right side is filled by the
-  // ACTIVE tab, a title repeating "积分面板" would misdescribe two of three tabs.
+  // NOTE: there is deliberately NO `entry.label` key here, and no
+  // `panel.title` either. Both used to carry the plugin's name inside the
+  // card; neither was the right home for it. The Plugins page names the card
+  // from `locale/<lang>.json`'s `meta.title` (PITFALLS §27) and prints it
+  // directly above the plugin's own section — 32px above, per the shell's
+  // `.detailSections`. An in-card heading therefore printed the SAME string
+  // twice on one screen, which read as one header split in half. The name has
+  // exactly one source now: `locale/<lang>.json`'s `meta.title`.
   //
-  // It reads the SAME string as the Plugins-page card (`locale/<lang>.json`'s
-  // `meta.title`): both are on screen at once once the card is opened, and
-  // `test/panel.test.mjs` pins the pair, so change this and the locale file
-  // together.
-  "panel.title": "商汤 Token Plan 接入全家桶",
+  // `test/render.test.mjs` pins the absence (the rendered card must not
+  // contain `panel.title`), because a name that lives in two places drifts
+  // the moment either side is edited — the pair used to be kept equal by a
+  // test, which kept the duplication alive rather than questioning it.
   "panel.back": "返回会话",
   "panel.refresh": "刷新",
   "panel.updated": "更新于 {time}",
@@ -284,7 +281,6 @@ export const zh = {
 
 /** English dictionary, mirroring every zh key. */
 export const en: typeof zh = {
-  "panel.title": "SenseNova Token Plan Connect",
   "panel.back": "Back to conversation",
   "panel.refresh": "Refresh",
   "panel.updated": "Updated {time}",

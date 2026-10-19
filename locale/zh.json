@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "商汤 Token Plan 接入全家桶",
-    "description": "商汤接入的 DSH Plugins 页全家桶：Token Plan 积分额度面板（额度窗口、每模型消耗、令牌自动续期），可选的模型 provider 注册与出图路由，外加 Host 侧 429 自愈。"
+    "title": "商汤模型接入",
+    "description": "把商汤（SenseNova）的语言模型与出图工具接入 DSH：模型清单随 Key 自动刷新、看图模型自动带图片输入，注册即可用（默认关）；不注册也能看 Token Plan 额度面板——积分池、每模型消耗、令牌自动续期，还能扫码接入小浣熊；限频时自动退避重试，不会误判为额度耗尽。"
   }
 }

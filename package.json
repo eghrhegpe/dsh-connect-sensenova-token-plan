@@ -3,7 +3,7 @@
   "displayName": "DSH Connect SenseNova Token Plan",
   "icon": "./icon.svg",
   "version": "0.8.0",
-  "description": "SenseNova connect family bundle for the Harness Web UI: Token Plan credit panel (per-pool quota windows, per-model consumption, self-renewing console token) plus optional provider registration that brings SenseNova models into DSH conversation, with host-side 429 rate-limit self-healing.",
+  "description": "Bring SenseNova into DSH: opt-in registration of SenseNova language models and the draw tool as an OpenAI-compatible provider (model list follows your key, vision models take images automatically), a Token Plan quota panel — credit pools, per-model consumption, self-renewing console token — that works without registering, QR-code sign-in for Xiaohuanxiong, and host-side 429 back-off so a rate limit never reads as an exhausted quota.",
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",

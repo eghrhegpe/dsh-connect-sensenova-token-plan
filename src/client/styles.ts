@@ -16,33 +16,46 @@ const BRAND = "var(--sensenova-brand, #6C5CE7)";
 const BUTTON = { height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--dsw-alias-border-l2)", background: "var(--dsw-alias-bg-layer-2)", color: "var(--dsw-alias-label-primary)", fontSize: 13, cursor: "pointer" };
 export const S = {
   // The config card is embedded inside the Plugins page
-  // (`plugins.bundle.config` slot). The host page provides outer margins,
-  // so this root only needs flex layout and overflow clipping: the pinned
-  // header stays flex-none and `scroll` (flex:1, min-height:0) takes the
-  // overflow. Without this chain the card grows past its container and
-  // the host silently truncates everything below the fold.
+  // (`plugins.bundle.config` slot). The host page provides the outer rhythm —
+  // 32px between its meta block and this section, 48px at the page bottom —
+  // so this root adds NO padding of its own. It used to: 24/32/56, back when
+  // the panel WAS the page; the horizontal 32 was stripped when the card moved
+  // into the slot (commit "remove redundant padding from config card"), the
+  // vertical 56 survived as a fossil and stacked on top of the host's 48, and
+  // a later 16px was added for a header bar that no longer exists. Both are
+  // gone: the gap you see above the tabs is the host's 32px alone.
+  //
+  // `scroll` stays for the case where the slot hands us a DEFINITE height (the
+  // host's `.detailSection` is auto-height today, so this container simply
+  // grows with its content and the host's page does the scrolling). Without
+  // the flex chain, a definite-height slot truncates everything below the fold.
   page: { flex: "1 1 auto", height: "100%", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", color: "var(--dsw-alias-label-primary)", fontSize: 14, lineHeight: "22px" },
-  headerBar: { flex: "none", background: "var(--dsw-alias-bg-base)", position: "relative", zIndex: 1 },
-  header: { display: "flex", alignItems: "center", gap: 12, padding: "16px 0 12px" },
   scroll: { flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" },
-  content: { padding: "6px 0 56px" },
+  // ONE row carries both the tab strip and the active tab's status cluster.
+  // The strip alone left the right half of the row empty, and a separate
+  // header row above it only repeated that emptiness. The row owns the rule
+  // under the tabs; `alignItems: stretch` keeps each tab's 2px active
+  // underline sitting exactly on that rule even when the cluster wraps.
+  tabRow: { display: "flex", alignItems: "stretch", gap: 12, borderBottom: "1px solid var(--dsw-alias-border-l1)", marginBottom: 4 },
   // Two fixed perspectives — daily quota reading vs. one-off API wiring —
   // so the setup cards stop crowding the numbers the panel exists for.
-  tabBar: { display: "flex", gap: 4, borderBottom: "1px solid var(--dsw-alias-border-l1)", marginBottom: 4 },
+  tabBar: { display: "flex", gap: 4 },
   // `outline: none` because the shell stamps its own white focus ring on
   // every clicked button — a second "active" language that fought this one:
   // the raccoon tab showed a clean underline while the two other tabs wore
   // a white box. The underline + weight below IS the active state, visible
   // without a ring; keyboard users keep the aria-selected semantics.
-  tab: { appearance: "none", background: "none", border: "none", borderBottom: "2px solid transparent", padding: "8px 12px", fontSize: 13, color: "var(--dsw-alias-label-secondary)", cursor: "pointer", outline: "none" },
+  // `flex` + `alignItems` center the LABEL inside the stretched tab.
+  tab: { appearance: "none", background: "none", border: "none", borderBottom: "2px solid transparent", padding: "8px 12px", fontSize: 13, color: "var(--dsw-alias-label-secondary)", cursor: "pointer", outline: "none", display: "flex", alignItems: "center" },
   tabActive: { color: "var(--dsw-alias-label-primary)", fontWeight: 600, borderBottom: `2px solid ${BRAND}` },
-  title: { margin: 0, fontSize: 20, fontWeight: 600, lineHeight: "28px" },
   updated: { color: "var(--dsw-alias-label-secondary)", fontSize: 12 },
   spacer: { flex: 1 },
-  // The active tab's status cluster on the right of the pinned header: a
-  // compact row (更新于 + chip + banner + 刷新) that stays put while the body
-  // scrolls. `inline-flex` lets it shrink instead of pushing the title off.
-  cluster: { display: "inline-flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" },
+  // The active tab's status cluster on the right of the tab row: a compact
+  // row (更新于 + chip + banner + 刷新) that sits beside the tabs instead of
+  // on a header row of its own. `alignSelf: center` keeps it off the rule
+  // the tab underlines sit on; `inline-flex` lets it shrink rather than
+  // pushing the tabs.
+  cluster: { display: "inline-flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end", alignSelf: "center" },
   button: BUTTON,
   sectionTitle: { margin: "22px 0 10px", fontSize: 13, fontWeight: 600, color: "var(--dsw-alias-label-secondary)" },
   // Content sections are workbuddy-style collapsible cards: a bordered

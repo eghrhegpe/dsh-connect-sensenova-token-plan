@@ -1,5 +1,6 @@
 {
   "meta": {
-    "title": "SenseNova Token Plan Connect"
+    "title": "SenseNova Model Access",
+    "description": "Bring SenseNova's language models and draw tool into DSH: the model list follows your key, vision models take images automatically, usable the moment it is registered (off by default); the Token Plan quota panel — credit pools, per-model consumption, self-renewing console token — works without registering, and Xiaohuanxiong signs in by QR code; rate-limit hits back off on their own instead of reading as an exhausted quota."
   }
 }

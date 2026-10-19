@@ -360,26 +360,31 @@ const healthy = {
   check("every statically-visible dictionary key is read by something", unused.length === 0,
     unused.join(", "));
 
-  // The plugin's NAME is stated in three places, and two of them sit on the
-  // same screen: the Plugins-page card title comes from `locale/<lang>.json`'s
-  // `meta.title` (the shell's own lookup, PITFALLS §27), while the heading
-  // inside the opened card comes from the panel dictionary's `panel.title`.
-  // Nothing joined them, so the card could read 「商汤 Token Plan 接入全家桶」
-  // on one surface and 「商汤接入」 on the other with every test green — two
-  // names for one plugin, differing by a whole tab's worth of description. The
-  // pair is pinned here so the two surfaces cannot drift apart silently.
+  // The plugin's NAME has exactly one home: `locale/<lang>.json`'s
+  // `meta.title` (the shell's own lookup, PITFALLS §27). It used to be stated
+  // twice on one screen — the card title from the locale file, plus an in-card
+  // `h1` reading `panel.title` — 32px apart, because the shell's
+  // `.detailSections` puts a fixed margin between its meta block and the
+  // plugin's own section. The old pin here kept the two strings EQUAL, which
+  // is what kept the duplication alive: two names for one plugin was treated
+  // as a drift risk instead of a design mistake.
+  //
+  // The name is locale-only now, so what gets pinned is its ABSENCE from the
+  // dictionary. `test/render.test.mjs` pins the other half — that the rendered
+  // card does not ask for `panel.title` — because a deleted key can be
+  // re-added by anyone who wants a heading.
   //
   // `package.json`'s `displayName` is deliberately NOT part of this: that one
   // names the package in npm/marketplace listings (English by convention) and
   // is not shown on either card surface.
   const localeZh = JSON.parse(await readFile(new URL("../locale/zh.json", import.meta.url), "utf8"));
   const localeEn = JSON.parse(await readFile(new URL("../locale/en.json", import.meta.url), "utf8"));
-  check("the zh card name and the in-card title agree",
-    localeZh?.meta?.title === dictionaries.zh["panel.title"],
-    `locale=${localeZh?.meta?.title} panel=${dictionaries.zh["panel.title"]}`);
-  check("the en card name and the in-card title agree",
-    localeEn?.meta?.title === dictionaries.en["panel.title"],
-    `locale=${localeEn?.meta?.title} panel=${dictionaries.en["panel.title"]}`);
+  check("the card name is stated in the locale file",
+    Boolean(localeZh?.meta?.title) && Boolean(localeEn?.meta?.title),
+    `zh=${localeZh?.meta?.title} en=${localeEn?.meta?.title}`);
+  check("the dictionaries do not restate the card name",
+    dictionaries.zh["panel.title"] === undefined && dictionaries.en["panel.title"] === undefined,
+    `zh=${dictionaries.zh["panel.title"]} en=${dictionaries.en["panel.title"]}`);
 }
 
 // === F4. the panel's rhythm comes from the Host, not from a literal ======
