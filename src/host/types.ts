@@ -22,21 +22,44 @@ export type { CodeValue } from "./codes.ts";
 import type { CodeValue } from "./codes.ts";
 
 /**
- * The dependency bag injected into the Host modules. Every field is optional:
- * each consumer falls back to a local default when a field is absent, so a
- * module keeps working even if `index.ts` does not wire a given capability.
- * Peer-typed members (`logger`, `emit`, …) use loose types because the
- * matching `@deepseek-ai/*` packages ship no declarations in this repo.
+ * The two dependency bags the Host wires down. `HostDeps` is what `apply()`
+ * (index.ts) accepts: the mount-time lazy-load seams, all test-only.
+ * `ProviderPublisherDeps` is what `createProviderPublisher()` accepts: the
+ * settings/llm/emitter/credential bag the publisher resolves lazily.
+ *
+ * Splitting the former 20-field `HostDeps` into the two bags each of its real
+ * consumers actually reads — 4 here, 7 there — drops the ten historical fields
+ * no module ever read (`credential`, `onTrace`, `timeoutMs`, `headers`,
+ * `jwksEndpoint`, `encKeyId`, `baseUrl`, `cache`, `maxHops`,
+ * `requestTimeoutMs`): a caller stopped using them but the bag kept carrying
+ * them, so they widened the contract without doing any work. Narrowing is a
+ * pure type-surface change — the runtime already defaulted every one of them.
+ *
+ * Every field is optional: each consumer falls back to a local default when a
+ * field is absent, so a module keeps working even if `index.ts` does not wire
+ * a given capability. Peer-typed members (`logger`, `emit`, …) use loose types
+ * because the matching `@deepseek-ai/*` packages ship no declarations here.
  */
+/** The mount-time lazy-load seams `apply()` accepts (test-only; defaults cover production). */
 export interface HostDeps {
+  /** Lazy-load the LLM adapter module (peer `dsh-llm-pi-ai`). */
+  loadAdapterModule?: any;
+  /** Lazy-load the Raccoon LLM adapter module (ROADMAP §6.1 second provider). */
+  loadRaccoonAdapterModule?: any;
+  /** Lazy-load the tools module. */
+  loadToolsModule?: any;
+  /** Host webserver fetch used by the draw route. */
+  drawFetch?: (...args: any[]) => Promise<any>;
+}
+
+/** The bag `createProviderPublisher()` accepts; each field resolves lazily. */
+export interface ProviderPublisherDeps {
   /** Resolved plugin settings object. */
   settings?: any;
   /** Toggle that flips the sidebar panel on/off from the Host. */
   panelSwitch?: any;
   /** Lazy-load the LLM adapter module (peer `dsh-llm-pi-ai`). */
   loadAdapterModule?: any;
-  /** Lazy-load the Raccoon LLM adapter module (ROADMAP §6.1 second provider). */
-  loadRaccoonAdapterModule?: any;
   /** Resolve the registered LLM instance. */
   getLlm?: any;
   /** Resolve the API key from the credentials service. */
@@ -45,30 +68,6 @@ export interface HostDeps {
   emit?: (...args: any[]) => void;
   /** Cordis logger (loose: peer has no declarations here). */
   logger?: any;
-  /** Lazy-load the tools module. */
-  loadToolsModule?: any;
-  /** Host webserver fetch used by the draw route. */
-  drawFetch?: (...args: any[]) => Promise<any>;
-  /** Login-trace sink used by the auth half. */
-  onTrace?: (...args: any[]) => void;
-  /** The resolved credential record. */
-  credential?: any;
-  /** Per-request timeout in milliseconds. */
-  timeoutMs?: number;
-  /** Extra request headers. */
-  headers?: Record<string, string>;
-  /** JWKS endpoint override. */
-  jwksEndpoint?: string;
-  /** Encryption key id used by the JWE sealer. */
-  encKeyId?: string;
-  /** Base URL override for the LLM adapter / provider config. */
-  baseUrl?: string;
-  /** Shared JWKS cache. */
-  cache?: any;
-  /** Max redirect hops for the login trace. */
-  maxHops?: number;
-  /** Login request timeout in milliseconds (config alias). */
-  requestTimeoutMs?: number;
 }
 
 /** Options every file-backed store accepts. */
