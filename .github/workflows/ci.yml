@@ -122,8 +122,76 @@ jobs:
       # test/peer-roots.mjs now falls back to. Installed GLOBALLY on purpose:
       # a global install does not read this repo's manifest, so npm is free to
       # pull the runtime's own peer closure.
+      #
+      # That global install measured 33-41 s on ubuntu-latest and unpacks the
+      # SAME tree every run (the CLI's version comes from the registry's
+      # `latest` tag, not from this repo), so the steps below give npm's global
+      # prefix a cacheable home and let actions/cache carry the tree between
+      # runs; the install then only happens on a cache miss. Keyed on the
+      # resolved version, so a new CLI release misses by construction instead
+      # of restoring a tree whose `@deepseek-ai/dsh-base` no longer matches.
+      #
+      # NPM_CONFIG_PREFIX goes through `$GITHUB_ENV` rather than an `.npmrc`
+      # because the environment variable outranks the config file, and
+      # `$PREFIX/bin` goes onto PATH in the same step: `test/e2e-gate.mjs`
+      # treats the CLI as present only when BOTH `dsh --version` runs AND
+      # `npm root -g` resolves a tree carrying `@deepseek-ai/dsh-base`, so
+      # moving the prefix without the shim splits exactly those two (the
+      # gate's own "usual cause" line) and turns its hard gate into a SKIP.
+      - name: Point npm's global prefix at a cacheable directory
+        run: |
+          PREFIX="$RUNNER_TEMP/dsh-global"
+          # Created up front so a cache miss does not end with actions/cache
+          # warning that the save path never existed.
+          mkdir -p "$PREFIX/bin"
+          echo "NPM_CONFIG_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve the host version the peer suites load
+        id: dsh-version
+        run: echo "version=$(npm view @deepseek-ai/dsh version)" >> "$GITHUB_OUTPUT"
+
+      # restore/save are split rather than the combined `actions/cache`: the
+      # combined action saves whatever the path holds at job teardown, so a run
+      # whose install FAILED would persist an empty directory under this key
+      # and every later run for the same CLI version would restore it forever
+      # (a saved key is never overwritten). Saving only when the anchor below
+      # was actually found keeps a bad run from poisoning the key.
+      - name: Restore the cached Host runtime
+        id: dsh-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/dsh-global
+          key: dsh-runtime-${{ runner.os }}-node${{ matrix.node-version }}-${{ steps.dsh-version.outputs.version }}
+
+      # The guard asks the question the suites actually ask — does the anchor
+      # `peer-roots.mjs` checks exist — instead of trusting `cache-hit`. A
+      # restored-but-truncated tree would report a hit and then fail every peer
+      # suite for a reason that looks like a code regression.
       - name: Provide the Host runtime the peer suites resolve from
-        run: npm install -g @deepseek-ai/dsh || echo "dsh CLI not installable here; the peer suites will fail loudly (this gate must not pass without them)"
+        id: dsh-runtime
+        run: |
+          echo "npm root -g -> $(npm root -g)"
+          ANCHOR="$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-base"
+          if node -e "process.exit(require('node:fs').existsSync(process.argv[1]) ? 0 : 1)" "$ANCHOR"; then
+            echo "cached runtime already present: $ANCHOR"
+          else
+            npm install -g @deepseek-ai/dsh || echo "dsh CLI not installable here; the peer suites will fail loudly (this gate must not pass without them)"
+          fi
+          # Only this decides whether the cache is written: an anchor still
+          # missing after the install means there is nothing worth saving.
+          if node -e "process.exit(require('node:fs').existsSync(process.argv[1]) ? 0 : 1)" "$ANCHOR"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::the runtime anchor is still missing after install; the cache will not be saved"
+          fi
+
+      - name: Save the Host runtime for the next run
+        if: steps.dsh-cache.outputs.cache-hit != 'true' && steps.dsh-runtime.outputs.present == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/dsh-global
+          key: ${{ steps.dsh-cache.outputs.cache-primary-key }}
       - name: Run the offline suites
         run: node test/run-all.mjs --skip=e2e-gate
 
@@ -151,12 +219,60 @@ jobs:
       # fail when the Host assembly is broken, and a run that never boots a Host
       # proved nothing. So the install and the executable are verified HERE, and
       # the job goes red when either fails; only a dsh that runs reaches the gate.
-      - name: Provide the dsh CLI (fail loudly if it cannot run)
+      #
+      # Same cached prefix as the offline job (see the long note there), but the
+      # guard differs by one clause: here the `dsh` SHIM is load-bearing, because
+      # this is the job that actually spawns it. A cache hit therefore only
+      # counts when the anchor exists AND `dsh --version` runs — otherwise the
+      # restore would have "succeeded" while handing the gate the exact
+      # split-prefix condition it skips on. The `node22` in the key is literal on
+      # purpose: it matches the offline job's node-22 leg, so the two jobs share
+      # one entry instead of unpacking the tree twice.
+      - name: Point npm's global prefix at a cacheable directory
         run: |
-          npm install -g @deepseek-ai/dsh || { echo "dsh CLI install failed — the e2e gate cannot run; failing loudly"; exit 1; }
+          PREFIX="$RUNNER_TEMP/dsh-global"
+          mkdir -p "$PREFIX/bin"
+          echo "NPM_CONFIG_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve the host version this job boots
+        id: dsh-version
+        run: echo "version=$(npm view @deepseek-ai/dsh version)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the cached DSH CLI
+        id: dsh-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/dsh-global
+          key: dsh-runtime-${{ runner.os }}-node22-${{ steps.dsh-version.outputs.version }}
+
+      - name: Provide the dsh CLI (fail loudly if it cannot run)
+        id: dsh-runtime
+        run: |
+          echo "npm root -g -> $(npm root -g)"
+          ANCHOR="$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-base"
+          have_runtime() { node -e "process.exit(require('node:fs').existsSync(process.argv[1]) ? 0 : 1)" "$ANCHOR"; }
+          if have_runtime && dsh --version >/dev/null 2>&1; then
+            echo "cached CLI already present and runnable: $(command -v dsh)"
+          else
+            npm install -g @deepseek-ai/dsh || { echo "dsh CLI install failed — the e2e gate cannot run; failing loudly"; exit 1; }
+          fi
           # Proof of a RUNNABLE CLI, not just a successful install: a broken shim
-          # must also fail this job instead of letting e2e-gate SKIP green.
+          # must also fail this job instead of letting e2e-gate SKIP green. It
+          # runs on the cache-hit path too, because that path never installed
+          # anything — the shim's presence is exactly what the cache had to
+          # preserve.
           dsh --version >/dev/null || { echo "dsh CLI does not run — the e2e gate cannot run; failing loudly"; exit 1; }
+          # Cache only a CLI the gate would really use: saving a broken one would
+          # keep this job red on every later run for a stale reason.
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+      - name: Save the DSH CLI for the next run
+        if: steps.dsh-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/dsh-global
+          key: ${{ steps.dsh-cache.outputs.cache-primary-key }}
       - name: Run the end-to-end suite (hard gate)
         run: node test/e2e-gate.mjs
 
