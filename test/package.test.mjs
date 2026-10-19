@@ -31,7 +31,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { SUITES, CI_FLAGS } from "./suites.mjs";
+import { SUITES, CI_FLAGS, EXEMPT } from "./suites.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -195,11 +195,12 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
 // only agree by invoking the runner that reads the roster.
 //
 // The one deliberate exception is the network tier: `live-jwks.test.mjs` is
-// NOT a default-run check (a green offline run must not reach the platform),
-// so it is exempted here and pinned EXCLUDED by its own header.
+// NOT a default-run check (a green offline run must not reach the platform).
+// `EXEMPT` is IMPORTED from `suites.mjs` rather than re-declared here: a local
+// copy would be one more place to forget when the exempt set grows, and the
+// whole point of this block is that the roster has exactly one home.
 {
   const TEST_DIR = join(root, "test");
-  const EXEMPT = new Set(["live-jwks.test.mjs"]);
 
   const disk = readdirSync(TEST_DIR)
     .filter((name) => name.endsWith(".test.mjs"))
@@ -244,10 +245,18 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
     ciText.includes(`test/run-all.mjs ${CI_FLAGS}`),
     `expected \`node test/run-all.mjs ${CI_FLAGS}\` in ci.yml`);
 
-  // The exempted network suite must STAY out of the default gate — if someone
-  // wires it in, the pin fails rather than letting a green run reach the platform.
-  check("live-jwks.test.mjs stays out of the default gate", !rosterSet.has("live-jwks.test.mjs"),
-    "the network tier must not be a default-run check");
+  // Every EXEMPT entry is pinned in BOTH directions: it must exist on disk (an
+  // exemption naming a deleted file is a ghost that hides a removal, and the
+  // disk⊆roster loop above cannot see it because EXEMPT filtered it out) and it
+  // must stay out of the default gate (wiring it in would let a green offline
+  // run reach the platform). Derived from the imported set, so a second
+  // exemption is covered the moment it is declared in suites.mjs.
+  for (const name of EXEMPT) {
+    check(`exempt suite ${name} exists on disk`, existsSync(join(TEST_DIR, name)),
+      "the exempt set names a file that is not in test/");
+    check(`${name} stays out of the default gate`, !rosterSet.has(name),
+      "the network tier must not be a default-run check");
+  }
 
   // The commit-floor gate is wired the same way it should stay: a plain script
   // (not a suite, not in the roster above) that BOTH `npm run commit:lint` and
