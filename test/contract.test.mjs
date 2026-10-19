@@ -38,6 +38,19 @@ const contract = JSON.parse(
 );
 const baseUrl = contract.meta.baseUrl;
 
+// The pin is load-bearing DATA, and this suite's coverage is a function of it:
+// most of the checks below are `for (const model of contract.models)`, so a
+// truncated pin does not FAIL them — it DELETES them, and the survivors still
+// print a green summary. Emptying the array today trips two id-specific checks
+// further down, so the suite is red — but by accident, and only for a total
+// wipe; dropping some models shrinks coverage silently. The header above states
+// the shape ("9 catalog models"); pin it here the way every other scan in this
+// repo pins its input. Raising these floors is a deliberate act when re-pinning.
+check("the contract pin carries the probed catalog", contract.models.length >= 9, `${contract.models.length} model(s)`);
+check("the contract pin carries the chat models",
+  contract.models.filter((m) => m.chat === true).length >= 7,
+  `${contract.models.filter((m) => m.chat === true).length} chat model(s)`);
+
 
 // --- 1. catalog entry shape from the contract ----------------------------
 // The contract's `models` entries are the normalized catalog rows
