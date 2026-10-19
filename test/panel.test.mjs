@@ -286,9 +286,18 @@ const healthy = {
       if (!PRIMITIVES.has(match[1])) inline.add(match[1]);
     }
   }
+  // Reaching the input is a SEPARATE assertion from what was found in it.
+  // `inline.size === 0` is satisfied by a regex that no longer matches anything
+  // exactly as well as by compliance, and this is the one scan in this file
+  // without a companion floor (the tt-site scan has `sites >= 100`, the ladder
+  // `>= 5`, the key sources `>= 2`, the open-default map its own guard). A bulk
+  // rename out of `.ts` would shrink the input with nothing going red.
+  check("the component scan reached the client sources",
+    components.length >= 20,
+    `${components.length} component(s) scanned`);
   check("no wire code is compared inline in a component",
     inline.size === 0,
-    inline.size > 0 ? `inline: ${[...inline].sort().join(", ")}` : "checked: none");
+    inline.size > 0 ? `inline: ${[...inline].sort().join(", ")}` : `checked: none of ${components.length}`);
 }
 
 // === F3. the two dictionaries carry the same keys ========================
