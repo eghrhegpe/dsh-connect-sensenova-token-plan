@@ -24,6 +24,10 @@
  *   3. Raccoon-vs-Token-Plan cross-boundary clones are called out in the
  *      failure message even when whitelisted, so the reviewer sees the
  *      invariant that is being spent.
+ *   4. A whitelisted pair that no longer appears — the files were renamed, or
+ *      the duplication was genuinely removed — fails as well. Otherwise an
+ *      entry rots into a silent no-op: its cap is never enforced, while it
+ *      still counts toward the aggregate cap below.
  *
  * Not a `*.test.mjs`: like typecheck-gate/build-gate/e2e-gate it is a gate
  * script in `test/suites.mjs`'s roster, so `npm test` (the run-all runner)
@@ -111,6 +115,7 @@ try {
   check(`jscpd scanned the tree (report format intact)`, Array.isArray(report.duplicates), "jscpd-report.json missing or malformed");
 
   const remaining = [...clones];
+  const live = new Set();
   for (const entry of WHITELIST) {
     const pairKey = (clone) => {
       const pair = [clone.a, clone.b].sort().join(" <-> ");
@@ -127,6 +132,18 @@ try {
         ? `now ${worst} lines (cap ${entry.maxLines}) — the Token Plan ↔ raccoon isolation is being re-spent; extract instead of copying`
         : `now ${worst} lines (cap ${entry.maxLines})`
     );
+    // An entry that matches NOTHING is a silent no-op: its cap is never
+    // enforced (the line above passes on `matched.length === 0` alone), yet it
+    // still counts toward the aggregate cap. A pair that is renamed or whose
+    // duplication is removed should RETIRE its entry — the closed-set
+    // discipline cuts both ways: a new member is a decision, and so is
+    // dropping one.
+    check(
+      `whitelisted pair ${entry.files.join(" <-> ")} still exists`,
+      matched.length > 0,
+      "this entry matches no clone — the files were renamed or the duplication was removed; update the paths or delete the entry"
+    );
+    if (matched.length > 0) live.add(entry);
   }
 
   for (const clone of remaining) {
@@ -140,7 +157,10 @@ try {
     );
   }
   // And the aggregate must not silently grow within whitelisted pairs either.
-  check(`total clone count stays within the whitelist (${WHITELIST.length})`, clones.length <= WHITELIST.length, `found ${clones.length}`);
+  // Count only the entries that actually matched: a stale entry must not buy
+  // the aggregate an extra clone's worth of headroom.
+  check(`total clone count stays within the whitelist (${live.size})`, clones.length <= live.size,
+    `found ${clones.length} clone(s), ${live.size} live entr${live.size === 1 ? "y" : "ies"}`);
 } finally {
   rmSync(outDir, { recursive: true, force: true });
 }
