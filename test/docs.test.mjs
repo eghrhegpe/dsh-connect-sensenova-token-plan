@@ -14,9 +14,15 @@
 //   变更日志分工（15）：CHANGELOG 只记公开行为变化——不写实现坐标（src/、test/）、
 //                    测试工程词（变异 / 断言级 / 套件 / fixture）与 commit hash；
 //                    版本导语 ≤ 90 字（先给结论）。
+//   索引与真源闭合（16）：TESTING.md §2 的套件表必须与 test/suites.mjs 的名册
+//                    双向闭合——新套件登了名册却忘了登表，是纯人肉步骤、不会自己变红。
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname, extname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// 名册是机器真源，TESTING.md §2 的套件表是人读索引——检查 16 把两者钉在一起。
+// 这里 import 的是纯数据模块（无副作用、无 peer），docs.test.mjs 因此仍是干净检出可跑。
+import { SUITES, EXEMPT } from "./suites.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const fails = [];
@@ -763,6 +769,43 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
     }
   }
   note(`${rel} 0.5.0 起 ${windowed} 个版本受分工纪律约束（导语超限 ${longIntro} 处、实现坐标 / 测试词 ${jargon} 处）`);
+}
+
+// 16) TESTING.md §2 的套件表 ↔ 门禁名册双向闭合
+//
+// 「新套件登记进名册，却没人记得登进 TESTING.md 的表」是一个纯人肉步骤：
+// silent-catch.test.mjs 落地时就是靠人记得补了一行（当时还发现表里 4 处硬编码
+// 项数早已腐掉）。名册是机器真源（test/suites.mjs，`npm run test:list` 自证），
+// 表是人读索引——两者漂移时，文档会先于代码过期，而这类缺陷不会自己变红。
+// 与 package.test.mjs 的 disk ⊆ roster 同款：闭合集合必须双向断言。
+{
+  const rel = "docs/TESTING.md";
+  const text = readFileSync(join(ROOT, rel), "utf8");
+  const rows = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\|\s*`test\/([^`]+)`\s*\|/);
+    if (m) rows.add(m[1]);
+  }
+  // 表里允许出现「不在默认名册」的行：EXEMPT（联网档，默认不得进链）与两个
+  // live 脚本——它们是 npm script 的便利入口，刻意不进默认门禁。
+  const allowedExtra = new Set([...EXEMPT, "live-contract.mjs", "live-raccoon.mjs"]);
+  const inRoster = new Set(SUITES.map((s) => s.name));
+  let missing = 0;
+  for (const s of SUITES) {
+    if (rows.has(s.name)) continue;
+    missing++;
+    bad(`${rel}: 名册里的 ${s.name}（kind=${s.kind}）没有出现在 §2 的套件表里——新增套件要连文档一起登记（名册是机器真源，表是人读索引，漂移时文档先过期）`);
+  }
+  let stale = 0;
+  for (const r of rows) {
+    if (inRoster.has(r) || allowedExtra.has(r)) continue;
+    stale++;
+    bad(`${rel}: 表里的 ${r} 既不在门禁名册里、也不在豁免集里——套件被退役或改名后，这一行会静默腐烂`);
+  }
+  // 下限：表被整体删掉时（rows 塌空）「僵尸行 0」绝不能读成合规——真源里
+  // 名册永远非空，缺行会逐条红，但先把扫描本身够没够到输入说清楚。
+  if (rows.size < 20) bad(`${rel}: 只解析到 ${rows.size} 行套件表——扫描没够到输入（表被删或被改写），这一轮什么都没验到`);
+  note(`${rel} 套件表 ↔ 名册：名册 ${SUITES.length} 项 / 表内 ${rows.size} 行（缺 ${missing}、僵尸 ${stale}）`);
 }
 
 if (fails.length) {
