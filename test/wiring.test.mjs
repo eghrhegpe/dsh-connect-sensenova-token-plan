@@ -40,6 +40,7 @@ import { createFileRaccoonStore } from "../src/host/raccoon-switch-store.ts";
 import { RACCOON_CREDENTIAL_REF, serializeRaccoonCredential } from "../src/host/raccoon-store.ts";
 import { RACCOON_PROVIDER_ID } from "../src/host/raccoon-models.ts";
 import { results, check, fail, finish } from "./harness.mjs";
+import * as fakes from "./fakes.mjs";
 
 /** After the peers are found: mounting must not write into the real Home. */
 const restoreStateDir = isolateStateDir();
@@ -63,29 +64,7 @@ function makeWebServer() {
   };
 }
 
-/** A credentials service with the same surface the store uses. */
-function makeCredentials() {
-  const records = new Map();
-  const refs = new Map();
-  return {
-    records,
-    refs,
-    async readRecord(k) { return records.get(k); },
-    async modifyRecord(k, mutate) {
-      const next = await mutate(records.get(k));
-      if (next === undefined) return records.get(k);
-      records.set(k, next);
-      return next;
-    },
-    async deleteRecord(k) { records.delete(k); },
-    async resolve(ref) {
-      const v = refs.get(ref);
-      return typeof v === "string" && v !== "" ? { value: v, source: "file" } : undefined;
-    },
-    async set(ref, value) { refs.set(ref, value); },
-    async unset(ref) { refs.delete(ref); }
-  };
-}
+const makeCredentials = () => fakes.fakeCredentials({});
 
 /** A fake llm registration service recording the provider pair lifecycle. */
 function makeLlm() {

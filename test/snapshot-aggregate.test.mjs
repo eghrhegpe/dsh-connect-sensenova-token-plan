@@ -30,6 +30,7 @@ import { buildSnapshotBody } from "../src/host/snapshot-aggregate.ts";
 import { resolveSettings } from "../src/host/host-config.ts";
 import { catalogSignature, syncSignaturesAfterPublish, quotaSignatureOf } from "../src/host/provider-publish.ts";
 import { results, check, finishVerbose } from "./harness.mjs";
+import { stubFetch } from "./fakes.mjs";
 
 
 const { settings } = resolveSettings({});
@@ -58,26 +59,6 @@ const HEALTHY_POOL = {
 
 const TREND_OK = { series: [], models: [] };
 
-/** Minimal `fetch` stub: routes by URL, records what was asked for. */
-function stubFetch(routes) {
-  const asked = [];
-  const previous = globalThis.fetch;
-  globalThis.fetch = async (input) => {
-    const url = String(typeof input === "string" ? input : (input?.url ?? input));
-    asked.push(url);
-    const match = Object.entries(routes).find(([fragment]) => url.includes(fragment));
-    if (match === undefined) throw new Error(`unstubbed request: ${url}`);
-    const [fragment, behaviour] = match;
-    if (typeof behaviour === "function") return behaviour(url, fragment);
-    return {
-      ok: true,
-      status: 200,
-      json: async () => behaviour,
-      text: async () => JSON.stringify(behaviour)
-    };
-  };
-  return { asked, restore: () => { globalThis.fetch = previous; } };
-}
 
 /**
  * Assembles the aggregator's parameter bag.

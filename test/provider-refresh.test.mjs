@@ -26,6 +26,7 @@ import { armProviderRefresher } from "../src/host/provider-refresh.ts";
 import { resolveSettings } from "../src/host/host-config.ts";
 import { catalogSignature } from "../src/host/provider-publish.ts";
 import { results, check, finishVerbose } from "./harness.mjs";
+import { stubFetch } from "./fakes.mjs";
 
 
 const EXHAUSTED_POOL = {
@@ -74,22 +75,6 @@ function fakeTimers() {
   };
 }
 
-/** Stub fetch that records which routes were asked and can be gated. */
-function stubFetch(routes, { hold } = {}) {
-  const asked = [];
-  const previous = globalThis.fetch;
-  globalThis.fetch = async (input) => {
-    const url = String(typeof input === "string" ? input : (input?.url ?? input));
-    asked.push(url);
-    if (hold !== undefined) await hold;
-    const match = Object.entries(routes).find(([fragment]) => url.includes(fragment));
-    if (match === undefined) throw new Error(`unstubbed request: ${url}`);
-    const behaviour = match[1];
-    if (typeof behaviour === "function") return behaviour(url);
-    return { ok: true, status: 200, json: async () => behaviour, text: async () => JSON.stringify(behaviour) };
-  };
-  return { asked, restore: () => { globalThis.fetch = previous; } };
-}
 
 /** The wiring bag the refresher reads — only the fields it actually touches. */
 function makeWiring({ registerProvider = true, panelEnabled = null, storeThrows = false, gate = null } = {}) {

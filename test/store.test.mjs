@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { results, check, fail, finish } from "./harness.mjs";
+import * as fakes from "./fakes.mjs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -54,45 +55,7 @@ const grant = (accessToken, refreshToken, expiresIn) => ({
   payload: { version: 1, accessToken, refreshToken, expiresAt: Date.now() + expiresIn * 1000 }
 });
 
-/** A fake credentials service covering both halves of the seam. */
-function fakeCredentials(initial, opts = {}) {
-  const records = new Map();
-  const refs = new Map(Object.entries(opts.refs ?? {}));
-  if (initial) records.set(KEY, initial);
-  const calls = { modify: 0, concurrentModify: 0, inModify: 0 };
-  return {
-    calls, records, refs,
-    async readRecord(k) { return records.get(k); },
-    async modifyRecord(k, mutate) {
-      calls.modify += 1;
-      calls.inModify += 1;
-      if (calls.inModify > 1) calls.concurrentModify += 1;
-      try {
-        await new Promise((r) => setTimeout(r, 5));
-        const next = await mutate(records.get(k));
-        if (next === undefined) return records.get(k);
-        records.set(k, next);
-        return next;
-      } finally {
-        calls.inModify -= 1;
-      }
-    },
-    async deleteRecord(k) { records.delete(k); },
-    async resolve(ref) {
-      const envValue = opts.env?.[ref];
-      if (typeof envValue === "string" && envValue.length > 0) return { value: envValue, source: "env" };
-      const value = refs.get(ref);
-      return typeof value === "string" && value.length > 0 ? { value, source: "file" } : undefined;
-    },
-    async set(ref, value) {
-      if (opts.readOnly?.includes(ref)) {
-        throw new Error(`credentials-local: "${ref}" is supplied read-only by the launching environment, so set would be shadowed`);
-      }
-      refs.set(ref, value);
-    },
-    async unset(ref) { refs.delete(ref); }
-  };
-}
+const fakeCredentials = (initial, opts = {}) => fakes.fakeCredentials({ key: KEY, delayMs: 5, ...opts, initial });
 
 /** A token-endpoint stub issuing a distinct pair per exchange. */
 /** The state the last authorization request issued, echoed into a success redirect. */

@@ -18,6 +18,7 @@ import { RACCOON_CREDENTIAL_REF, serializeRaccoonCredential } from "../src/host/
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { results, check, fail, finish } from "./harness.mjs";
+import * as fakes from "./fakes.mjs";
 
 /** Installed before anything runs, so an unstubbed call cannot escape. */
 const releaseNetworkGuard = installNetworkGuard();
@@ -70,29 +71,7 @@ const storedGrant = (accessToken, refreshToken, expiresIn) => ({
   payload: { version: 1, accessToken, refreshToken, expiresAt: Date.now() + expiresIn * 1000 }
 });
 
-/** A fake credentials service covering both halves of the seam. */
-function makeCredentials(initial, opts = {}) {
-  const records = new Map();
-  const refs = new Map(Object.entries(opts.refs ?? {}));
-  if (initial) records.set(RECORD_KEY, initial);
-  return {
-    records, refs,
-    async readRecord(k) { return records.get(k); },
-    async modifyRecord(k, mutate) {
-      const next = await mutate(records.get(k));
-      if (next === undefined) return records.get(k);
-      records.set(k, next);
-      return next;
-    },
-    async deleteRecord(k) { records.delete(k); },
-    async resolve(ref) {
-      const v = refs.get(ref);
-      return typeof v === "string" && v.length > 0 ? { value: v, source: "file" } : undefined;
-    },
-    async set(ref, value) { refs.set(ref, value); },
-    async unset(ref) { refs.delete(ref); }
-  };
-}
+const makeCredentials = (initial, opts = {}) => fakes.fakeCredentials({ key: RECORD_KEY, ...opts, initial });
 
 function makeRequest(extra = {}) {
   return { method: "GET", headers: { host: "127.0.0.1:19387", ...extra } };
