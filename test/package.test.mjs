@@ -32,6 +32,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { SUITES, CI_FLAGS, EXEMPT } from "./suites.mjs";
+import { ARTIFACT_CONSUMERS, staleArtifactReason } from "./artifact-freshness.mjs";
 import { results, check, finish } from "./harness.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -338,6 +339,38 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
   check("a cancelled selection in run mode exits red",
     emptyRun.status === 1 && /no suite matched/.test(emptyRun.stderr ?? ""),
     `status=${emptyRun.status} stderr=${(emptyRun.stderr ?? "").slice(0, 80)}`);
+}
+
+// --- 8. the artifact gate: which suites it guards, and what it decides ------
+// The runner skips an artifact-consuming suite when its bundle predates the
+// uncommitted sources (PITFALLS §41). Nothing about that is exercised by a
+// clean full run — the gate is deliberately inert there — so pin the two halves
+// that CAN rot silently: the consumer set (a second eval'ing suite would run
+// ungated) and the verdict itself.
+{
+  const consumers = [...ARTIFACT_CONSUMERS].sort();
+  // Derive the truth from the roster instead of trusting the list: "which
+  // suites eval the bundle" is a fact about test/, not an opinion.
+  const scanned = readdirSync(join(root, "test"))
+    .filter((name) => name.endsWith(".test.mjs"))
+    .filter((name) => /win\.eval\(|new Function\(/.test(readFileSync(join(root, "test", name), "utf8")))
+    .sort();
+  check("the artifact-consumer set is exactly the suites that eval the bundle",
+    consumers.join(",") === scanned.join(","), `set=[${consumers.join(",")}] scanned=[${scanned.join(",")}]`);
+  check("the artifact-consumer set is not empty", consumers.length > 0, `${consumers.length} entry(ies)`);
+
+  const absent = staleArtifactReason({ exists: false, dirty: true, srcMtime: 9, artifactMtime: 1 });
+  check("a missing bundle is named as a missing input",
+    /absent/.test(absent) && /npm run build/.test(absent), absent);
+  const clean = staleArtifactReason({ exists: true, dirty: false, srcMtime: 9, artifactMtime: 1 });
+  check("a committed tree is left to build-gate", clean === "", clean);
+  const noGit = staleArtifactReason({ exists: true, dirty: null, srcMtime: 9, artifactMtime: 1 });
+  check("an unusable git decides nothing rather than guessing", noGit === "", noGit);
+  const stale = staleArtifactReason({ exists: true, dirty: true, srcMtime: 9, artifactMtime: 1 });
+  check("an unbuilt edit is named as a stale bundle",
+    /would verify the previous build/.test(stale), stale);
+  const built = staleArtifactReason({ exists: true, dirty: true, srcMtime: 1, artifactMtime: 9 });
+  check("edit-then-build passes: the mtime tiebreak is what keeps it usable", built === "", built);
 }
 
 finish();

@@ -50,11 +50,14 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { SUITES } from "./suites.mjs";
+import { ARTIFACT_CONSUMERS, staleArtifactReason } from "./artifact-freshness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, "..");
 
 /** Parse `--only=` / `--skip=` / `--list` out of argv. */
 const argv = process.argv.slice(2);
@@ -99,6 +102,59 @@ if (selected.length === 0) {
   process.exit(1);
 }
 
+// ---------------------------------------------------------------------------
+// The on-disk-artifact gate.
+//
+// `render-dom.test.mjs` EVALUATES the root `client.js`, not `src/client/**`:
+// its verdict is about whatever bundle is on disk. That is the point of the
+// suite — it is the only one that proves the SHIPPED bytes render — but it also
+// means a run that includes it and NOT `build-gate.mjs` can come back green
+// about code that is no longer in the tree (PITFALLS §41: ten source mutations
+// survived a green run).
+//
+// `build-gate.mjs` is the authority on freshness — it rebuilds in place and
+// compares byte-for-byte — so any selection containing it is already covered
+// and this gate stays out of the way. Full `npm test` and CI never see it fire,
+// which is what keeps a fresh checkout from skipping DOM coverage it should run.
+//
+// When `build-gate` is absent this SKIPS rather than fails: "you did not
+// rebuild" is a missing input, not a broken assertion. A selection that skips
+// entirely still exits 1 through the all-skipped guard below, so a lone
+// `--only=render-dom` on an unbuilt tree cannot read as a pass.
+//
+// The verdict itself lives in ./artifact-freshness.mjs — a judgement that only
+// ever runs inside a spawn is a judgement nobody tests — so this file merely
+// gathers the facts it decides on.
+// ---------------------------------------------------------------------------
+const buildGateSelected = selected.some((suite) => suite.name === "build-gate.mjs");
+
+/** The newest mtime (ms) of any file under `dir`, recursively (0 if empty). */
+function newestMtime(dir) {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const child = join(dir, entry.name);
+    if (entry.isDirectory()) newest = Math.max(newest, newestMtime(child));
+    else if (entry.isFile()) newest = Math.max(newest, statSync(child).mtimeMs);
+  }
+  return newest;
+}
+
+/** Gather the ambient facts {@link staleArtifactReason} decides on. */
+function probeArtifact() {
+  const artifact = join(root, "client.js");
+  const exists = existsSync(artifact);
+  const status = spawnSync("git", ["status", "--porcelain", "--", "src"], { cwd: root, encoding: "utf8" });
+  // No usable git (a source tarball, a stripped PATH) is passed through as
+  // `null` — "cannot tell" — rather than as a clean tree.
+  const dirty = status.error || status.status !== 0 ? null : String(status.stdout ?? "").trim() !== "";
+  return {
+    exists,
+    dirty,
+    srcMtime: exists ? newestMtime(join(root, "src")) : 0,
+    artifactMtime: exists ? statSync(artifact).mtimeMs : 0,
+  };
+}
+
 const failures = [];
 const skips = [];
 let totalMs = 0;
@@ -109,6 +165,18 @@ console.log(`(every suite reports; the exit code is the AND of all verdicts — 
 for (const [index, suite] of selected.entries()) {
   const label = `${String(index + 1).padStart(2, " ")}/${selected.length} ${suite.name}`;
   process.stdout.write(`── ${label}\n`);
+
+  // Refuse to grade the bundle against sources it predates — see the artifact
+  // gate above. Checked before the spawn so nothing runs at all.
+  if (ARTIFACT_CONSUMERS.has(suite.name) && !buildGateSelected) {
+    const artifactReason = staleArtifactReason(probeArtifact());
+    if (artifactReason !== "") {
+      skips.push({ suite: suite.name, reason: artifactReason });
+      console.log(`   ⊘ ${suite.name} SKIPPED — ${artifactReason}\n`);
+      continue;
+    }
+  }
+
   const startedAt = Date.now();
   // stdout is piped (not inherited) for exactly one reason: a suite that skips
   // itself announces `[skip] <name> — <reason>` there, and the summary below
