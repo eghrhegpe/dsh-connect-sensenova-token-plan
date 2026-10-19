@@ -266,6 +266,25 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
   check("the CI commit-floor step still calls the linter", /node test\/commit-lint\.mjs/.test(ciText),
     "ci.yml no longer runs the commit floor");
 
+  // The allowed commit types live in TWO homes: the linter's own TYPES list
+  // (which now drives both of its regexes AND the hint it prints) and the
+  // sentence in docs/CONTRIBUTING.md §1 that documents the rule to humans. A
+  // doc cannot import a constant, so pin the two against each other — the same
+  // treatment the duplication threshold below gets.
+  try {
+    const lintSrc = readFileSync(join(root, "test", "commit-lint.mjs"), "utf8");
+    const contributing = readFileSync(join(root, "docs", "CONTRIBUTING.md"), "utf8");
+    const codeTypes = (lintSrc.match(/const TYPES = \[([^\]]*)\]/)?.[1] ?? "")
+      .match(/"([a-z]+)"/g)?.map((s) => s.slice(1, -1)) ?? [];
+    const docTypes = (contributing.match(/必须有 `type:` 前缀（([^）]*)）/)?.[1] ?? "")
+      .match(/`([a-z]+)`/g)?.map((s) => s.slice(1, -1)) ?? [];
+    check("the allowed commit types are one list in both homes",
+      codeTypes.length > 0 && codeTypes.join(",") === docTypes.join(","),
+      `commit-lint.mjs=[${codeTypes.join(",")}] CONTRIBUTING.md=[${docTypes.join(",")}]`);
+  } catch (error) {
+    check("the allowed commit types are one list in both homes", false, String(error?.message ?? error));
+  }
+
   // The duplication gate's scan threshold lives in THREE places that used to
   // hold each other up by comment alone: .jscpd.json (minTokens), the gate's
   // own MIN_TOKENS constant, and the interactive `duplicate-check` npm script.

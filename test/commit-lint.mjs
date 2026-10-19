@@ -28,10 +28,15 @@
  */
 import { spawnSync } from "node:child_process";
 
-const TYPES = new Set([
-  "feat", "fix", "docs", "test", "chore", "style", "refactor", "perf", "build", "ci",
-]);
-const PREFIX_RE = /^(feat|fix|docs|test|chore|style|refactor|perf|build|ci)(\([a-z0-9][a-z0-9._-]*\))?:\s+\S/;
+// One source for the allowed types: both regexes below and the operator-facing
+// hint in `lintSubject` derive from it, so a type cannot be added to one and
+// forgotten in the other. (Before this the alternation was written out twice —
+// and the `TYPES` set that was meant to be that one source was never read at
+// all: a list nobody consults cannot notice when it drifts.)
+const TYPES = ["feat", "fix", "docs", "test", "chore", "style", "refactor", "perf", "build", "ci"];
+const TYPE_ALT = TYPES.join("|");
+const PREFIX_RE = new RegExp(`^(?:${TYPE_ALT})(?:\\([a-z0-9][a-z0-9._-]*\\))?:\\s+\\S`);
+const STRIP_PREFIX_RE = new RegExp(`^(?:${TYPE_ALT})(?:\\([a-z0-9][a-z0-9._-]*\\))?:`);
 const BARE_PATH_RE = /^[A-Za-z0-9_@./\\-]+\.(mjs|cjs|js|ts|tsx|jsx|json|yml|yaml|md|toml|png|svg|lock)$/i;
 const MIN_SUBJECT = 4; // characters after the prefix
 
@@ -66,9 +71,9 @@ function lintSubject(subject) {
   if (subject.includes("\\")) return "subject contains a backslash (Windows path?)";
   if (BARE_PATH_RE.test(subject)) return "subject is a bare filename — say what changed and why";
   if (!PREFIX_RE.test(subject)) {
-    return "subject needs a `type:` prefix (feat/fix/docs/test/chore/style/refactor/perf/build/ci), optional `type(scope):`)";
+    return `subject needs a \`type:\` prefix (${TYPES.join("/")}), optional \`type(scope):\`)`;
   }
-  const after = subject.replace(/^(feat|fix|docs|test|chore|style|refactor|perf|build|ci)(\([a-z0-9][a-z0-9._-]*\))?:/, "").trim();
+  const after = subject.replace(STRIP_PREFIX_RE, "").trim();
   if (after.length < MIN_SUBJECT) return `subject too thin after the prefix (>= ${MIN_SUBJECT} chars)`;
   return null;
 }
