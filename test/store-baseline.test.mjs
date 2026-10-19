@@ -15,9 +15,11 @@
  * standing in for persistence across a "restart", a virtual clock): no
  * network, no peer packages, no wall clock — runnable on a clean checkout.
  *
- * Regenerate intentionally, with the reason for the behavior change in the
- * commit message:
- *   UPDATE_BASELINE=1 node test/store-baseline.test.mjs
+ * Regenerate intentionally. The reason for the behavior change must be passed
+ * AND carried into the commit message — a reasonless regeneration is an
+ * unreviewable frozen-surface change, so the gate refuses it:
+ *   UPDATE_BASELINE=1 BASELINE_REASON="<one line: what drifted and why>" \
+ *     node test/store-baseline.test.mjs
  */
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -610,9 +612,21 @@ if (frameCount !== FROZEN_FRAME_COUNT) {
   process.exit(1);
 }
 if (process.env.UPDATE_BASELINE === "1") {
+  const reason = (process.env.BASELINE_REASON ?? "").trim();
+  if (reason.length < 12) {
+    console.error(
+      "UPDATE_BASELINE=1 refuses to regenerate the frozen token-store baseline without a reason " +
+        "(a frozen-surface change is only reviewable with one).\n" +
+        'Re-run with the reason:  UPDATE_BASELINE=1 BASELINE_REASON="<one line: what drifted and why>" ' +
+        "node test/store-baseline.test.mjs\n" +
+        "Carry that reason into the commit message."
+    );
+    process.exit(1);
+  }
   mkdirSync(BASELINE_DIR, { recursive: true });
   writeFileSync(BASELINE, `${JSON.stringify(actual, null, 2)}\n`);
   console.log(`baseline (re)written: ${defs.length} scenarios -> ${BASELINE}`);
+  console.log(`reason: ${reason}`);
   process.exit(0);
 }
 
@@ -620,8 +634,8 @@ let expected;
 try {
   expected = JSON.parse(readFileSync(BASELINE, "utf8"));
 } catch (e) {
-  console.error(`cannot read frozen baseline ${BASELINE}: ${e.message}`);
-  console.error("generate it once with: UPDATE_BASELINE=1 node test/store-baseline.test.mjs");
+  console.error('cannot read frozen baseline ' + BASELINE + ': ' + e.message);
+  console.error('generate it once with: UPDATE_BASELINE=1 BASELINE_REASON="<why>" node test/store-baseline.test.mjs');
   process.exit(1);
 }
 
@@ -635,7 +649,7 @@ if (diffs.length === 0) {
 console.error("token-store behavior DRIFTED from the frozen baseline:");
 for (const d of diffs) console.error(`  ${d}`);
 console.error(
-  "\nIf this change is intentional, review every frame and regenerate:\n" +
-    "  UPDATE_BASELINE=1 node test/store-baseline.test.mjs"
+  "\nIf this change is intentional, review every frame and regenerate (record the reason):\n" +
+    '  UPDATE_BASELINE=1 BASELINE_REASON="<one line: what drifted and why>" node test/store-baseline.test.mjs'
 );
 process.exit(1);

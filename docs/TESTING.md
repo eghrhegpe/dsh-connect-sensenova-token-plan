@@ -106,10 +106,12 @@ npm run test:peer-contract # 仅 peer-contract.test.mjs（peer 可达时追加�
 
 - **驱动方式**：只走公开 API（`getToken`/`invalidate`/`saveAccount`/`forgetAccount`/`state`），注入脚本化 `auth`、内存凭据服务、共享内存节流存储（第二个 store 实例模拟「重启」）、虚拟时钟；无网络、无 peer、无墙钟，干净检出可跑。
 - **已钉死的阴沟语义**：`not_configured` 绝不写节流；parked 跨重启零新登录；本地退避 60s→120s 翻倍且关窗后 attempt 保留；平台声明的 2h 窗口不被 30 分钟本地帽截断；并发轮询单飞（恰好一次 refresh）；compare-and-set 慢者赢（并发旋转的 grant 不被覆盖）；`refresh_rejected` 无账号回收 vs 有账号重登的岔路；被拒令牌不复播；旧命名空间 grant/节流一次性收养（节流只收养第一条、第二条等 `clearThrottle` 扫）；密码不落盘（`autoRecoverArmed` 只报布尔）；无凭据服务降级并标记 `ephemeral`。
-- **门禁纪律**：拆分后该套件必须零漂移。有意改动 store 行为时，先逐帧评审、再显式重生成，并在提交信息写明原因：
+- **门禁纪律**：拆分后该套件必须零漂移。有意改动 store 行为时，先逐帧评审、再显式重生成，并在提交信息写明原因。重生成必须显式带一句原因（`BASELINE_REASON`），缺则 `UPDATE_BASELINE=1` 直接 `exit 1`——把「先停下来说」变成机械闸，不留无因可审的冻结面改动：
 
   ```powershell
-  $env:UPDATE_BASELINE='1'; node test/store-baseline.test.mjs; Remove-Item Env:UPDATE_BASELINE
+  $env:UPDATE_BASELINE='1'; $env:BASELINE_REASON='…一句：这次行为改动是什么、为什么…'
+  node test/store-baseline.test.mjs
+  Remove-Item Env:UPDATE_BASELINE, Env:BASELINE_REASON
   ```
 
   重生成不是「让测试变绿」的手段。套件与基线同进 `npm test`（= `test/run-all.mjs`）与 CI 离线 job（三方名册由 `package.test.mjs` 钉住）。
