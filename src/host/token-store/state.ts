@@ -3,9 +3,9 @@
  * around `token-store.ts` stands on.
  *
  * `token-store.ts` is one closure holding four intertwined blocks (grant,
- * account, renewal, throttle) that share seven mutable variables. The split
- * (docs/TOKEN-STORE-SPLIT.md) moves each block into its own module; what they
- * all keep in common is exactly what this file owns:
+ * account, renewal, throttle) that share seven mutable variables. Each block
+ * lives in its own module (docs/TOKEN-STORE-SPLIT.md); what they all keep in
+ * common is exactly what this file owns:
  *
  *   - `wiring` — the read side: the credentials backend (real service or the
  *     in-memory vault), the keys, the injected clock, env, auth, and the
@@ -15,12 +15,6 @@
  *     `consecutiveRefusals`, `passwordSwept`. Each block writes only its own
  *     fields (the ownership table lives in the split doc §1); every block may
  *     read any field through `state.`.
- *
- * Step 1 of the split: `createStoreContext()` is the one new piece of code in
- * this move. `token-store.ts`'s `createTokenStore` now builds this context and
- * keeps its bodies verbatim against it, so the behavior baseline
- * (`test/store-baseline.test.mjs`) and the 131 live checks stay green —
- * no semantics moved, only the names did.
  *
  * @module dsh-connect-sensenova-token-plan/token-store/state
  */
@@ -93,7 +87,7 @@ export interface StoreContextWiring {
   ephemeral: () => boolean;
 }
 
-/** Record address: this plugin's own namespace, so a stranger cannot collide. */
+/** Refresh this long before the stored expiry, so a request never races the token's death. */
 const DEFAULT_SKEW_MS = 120_000;
 
 /** The stored grant shape `grant.ts` parses and `acquire` carries. */
@@ -149,11 +143,10 @@ export interface TokenStoreState {
 /**
  * Build one store instance's wiring + state.
  *
- * The body of what `createTokenStore` used to do before its first `let`:
- * resolve the throttle store, build the in-memory vault, the service
+ * Resolves the throttle store, builds the in-memory vault, the service
  * resolver, the backend and the ephemeral check, and the key pair. The
- * defaults and their comments move here unchanged; `token-store.ts` still
- * documents the OPTIONS (they are the public face of the factory).
+ * defaults and their comments live here; `token-store.ts` still documents the
+ * OPTIONS (they are the public face of the factory).
  *
  * @param {object} options - the same options object `createTokenStore` takes.
  * @returns {{wiring: object, state: object}}
@@ -219,9 +212,8 @@ export function createStoreContext({
     async set(ref: string, value: string) { this.account.set(ref, value); },
     async unset(ref: string) { this.account.delete(ref); }
   };
-  // Resolved on EVERY use, not once at mount — the idiom itself now lives in
-  // `credentials-service.ts`, because api-key-store and raccoon-store spelled
-  // these same four lines out. The service may register after this plugin
+  // Resolved on EVERY use, not once at mount (the idiom lives in
+  // `credentials-service.ts`): the service may register after this plugin
   // loads, and a flag frozen at mount would then claim "no credentials service"
   // forever while the store quietly exists on disk.
   /** The live backend: the real service when attached, else the in-memory vault. */

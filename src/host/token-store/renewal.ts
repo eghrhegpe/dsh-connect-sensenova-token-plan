@@ -3,8 +3,7 @@
  *
  * `renewWithRefresh` calls the grant block's `store` (compare-and-set write),
  * so it receives `store` as an injected callback — keeping this module free of
- * any `grant.ts` import (no circular dependency). The function body is
- * **verbatim**; the behavior baseline stays green.
+ * any `grant.ts` import (no circular dependency).
  *
  * @module dsh-connect-sensenova-token-plan/token-store/renewal
  */

@@ -84,3 +84,30 @@
 - **边界**：本条只管小浣熊这一条标签通道。Token Plan 侧（`identifyVisionModel` 按 `/v1/models` 的 `input_modalities` 判定）是另一个上游、另一套声明字段，不受影响；两侧判定函数依旧不合并。`RACCOON_FALLBACK_MODELS` 快照表里的 vision 列**不是**目录快照的一部分，而是随本条一起改为实测值（那 6 行是已归一化的行，不经过判定函数），由离线一致性断言看住。
 - **复核条件**：`sn-glm-5-3` 是被**路由**到看不见的后端（同 payload 其余模型读得出，故非载荷问题），所以网关哪天改路由，L2e 会红——那时删掉否决集条目、同步基线 `visionProbe.expected` 与 fallback 表即可，不必重写判定链。
 - **取代**：[ROADMAP.md](./ROADMAP.md) §6.1.6 末句「`sn-glm-5-3-flash` 仍 `vision:false`（tags 无 vision、未实测，不猜）」由本条取代。那句当时是正确姿势（不猜），今天补上了实测；ROADMAP 已是冻结档案，照冻结纪律不回头改它，结论落在这里。
+
+## ADR-010 token-store 注释只砍「搬家叙述」，不砍不变式与教训
+
+- **日期**：2026-10-19
+- **状态**：现行（实现见 `src/host/token-store/` 七个文件；行为零变化，守它的仍是 `test/store-baseline.test.mjs` 的 17 场景 / 48 帧冻结基线 + 全量 34 套件）
+- **裁定**：`src/host/token-store/` 的注释占比实测 **54.7%**（1136 行里 621 行注释，`docs/issues/P1-STRUCTURAL-BACKLOG.md` 原记 48%）。瘦身只动一类：**搬家叙述**（「Block N of the split」「Functions moved here are verbatim」「this used to read …」「what `createTokenStore` used to do」）。不变式、红线理由、迁移键语义（`THROTTLE_MARKER` / 旧记录的「read for MIGRATION ONLY」）一律不动。
+- **理由**：台账把这一点描述为「48% 占比里大量『当初为什么没这么写』是 git/ADR 的活」，逐块读下来该判断**只对了一半**：绝大多数注释是**防回归理由**——fail-open 的清除闸为什么必须区分「读失败」与「记录不存在」、`rejected` 集合为什么存在、throttle 的写失败为什么故意落到内存、凭据服务为什么每次使用都重新 resolve。删掉这些等于把「改回去会怎样」从代码点挪进一份没人会翻的 log，是净损失。真正只描述「文件怎么搬过来」的段落实测 **31 行**（1136→1105 总行、621→590 注释行，占比 54.7%→53.4%），删掉零知识损失。
+- **边界**：本轮不动其他已收编文件的注释（`state-store.ts`、`web-search.ts`），也不把行数当 KPI——瘦身后 `token-store/` 仍以注释为主，那是这类凭据状态机的合理形态。
+- **复核条件**：后续若有人以「注释太长」为由继续删，先问被删段落是否回答了「改回去会怎样」。回答了就不能删，只能压缩措辞。
+
+## ADR-011 不为行数拆分 `wire.ts` / `qr.ts`
+
+- **日期**：2026-10-19
+- **状态**：现行（`src/host/wire.ts` 104 行、`src/host/qr.ts` 509 行，均保持单文件；守它们的是 `test/docs.test.mjs` 检查 8 的 `SnapshotData` ↔ Host 构造块双向一致、`test/raccoon.test.mjs` §7 与 `test/typecheck-gate.mjs`）
+- **裁定**：两者都**不拆**。`wire.ts` 里 raccoon 专属的那一段不是「分叉」，是组装点：它是共享层与 Host 的契约面，拆开只会把一份契约切成两个必须同步的文件。`qr.ts` 已经切到「每一段只被下一段调用一次」的粒度，再切只会切出一次性辅助函数。
+- **理由**：拆分的收益是「文件短了」，代价是「多一个 import 边界 + 一个需要文档与门禁追踪的新文件」。本仓库更划算的方向已被证明是**收敛重复的读侧/写侧脚手架**（`switch-store.ts`、`state-store.createVersionedJsonWriter`），而不是按行数切分。
+- **边界**：本条只管「以行数为由的拆分」。若 `qr.ts` 需要支持第二种码制、或 `wire.ts` 需要承载第三类上游，重组属于另一条裁定。
+- **复核条件**：`qr.ts` 超过 800 行，或 `wire.ts` 出现两个互不相关的契约段（不再只是「主注册 + 一个上游」）时重开。
+
+## ADR-012 `web.searchProviderId` 的根因交由上游，本地只留 Option B
+
+- **日期**：2026-10-19
+- **状态**：现行（防御性补丁实现见 `src/host/web-search.ts` 的 `applyWebSearchSelection`；门禁见 `test/raccoon-web.test.mjs` 的「外来 provider 占用 → 拒绝接管、模块缺席」用例）
+- **裁定**：本插件**不再**尝试自己解决「凭什么由我改全局搜索选择」这个问题。已落地的 Option B 只是防御姿态：只在槽位为空（`undefined`）或本插件已持有时接管；外来 provider 占用则拒绝、整个模块缺席。真解法必须由宿主提供 **plugin-owned 的选择面**（或让插件注册为候选、由用户显式选择），那部分超出本仓库的边界。
+- **理由**：全局 `searchProviderId` 是宿主的一份单值状态，插件单方面写入必然是零和——写进去那一刻就替用户做了选择，而 teardown 的归还逻辑只能表达「我顶掉了谁」，无法表达「我们俩都该在」。Option B 把风险收敛到「不抢别人的」，但没有消除域归属问题本身。
+- **边界**：本条不否决宿主未来给出的选择面；届时把 `applyWebSearchSelection` 换成注册式调用即可，不需要重写 provider 发布链。
+- **复核条件**：宿主 API 出现插件级选择面（或 `searchProviderId` 改为可多值）时重开。在那之前，任何「再包一层 try/catch」的补丁都属于重复解决同一个问题。

@@ -11,8 +11,7 @@
  *      write the throttle (except `not_configured`, which records nothing)
  *
  * All block functions are injected by the caller so this module never imports
- * them directly (no circular dependency). The body is **verbatim**; the
- * behavior baseline stays green.
+ * them directly (no circular dependency).
  *
  * @module dsh-connect-sensenova-token-plan/token-store/acquire
  */
@@ -120,12 +119,9 @@ export async function acquire(wiring: StoreContextWiring, state: TokenStoreState
     // lock again. The platform's own error is what the panel shows, since it
     // carries the reason and any stated window; the throttle only governs
     // when the next attempt may happen — so the record is kept for its side
-    // effect and its return value is deliberately not read.
-    //
-    // This used to read `throw held.parked ? error : throttleError(held, error)`,
-    // which is ONE throw wearing a two-branch hat: `throttleError` returns its
-    // `cause` unchanged whenever a cause is passed, so both arms handed back the
-    // identical object. The ternary promised a distinction the code never made.
+    // effect and its return value is deliberately not read (`throttleError`
+    // returns its `cause` unchanged, so choosing between the two would hand
+    // back the identical object).
     //
     // `error` was thrown by `loginFromAccount` (a pluginError); the throttle
     // contract takes an Error, so the assertion is the semantic the code

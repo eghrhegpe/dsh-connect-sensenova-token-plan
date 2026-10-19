@@ -1,17 +1,12 @@
 /**
  * The credential-domain string constants, in one place.
  *
- * These three used to be re-declared at every site that needed them — twice in
- * `token-store.ts`, once in `state.ts`, once in `grant.ts`, and twice inside
- * `throttle.ts`'s function bodies (`LEGACY_SCOPE` / `THROTTLE_ID` were
- * re-declared in BOTH `adoptLegacyThrottle` and `clearThrottle`, on the theory
- * that a local copy was cheaper than an import). The values were identical, so
- * nothing was broken — which is exactly why the duplication was dangerous:
- * these strings are RECORD ADDRESSES and MIGRATION KEYS, and a value that
- * drifts in one copy does not fail a type check, does not fail a test, and
- * fails as "the user has to log in again" or "a parked password is retried
- * after a restart" — the two failures hardest to trace back to a renamed
- * string. One declaration, imported by every site that addresses a record.
+ * These strings are RECORD ADDRESSES and MIGRATION KEYS: a value that drifts
+ * from the one a record was written under does not fail a type check, does not
+ * fail a test, and fails instead as "the user has to log in again" or "a parked
+ * password is retried after a restart" — the two failures hardest to trace back
+ * to a renamed string. One declaration, imported by every site that addresses a
+ * record.
  *
  * NOT here, and deliberately so:
  *

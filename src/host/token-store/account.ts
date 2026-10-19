@@ -8,10 +8,6 @@
  * persist the new one); they are injected by the caller so this module never
  * imports `grant.ts` (no circular dependency).
  *
- * Functions moved here are **verbatim** — the behavior baseline
- * (`test/store-baseline.test.mjs`) stays green, so no semantics moved, only
- * the file did.
- *
  * @module dsh-connect-sensenova-token-plan/token-store/account
  */
 
