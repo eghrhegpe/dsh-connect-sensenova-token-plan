@@ -342,34 +342,49 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
 }
 
 // --- 8. the artifact gate: which suites it guards, and what it decides ------
-// The runner skips an artifact-consuming suite when its bundle predates the
+// The runner skips an artifact-consuming suite when its artifact predates the
 // uncommitted sources (PITFALLS §41). Nothing about that is exercised by a
-// clean full run — the gate is deliberately inert there — so pin the two halves
-// that CAN rot silently: the consumer set (a second eval'ing suite would run
-// ungated) and the verdict itself.
+// clean full run — the gate is deliberately inert there — so pin the halves
+// that CAN rot silently: the consumer map (a second eval'ing suite would run
+// ungated, and a renamed artifact would leave it watching nothing) and the
+// verdict itself.
 {
-  const consumers = [...ARTIFACT_CONSUMERS].sort();
-  // Derive the truth from the roster instead of trusting the list: "which
-  // suites eval the bundle" is a fact about test/, not an opinion.
+  const consumers = [...ARTIFACT_CONSUMERS.keys()].sort();
+  const rosterNames = new Set(SUITES.map((entry) => entry.name));
+  check("every artifact consumer is a roster entry",
+    consumers.every((name) => rosterNames.has(name)), consumers.join(","));
+
+  // The artifacts guarded must be the ones we actually ship, or the gate
+  // watches a path nobody reads.
+  const bare = (value) => String(value ?? "").replace(/^\.\//, "");
+  check("the guarded artifacts are the published entry points",
+    ARTIFACT_CONSUMERS.get("e2e-gate.mjs") === bare(manifest.main) &&
+    ARTIFACT_CONSUMERS.get("render-dom.test.mjs") === bare(manifest.exports?.["./client"]),
+    `host=${ARTIFACT_CONSUMERS.get("e2e-gate.mjs")} client=${ARTIFACT_CONSUMERS.get("render-dom.test.mjs")}`);
+
+  // Derive the truth from the roster instead of trusting the map: a second
+  // suite that evals the bundle would otherwise reproduce §41 in a new file.
   const scanned = readdirSync(join(root, "test"))
     .filter((name) => name.endsWith(".test.mjs"))
     .filter((name) => /win\.eval\(|new Function\(/.test(readFileSync(join(root, "test", name), "utf8")))
     .sort();
-  check("the artifact-consumer set is exactly the suites that eval the bundle",
-    consumers.join(",") === scanned.join(","), `set=[${consumers.join(",")}] scanned=[${scanned.join(",")}]`);
-  check("the artifact-consumer set is not empty", consumers.length > 0, `${consumers.length} entry(ies)`);
+  const evalConsumers = [...ARTIFACT_CONSUMERS.entries()]
+    .filter(([, artifact]) => artifact === "client.js").map(([suite]) => suite).sort();
+  check("the client-bundle consumers are exactly the suites that eval it",
+    evalConsumers.join(",") === scanned.join(","), `map=[${evalConsumers.join(",")}] scanned=[${scanned.join(",")}]`);
 
-  const absent = staleArtifactReason({ exists: false, dirty: true, srcMtime: 9, artifactMtime: 1 });
-  check("a missing bundle is named as a missing input",
-    /absent/.test(absent) && /npm run build/.test(absent), absent);
-  const clean = staleArtifactReason({ exists: true, dirty: false, srcMtime: 9, artifactMtime: 1 });
+  const probe = (over = {}) => ({ name: "client.js", exists: true, dirty: false, srcMtime: 1, artifactMtime: 9, ...over });
+  const absent = staleArtifactReason(probe({ exists: false }));
+  check("a missing artifact is named as a missing input",
+    /client\.js/.test(absent) && /absent/.test(absent) && /npm run build/.test(absent), absent);
+  const clean = staleArtifactReason(probe());
   check("a committed tree is left to build-gate", clean === "", clean);
-  const noGit = staleArtifactReason({ exists: true, dirty: null, srcMtime: 9, artifactMtime: 1 });
+  const noGit = staleArtifactReason(probe({ dirty: null }));
   check("an unusable git decides nothing rather than guessing", noGit === "", noGit);
-  const stale = staleArtifactReason({ exists: true, dirty: true, srcMtime: 9, artifactMtime: 1 });
-  check("an unbuilt edit is named as a stale bundle",
-    /would verify the previous build/.test(stale), stale);
-  const built = staleArtifactReason({ exists: true, dirty: true, srcMtime: 1, artifactMtime: 9 });
+  const stale = staleArtifactReason(probe({ dirty: true, srcMtime: 9, artifactMtime: 1 }));
+  check("an unbuilt edit is named as a stale artifact",
+    /would exercise the previous build/.test(stale) && /client\.js/.test(stale), stale);
+  const built = staleArtifactReason(probe({ dirty: true }));
   check("edit-then-build passes: the mtime tiebreak is what keeps it usable", built === "", built);
 }
 

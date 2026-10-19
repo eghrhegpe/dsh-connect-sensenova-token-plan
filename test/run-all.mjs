@@ -105,17 +105,17 @@ if (selected.length === 0) {
 // ---------------------------------------------------------------------------
 // The on-disk-artifact gate.
 //
-// `render-dom.test.mjs` EVALUATES the root `client.js`, not `src/client/**`:
-// its verdict is about whatever bundle is on disk. That is the point of the
-// suite — it is the only one that proves the SHIPPED bytes render — but it also
-// means a run that includes it and NOT `build-gate.mjs` can come back green
-// about code that is no longer in the tree (PITFALLS §41: ten source mutations
-// survived a green run).
+// Two suites here judge BUILT bytes rather than sources: `render-dom.test.mjs`
+// `eval`s the root `client.js`, and `e2e-gate.mjs` boots a Host against a
+// profile that links this package, so it exercises `lib/index.js`. Both are
+// valuable precisely because they read the shipped bytes — but a selection that
+// includes either and NOT `build-gate.mjs` can come back green about code that
+// is no longer in the tree (PITFALLS §41: ten source mutations survived).
 //
 // `build-gate.mjs` is the authority on freshness — it rebuilds in place and
 // compares byte-for-byte — so any selection containing it is already covered
 // and this gate stays out of the way. Full `npm test` and CI never see it fire,
-// which is what keeps a fresh checkout from skipping DOM coverage it should run.
+// which is what keeps a fresh checkout from skipping coverage it should run.
 //
 // When `build-gate` is absent this SKIPS rather than fails: "you did not
 // rebuild" is a missing input, not a broken assertion. A selection that skips
@@ -140,14 +140,15 @@ function newestMtime(dir) {
 }
 
 /** Gather the ambient facts {@link staleArtifactReason} decides on. */
-function probeArtifact() {
-  const artifact = join(root, "client.js");
+function probeArtifact(relPath) {
+  const artifact = join(root, relPath);
   const exists = existsSync(artifact);
   const status = spawnSync("git", ["status", "--porcelain", "--", "src"], { cwd: root, encoding: "utf8" });
   // No usable git (a source tarball, a stripped PATH) is passed through as
   // `null` — "cannot tell" — rather than as a clean tree.
   const dirty = status.error || status.status !== 0 ? null : String(status.stdout ?? "").trim() !== "";
   return {
+    name: relPath,
     exists,
     dirty,
     srcMtime: exists ? newestMtime(join(root, "src")) : 0,
@@ -166,10 +167,11 @@ for (const [index, suite] of selected.entries()) {
   const label = `${String(index + 1).padStart(2, " ")}/${selected.length} ${suite.name}`;
   process.stdout.write(`── ${label}\n`);
 
-  // Refuse to grade the bundle against sources it predates — see the artifact
-  // gate above. Checked before the spawn so nothing runs at all.
-  if (ARTIFACT_CONSUMERS.has(suite.name) && !buildGateSelected) {
-    const artifactReason = staleArtifactReason(probeArtifact());
+  // Refuse to grade a built artifact against sources it predates — see the
+  // artifact gate above. Checked before the spawn so nothing runs at all.
+  const artifactName = ARTIFACT_CONSUMERS.get(suite.name);
+  if (artifactName !== undefined && !buildGateSelected) {
+    const artifactReason = staleArtifactReason(probeArtifact(artifactName));
     if (artifactReason !== "") {
       skips.push({ suite: suite.name, reason: artifactReason });
       console.log(`   ⊘ ${suite.name} SKIPPED — ${artifactReason}\n`);
