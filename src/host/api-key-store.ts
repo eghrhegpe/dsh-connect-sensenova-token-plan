@@ -17,6 +17,7 @@
  * @module dsh-connect-sensenova-token-plan/api-key-store
  */
 
+import { isEphemeral, resolveCredentialsService } from "./credentials-service.ts";
 import { verbatim } from "./util.ts";
 
 /**
@@ -41,11 +42,6 @@ export function createApiKeyStore({ credentials = null, env = process.env }: { c
   /** Fallback vault for a Host that has no credentials service. */
   const memory = new Map();
 
-  const resolveService = () => {
-    const value = typeof credentials === "function" ? credentials() : credentials;
-    return value ?? null;
-  };
-
   return {
     /**
      * Persist a typed-in key as the `SENSENOVA_API_KEY` reference.
@@ -61,7 +57,7 @@ export function createApiKeyStore({ credentials = null, env = process.env }: { c
       if (typeof value !== "string" || value.trim() === "") {
         throw new Error("an API key is required");
       }
-      const service = resolveService();
+      const service = resolveCredentialsService(credentials);
       if (service !== null && typeof service.set === "function") {
         // The durable copy first: a save the service refuses must propagate
         // and leave nothing behind, as the route reports it.
@@ -90,7 +86,7 @@ export function createApiKeyStore({ credentials = null, env = process.env }: { c
      */
     async forget() {
       memory.delete(API_KEY_REF);
-      const service = resolveService();
+      const service = resolveCredentialsService(credentials);
       if (service === null || typeof service.unset !== "function") return;
       // Proof, not trust: only a value the service hands back RIGHT NOW is one
       // a failed unset would leave behind. A service whose reads throw gives no
@@ -122,7 +118,7 @@ export function createApiKeyStore({ credentials = null, env = process.env }: { c
      */
     async resolve() {
       try {
-        const service = resolveService();
+        const service = resolveCredentialsService(credentials);
         if (service !== null && typeof service.resolve === "function") {
           const resolved = await service.resolve(API_KEY_REF).catch(() => undefined);
           const value = verbatim(resolved?.value, "");
@@ -148,7 +144,7 @@ export function createApiKeyStore({ credentials = null, env = process.env }: { c
      */
     async state() {
       const { source } = await this.resolve();
-      return { hasApiKey: source !== null, keySource: source, ephemeral: resolveService() === null };
+      return { hasApiKey: source !== null, keySource: source, ephemeral: isEphemeral(credentials) };
     }
   };
 }

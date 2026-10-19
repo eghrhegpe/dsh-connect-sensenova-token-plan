@@ -25,6 +25,7 @@
  * @module dsh-connect-sensenova-token-plan/token-store/state
  */
 
+import { isEphemeral, resolveCredentialsService } from "../credentials-service.ts";
 import { createAuth } from "../sensenova-auth.ts";
 import { createMemoryThrottleStore } from "../throttle-store.ts";
 import { name as RECORD_SCOPE } from "../host-config.ts";
@@ -218,22 +219,15 @@ export function createStoreContext({
     async set(ref: string, value: string) { this.account.set(ref, value); },
     async unset(ref: string) { this.account.delete(ref); }
   };
-  /**
-   * Resolve the credentials service on EVERY use, not once at mount: the
-   * service may register after this plugin loads, and a flag frozen at mount
-   * would then claim "no credentials service" forever while the store quietly
-   * exists on disk. Accepts the service itself (tests) or a resolver function
-   * (production, where the service is looked up per use) and normalises
-   * anything absent to `null`.
-   */
-  const resolveService = () => {
-    const value = typeof credentials === "function" ? credentials() : credentials;
-    return value ?? null;
-  };
+  // Resolved on EVERY use, not once at mount — the idiom itself now lives in
+  // `credentials-service.ts`, because api-key-store and raccoon-store spelled
+  // these same four lines out. The service may register after this plugin
+  // loads, and a flag frozen at mount would then claim "no credentials service"
+  // forever while the store quietly exists on disk.
   /** The live backend: the real service when attached, else the in-memory vault. */
-  const backend = () => resolveService() ?? memory;
+  const backend = () => resolveCredentialsService(credentials) ?? memory;
   /** True while nothing written through the store would survive a restart. */
-  const ephemeral = () => resolveService() === null;
+  const ephemeral = () => isEphemeral(credentials);
 
   const wiring: StoreContextWiring = {
     credentials,

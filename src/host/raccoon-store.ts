@@ -24,6 +24,7 @@
  * @module dsh-connect-sensenova-token-plan/raccoon-store
  */
 
+import { isEphemeral, resolveCredentialsService } from "./credentials-service.ts";
 import { obj, str } from "./util.ts";
 import {
   decodeRaccoonJwtExpMs,
@@ -118,14 +119,9 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
    */
   let sessionDead = false;
 
-  const resolveService = () => {
-    const value = typeof credentials === "function" ? credentials() : credentials;
-    return value ?? null;
-  };
-
   const storeNow = async (credential: { accessToken?: unknown; refreshToken?: unknown; expiresAtMs?: unknown; officeIdentity?: unknown; nickname?: unknown }) => {
     const serialized = serializeRaccoonCredential(credential);
-    const service = resolveService();
+    const service = resolveCredentialsService(credentials);
     if (service !== null && typeof service.set === "function") {
       await service.set(RACCOON_CREDENTIAL_REF, serialized);
       memory.set(RACCOON_CREDENTIAL_REF, serialized);
@@ -157,7 +153,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
       sessionDead = false;
       memory.delete(RACCOON_CREDENTIAL_REF);
       try {
-        const service = resolveService();
+        const service = resolveCredentialsService(credentials);
         if (service !== null && typeof service.unset === "function") {
           await service.unset(RACCOON_CREDENTIAL_REF);
         }
@@ -172,7 +168,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
      */
     async resolve() {
       try {
-        const service = resolveService();
+        const service = resolveCredentialsService(credentials);
         if (service !== null && typeof service.resolve === "function") {
           const resolved = await service.resolve(RACCOON_CREDENTIAL_REF).catch(() => undefined);
           const credential = parseRaccoonCredential(resolved?.value);
@@ -286,7 +282,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
       return {
         hasCredential: credential !== null,
         source,
-        ephemeral: resolveService() === null,
+        ephemeral: isEphemeral(credentials),
         nickname: credential?.nickname ?? "",
         expiresAtMs: credential?.expiresAtMs ?? null,
         ...(refreshExpiresAtMs !== undefined ? { refreshExpiresAtMs } : {})
