@@ -1115,18 +1115,20 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     // it and turn the refusal back into a no-op. Pin the literal in the source
     // the same way draw.test.mjs pins its `degrade` markers.
     const source = readFileSync(new URL("../src/host/provider-store.ts", import.meta.url), "utf8");
+    const switchFactory = readFileSync(new URL("../src/host/switch-store.ts", import.meta.url), "utf8");
     const factory = readFileSync(new URL("../src/host/state-store.ts", import.meta.url), "utf8");
-    // The ADR-006 refusal reason now lives in the shared factory
-    // (createVersionedJsonWriter) — one source of truth instead of three copies.
-    // Pin BOTH: the safety phrase in the factory, and that this switch still
-    // registers its own label + version set, so a future edit cannot silently
-    // retarget or downgrade the guard.
+    // The ADR-006 refusal phrase lives in the shared WRITE factory
+    // (state-store.createVersionedJsonWriter); the shared READ-side factory
+    // (switch-store.createSwitchStore) wires that guard for all four switches;
+    // each switch still registers its OWN label + version set. Pin all three so
+    // a future edit cannot silently retarget or downgrade the guard.
     check("the refusal marker stays in the source",
       factory.includes("refusing to overwrite") &&
       factory.includes("this build knows") &&
-      source.includes('createVersionedJsonWriter({') &&
+      switchFactory.includes("createVersionedJsonWriter(") &&
       source.includes('label: "provider"') &&
-      source.includes("KNOWN_PROVIDER_VERSIONS"), "");
+      source.includes("KNOWN_PROVIDER_VERSIONS") &&
+      source.includes("createSwitchStore"), "");
   } catch (error) {
     fail("ADR-006 write-side version guard", error);
   } finally {
@@ -1252,16 +1254,19 @@ const BASE_URL = "https://token.sensenova.cn/v1";
 
     // The reason string is load-bearing, same as the provider guard.
     const source = readFileSync(new URL("../src/host/draw-store.ts", import.meta.url), "utf8");
+    const switchFactory = readFileSync(new URL("../src/host/switch-store.ts", import.meta.url), "utf8");
     const factory = readFileSync(new URL("../src/host/state-store.ts", import.meta.url), "utf8");
-    // The ADR-006 refusal reason now lives in the shared factory
-    // (createVersionedJsonWriter). Pin the factory phrase AND this switch's
-    // own label + version set registration.
+    // The ADR-006 refusal phrase lives in the shared WRITE factory
+    // (state-store.createVersionedJsonWriter); the shared READ-side factory
+    // (switch-store.createSwitchStore) wires that guard for all four switches;
+    // each switch still registers its OWN label + version set.
     check("the draw refusal marker stays in the source",
       factory.includes("refusing to overwrite") &&
       factory.includes("this build knows") &&
-      source.includes('createVersionedJsonWriter({') &&
+      switchFactory.includes("createVersionedJsonWriter(") &&
       source.includes('label: "draw"') &&
-      source.includes("KNOWN_DRAW_VERSIONS"), "");
+      source.includes("KNOWN_DRAW_VERSIONS") &&
+      source.includes("createSwitchStore"), "");
   } catch (error) {
     fail("ADR-006 draw write-side version guard", error);
   } finally {

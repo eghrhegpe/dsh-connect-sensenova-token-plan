@@ -8,12 +8,18 @@
  * a temp file plus an atomic rename, owner-only modes, and "anything
  * unrecognised reads as not set" (PITFALLS §23, per-profile segment).
  *
+ * No legacy inheritance here: this switch post-dates the profile segmentation,
+ * so there is no shared-directory value to adopt — `hasLegacy` is left off.
+ *
+ * Shared scaffolding (directory, ADR-006 write-side guard, short-TTL read
+ * cache) lives in `switch-store.ts`; this store keeps only its payload shape
+ * and its public method surface on top.
+ *
  * @module dsh-connect-sensenova-token-plan/raccoon-web-store
  */
-import { degrade } from "./util.ts";
-import { join } from "node:path";
 import { name } from "./host-config.ts";
-import { readStateJson, createStateReadCache, createVersionedJsonWriter, STATE_READ_TTL_MS, profileStateDir } from "./state-store.ts";
+import { profileStateDir } from "./state-store.ts";
+import { createSwitchStore, normalizeSwitchEnabled } from "./switch-store.ts";
 import type { StoreOptions } from "./types.ts";
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
@@ -27,9 +33,12 @@ export function raccoonWebDir(profile: string | null) {
   return profileStateDir(name, profile);
 }
 
-/** Only booleans are real answers. */
-export function normalizeWebSearchEnabled(raw: unknown): boolean | null {
-  return typeof raw === "boolean" ? raw : null;
+// The on/off normaliser is shared; re-export under this store's historical name
+// (the suite imports `normalizeWebSearchEnabled` from here).
+export { normalizeSwitchEnabled as normalizeWebSearchEnabled };
+
+interface RaccoonWebRecord {
+  enabled: boolean | null;
 }
 
 /**
@@ -38,28 +47,19 @@ export function normalizeWebSearchEnabled(raw: unknown): boolean | null {
  * @returns {object} the store.
  */
 export function createFileRaccoonWebStore(options: StoreOptions = {}) {
-  const { dir, profile = null, ttlMs = STATE_READ_TTL_MS, logger } = options;
-  const stateDir = dir ?? raccoonWebDir(profile);
-  const filePath = join(stateDir, "raccoon-web-search.json");
-
-  // ADR-006 写侧守卫（未知版本拒绝）+ 0600 temp 原子写，收编到 state-store 的
-  // createVersionedJsonWriter —— 四份同构的写路径合一，任何写安全修复只改一处。
-  // 拒绝降级仍走 host 的 degrade（理由见工厂注释）。
-  const writePayload = createVersionedJsonWriter({
-    file: filePath,
-    versions: KNOWN_RACCOON_WEB_SWITCH_VERSIONS,
+  const base = createSwitchStore<RaccoonWebRecord>({
     label: "raccoon-web-switch",
-    onRefuse: (reason) => degrade(reason, null, logger, null)
-  });
-
-  const parseSwitch = (raw: unknown) => {
-    const source = (raw && typeof raw === "object" ? raw : {}) as { version?: unknown; enabled?: unknown };
-    if (source.version !== RACCOON_WEB_SWITCH_VERSION) return null;
-    return { enabled: normalizeWebSearchEnabled(source.enabled) };
-  };
-
-  const cache = createStateReadCache(async () => parseSwitch(await readStateJson(filePath)), { ttlMs });
-  const read = () => cache.read();
+    file: "raccoon-web-search.json",
+    version: RACCOON_WEB_SWITCH_VERSION,
+    knownVersions: KNOWN_RACCOON_WEB_SWITCH_VERSIONS,
+    normalize: (raw) => {
+      const source = (raw && typeof raw === "object" ? raw : {}) as { version?: unknown; enabled?: unknown };
+      if (source.version !== RACCOON_WEB_SWITCH_VERSION) return null;
+      return { enabled: normalizeSwitchEnabled(source.enabled) };
+    },
+    writeInherited: (value) => ({ version: RACCOON_WEB_SWITCH_VERSION, enabled: value.enabled, updatedAt: new Date().toISOString() }),
+  }, options);
+  const read = () => base.read();
 
   return {
     /** The saved switch value. */
@@ -72,17 +72,17 @@ export function createFileRaccoonWebStore(options: StoreOptions = {}) {
     },
     /** Persist a switch value (atomic). */
     async save(value: boolean) {
-      const enabled = normalizeWebSearchEnabled(value);
+      const enabled = normalizeSwitchEnabled(value);
       if (enabled === null) throw new TypeError("the raccoon web-search switch expects a boolean");
-      const refusal = await writePayload({ version: RACCOON_WEB_SWITCH_VERSION, enabled, updatedAt: new Date().toISOString() });
+      const refusal = await base.writePayload({ version: RACCOON_WEB_SWITCH_VERSION, enabled, updatedAt: new Date().toISOString() });
       if (refusal !== null) throw new Error(refusal);
-      cache.remember({ enabled });
+      base.remember({ enabled });
     },
     /** Forget the panel-saved value. */
     async forget() {
-      const refusal = await writePayload({ version: RACCOON_WEB_SWITCH_VERSION, updatedAt: new Date().toISOString() });
+      const refusal = await base.writePayload({ version: RACCOON_WEB_SWITCH_VERSION, updatedAt: new Date().toISOString() });
       if (refusal !== null) throw new Error(refusal);
-      cache.remember(null);
+      base.remember(null);
     }
   };
 }

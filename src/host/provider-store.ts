@@ -17,16 +17,20 @@
  *      provider through configuration keeps it enabled across this change.
  *
  * Integrity follows `throttle-store.ts` / `catalog-store.ts`: a versioned
- * payload, a temp file plus an atomic rename (two Host processes can share
- * the directory), owner-only modes, and "anything unrecognised reads as not
- * set" — a corrupted or downgraded file costs one re-toggle, never a crash.
+ * payload, a temp file plus an atomic rename, owner-only modes, and "anything
+ * unrecognised reads as not set" — a corrupted or downgraded file costs one
+ * re-toggle, never a crash.
+ *
+ * The shared scaffolding (directory, ADR-006 write-side guard, one-shot legacy
+ * inheritance, short-TTL read cache) lives in `switch-store.ts` — this store
+ * keeps only its payload shape and its public method surface on top.
  *
  * @module dsh-connect-sensenova-token-plan/provider-store
  */
-import { obj, degrade } from "./util.ts";
-import { join } from "node:path";
+import { obj } from "./util.ts";
 import { name } from "./host-config.ts";
-import { readStateJson, createStateReadCache, createVersionedJsonWriter, STATE_READ_TTL_MS, profileStateDir, stateDir as sharedStateDir } from "./state-store.ts";
+import { profileStateDir } from "./state-store.ts";
+import { createSwitchStore, normalizeSwitchEnabled } from "./switch-store.ts";
 import type { StoreOptions } from "./types.ts";
 
 /** Shape version, bumped when the persisted form changes incompatibly. */
@@ -38,8 +42,7 @@ export const PROVIDER_VERSION = 1;
  * here too — otherwise this build would refuse its own newest files.
  *
  * This is the ADR-006 write-side guard's whitelist: an on-disk version not in
- * this list was written by a NEWER build, and must not be clobbered (see
- * {@link writePayload}).
+ * this list was written by a NEWER build, and must not be clobbered.
  */
 export const KNOWN_PROVIDER_VERSIONS: readonly number[] = [1];
 
@@ -55,14 +58,9 @@ export function providerDir(profile: string | null) {
   return profileStateDir(name, profile);
 }
 
-/**
- * Normalize an on/off switch: only booleans are real answers.
- * @param {unknown} raw - the persisted or posted value.
- * @returns {boolean|null} `true`/`false`, or `null` when nothing usable.
- */
-export function normalizeEnabled(raw: unknown): boolean | null {
-  return typeof raw === "boolean" ? raw : null;
-}
+// The on/off normaliser is shared (`switch-store.ts`); re-export under this
+// store's historical name — `doctor.ts` and the suite import it from here.
+export { normalizeSwitchEnabled as normalizeEnabled };
 
 /**
  * The file-backed provider switch.
@@ -70,67 +68,37 @@ export function normalizeEnabled(raw: unknown): boolean | null {
  * @param {string} [options.dir] - override the state directory (tests).
  * @param {string|null} [options.profile] - the profile name; see {@link providerDir}.
  * @param {number} [options.ttlMs] - how long a parsed switch may be reused
- *   before disk is consulted again; defaults to {@link STATE_READ_TTL_MS}.
+ *   before disk is consulted again.
  * @returns {object} the store.
  */
 export function createFileProviderStore(options: StoreOptions = {}) {
-  const { dir, profile = null, ttlMs = STATE_READ_TTL_MS, logger } = options;
-  const stateDir = dir ?? providerDir(profile);
-  const filePath = join(stateDir, "provider.json");
-
-
-  // ADR-006 写侧守卫（未知版本拒绝）+ 0600 temp 原子写，收编到 state-store 的
-  // createVersionedJsonWriter —— 四份同构的写路径合一，任何写安全修复只改一处。
-  // 拒绝降级仍走 host 的 degrade（理由见工厂注释）。
-  const writePayload = createVersionedJsonWriter({
-    file: filePath,
-    versions: KNOWN_PROVIDER_VERSIONS,
+  const base = createSwitchStore<boolean>({
     label: "provider",
-    onRefuse: (reason) => degrade(reason, null, logger, null)
-  });
-
-  // Pre-§23 machines kept this switch in the SHARED directory. A profile-scoped
-  // store inherits it once, when its own file is missing — see the note on
-  // `createStateReadCache` (`state-store.ts`). An explicit `dir` (the tests)
-  // never inherits: it was never part of the shared layout.
-  const legacyFile = dir === undefined && profile ? join(sharedStateDir(name), "provider.json") : null;
-  const parseSwitch = (raw: unknown) => {
-    const source = obj(raw);
-    return source.version === PROVIDER_VERSION ? normalizeEnabled(source.enabled) : null;
-  };
-
-  // Short-TTL read cache, deliberately shared with the draw switch and the
-  // catalog (`state-store.ts`): "someone else edited this file" must become
-  // visible here within a tick, not after a restart, but one poll must not
-  // re-read the file for every question it asks.
-  const cache = createStateReadCache(async () => {
-    // Shape check, not trust: anything unexpected reads as "not set" so a
-    // corrupted or downgraded file can never silently flip the switch.
-    // Absent/unreadable/non-JSON reads as `null` (`readStateJson`).
-    return parseSwitch(await readStateJson(filePath));
-  }, {
-    ttlMs,
-    inheritFrom: legacyFile === null ? null : {
-      read: async () => parseSwitch(await readStateJson(legacyFile)),
-      write: async (enabled) => {
-        await writePayload({ version: PROVIDER_VERSION, enabled, updatedAt: new Date().toISOString() });
-      }
-    }
-  });
-  const read = () => cache.read();
+    file: "provider.json",
+    version: PROVIDER_VERSION,
+    knownVersions: KNOWN_PROVIDER_VERSIONS,
+    hasLegacy: true,
+    normalize: (raw) => {
+      const source = obj(raw);
+      // Shape check, not trust: anything unexpected reads as "not set" so a
+      // corrupted or downgraded file can never silently flip the switch.
+      return source.version === PROVIDER_VERSION ? normalizeSwitchEnabled(source.enabled) : null;
+    },
+    writeInherited: (enabled) => ({ version: PROVIDER_VERSION, enabled, updatedAt: new Date().toISOString() }),
+  }, options);
+  const read = () => base.read();
 
   return {
-  
     async enabled() {
       return read();
     },
-  
+
     async isSet() {
       return (await read()) !== null;
     },
-  
+
     async save(value: boolean) {
-      const enabled = normalizeEnabled(value);
+      const enabled = normalizeSwitchEnabled(value);
       if (enabled === null) throw new TypeError("provider switch expects a boolean");
       // Write failures PROPAGATE on purpose: a switch the panel ordered must
       // not silently stay off because the state file could not be written.
@@ -138,19 +106,19 @@ export function createFileProviderStore(options: StoreOptions = {}) {
       // action, and the route re-reads the value on the same request — silence
       // here left the panel showing an unchanged switch with no reason to act
       // on (the audit's support trap).
-      const refusal = await writePayload({ version: PROVIDER_VERSION, enabled, updatedAt: new Date().toISOString() });
+      const refusal = await base.writePayload({ version: PROVIDER_VERSION, enabled, updatedAt: new Date().toISOString() });
       if (refusal !== null) throw new Error(refusal);
-      cache.remember(enabled);
+      base.remember(enabled);
     },
-  
+
     async forget() {
       // No `enabled` key: "not set" is the absence of an answer, not `false`.
       // Remember only once the write landed — a refused write (ADR-006) leaves
       // the file, and therefore this switch, exactly as it was. Same surfacing
       // rule as `save`: silence here is a button that appears to work.
-      const refusal = await writePayload({ version: PROVIDER_VERSION, updatedAt: new Date().toISOString() });
+      const refusal = await base.writePayload({ version: PROVIDER_VERSION, updatedAt: new Date().toISOString() });
       if (refusal !== null) throw new Error(refusal);
-      cache.remember(null);
+      base.remember(null);
     }
   };
 }
