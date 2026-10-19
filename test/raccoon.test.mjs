@@ -30,6 +30,8 @@ import {
   decodeRaccoonJwtExpMs,
   extractRaccoonNickname,
   raccoonHeaders,
+  raccoonRowVision,
+  raccoonEffectiveMultiplier,
   RACCOON_FALLBACK_MODELS,
   refreshRaccoonCredential,
   pollRaccoonQrLogin,
@@ -449,6 +451,73 @@ function section(title) {
       })()));
   } catch (error) {
     fail("balance + catalog", error);
+  }
+}
+
+// --- 3b. the promotion-aware credit multiplier -------------------------------
+// `raccoonEffectiveMultiplier` is the catalogue transform with a money story,
+// and it was the one exported leaf in this barrel with no direct check: the
+// gateway ships a LIST price and an EFFECTIVE price, and quoting the wrong one
+// misstates a turn's cost in BOTH directions — the list price overstates a
+// `limited_free` turn (0.5 where 0 is actually charged), the effective price
+// understates it once the promotion lapses, which is why `original` rides
+// along. Its second job is negative: a `normal` row must keep the row shape it
+// had before promotion fields existed, so those fields appear ONLY for the two
+// promotion states. That shape is a contract with the panel, not an accident.
+{
+  section("the promotion-aware credit multiplier (raccoon-catalog.ts)");
+  try {
+    const normal = raccoonEffectiveMultiplier({ billing_multiplier: 2, billing_status: "normal" });
+    check("a normal row keeps the bare row shape",
+      normal.multiplier === 2 && !("original" in normal) && !("status" in normal) && !("note" in normal),
+      JSON.stringify(normal));
+
+    const promoted = raccoonEffectiveMultiplier({
+      billing_multiplier: 0.5,
+      billing_effective_multiplier: 0,
+      billing_status: "limited_free",
+      billing_status_note: "  限时免费  "
+    });
+    check("a promoted row quotes the EFFECTIVE price, not the list price",
+      promoted.multiplier === 0 && promoted.original === 0.5 && promoted.status === "limited_free",
+      JSON.stringify(promoted));
+    check("the note is trimmed before it reaches the panel",
+      promoted.note === "限时免费", JSON.stringify(promoted));
+
+    const discount = raccoonEffectiveMultiplier({ multiplier: 1, billing_effective_multiplier: 0.8, billing_status: "discount" });
+    check("`multiplier` is the fallback list price when `billing_multiplier` is absent",
+      discount.multiplier === 0.8 && discount.original === 1 && discount.status === "discount",
+      JSON.stringify(discount));
+
+    const declaredButUnapplied = raccoonEffectiveMultiplier({ billing_multiplier: 3, billing_status: "discount" });
+    check("a declared status with no effective price does NOT promote",
+      declaredButUnapplied.multiplier === 3 &&
+      !("original" in declaredButUnapplied) && !("status" in declaredButUnapplied),
+      JSON.stringify(declaredButUnapplied));
+
+    const unknownStatus = raccoonEffectiveMultiplier({ billing_multiplier: 4, billing_status: "half_off", billing_status_note: "n" });
+    check("a status the desktop client does not accept is treated as undeclared",
+      unknownStatus.multiplier === 4 && !("status" in unknownStatus) && !("note" in unknownStatus),
+      JSON.stringify(unknownStatus));
+
+    const bare = raccoonEffectiveMultiplier({});
+    check("a row with no price fields carries no price and no promotion fields",
+      bare.multiplier === undefined && Object.keys(bare).join(",") === "multiplier",
+      JSON.stringify(bare));
+
+    check("a blank note is omitted rather than carried as empty prose",
+      !("note" in raccoonEffectiveMultiplier({
+        billing_multiplier: 1, billing_effective_multiplier: 1, billing_status: "discount", billing_status_note: "   "
+      })));
+
+    check("vision is read from the explicit flag or the declared modality list",
+      raccoonRowVision({ vision: true }) === true &&
+      raccoonRowVision({ input_modalities: ["text", "image"] }) === true &&
+      raccoonRowVision({ input_modalities: ["text"] }) === false &&
+      raccoonRowVision({}) === false,
+      `flag=${raccoonRowVision({ vision: true })} mod=${raccoonRowVision({ input_modalities: ["text", "image"] })}`);
+  } catch (error) {
+    fail("the promotion-aware credit multiplier", error);
   }
 }
 
