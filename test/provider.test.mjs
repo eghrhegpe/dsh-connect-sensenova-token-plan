@@ -789,12 +789,27 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       JSON.stringify(await fresh.listEnabledIds()) === JSON.stringify(["kept-across-processes"]),
       `enabledModelIds=${JSON.stringify(await fresh.listEnabledIds())}`);
 
-    // 开关 store 走同一个原语：面板在另一个进程里拨动后，这边同样要跟上。
-    const switchHere = createFileProviderStore({ dir });
+    // 开关 store 走同一个原语（`switch-store.ts` 包着 `state-store` 的写器 + 读缓存），
+    // 所以跨过 TTL 后同样要看见另一个进程拨的开关。这里刻意**先读一次**再让对面改：
+    // 只做一次冷读的话缓存是空的，断言恒真——那种写法曾经守着这个 bug 却看不见它
+    // （`createSwitchStore` 把 `StoreOptions.now` 丢了，注入的时钟根本不生效，
+    //  而 `catalog-store` 手搭同样的两个对象时是认这个时钟的）。
+    let switchClock = 20_000;
+    const switchHere = createFileProviderStore({ dir, now: () => switchClock, ttlMs: 1000 });
     const switchElsewhere = createFileProviderStore({ dir });
     await switchElsewhere.save(true);
     check("a second process's panel switch is visible here too",
       (await switchHere.enabled()) === true, `enabled=${await switchHere.enabled()}`);
+
+    // TTL 窗口内：缓存里的值仍然够用，不替每个问题都读一次盘。
+    await switchElsewhere.forget();
+    check("inside the TTL the switch is served from the cache, not the disk",
+      (await switchHere.enabled()) === true, `enabled=${await switchHere.enabled()}`);
+
+    // 跨过 TTL：注入的时钟必须真的让缓存过期，否则这个 store 的 `now` 是死参数。
+    switchClock += 1500;
+    check("past the TTL the injected clock expires the switch cache too",
+      (await switchHere.enabled()) === null, `enabled=${await switchHere.enabled()}`);
   } catch (error) {
     fail("cross-process visibility of the shared state directory", error);
   } finally {

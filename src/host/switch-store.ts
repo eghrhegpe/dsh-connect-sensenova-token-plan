@@ -82,11 +82,17 @@ export interface SwitchStoreConfig<T> {
  * legacy inheritance, and the short-TTL read cache. The store keeps only its own
  * payload normalisation and method surface on top of what this returns.
  * @param {SwitchStoreConfig<T>} config - what makes this switch its own.
- * @param {StoreOptions} [options] - {@link StoreOptions}; `dir`/`profile`/`ttlMs`/`logger`.
+ * @param {StoreOptions} [options] - {@link StoreOptions}; `dir`/`profile`/`now`/`ttlMs`/`logger`.
  * @returns {SwitchStoreBase<T>} the plumbing the store's methods wrap.
  */
 export function createSwitchStore<T>(config: SwitchStoreConfig<T>, options: StoreOptions = {}): SwitchStoreBase<T> {
-  const { dir, profile = null, ttlMs = STATE_READ_TTL_MS, logger } = options;
+  // `now` is threaded into BOTH the writer (temp-file naming) and the read
+  // cache (TTL expiry). Dropping it here made `StoreOptions.now` — documented as
+  // "Clock override for tests" — silently inert for all four switches, while
+  // `catalog-store` (which builds the same two objects by hand) honoured it: the
+  // two implementations of one scaffold had drifted, which is the exact failure
+  // this factory exists to prevent.
+  const { dir, profile = null, now = Date.now, ttlMs = STATE_READ_TTL_MS, logger } = options;
   const stateDir = dir ?? profileStateDir(name, profile);
   const filePath = join(stateDir, config.file);
 
@@ -99,6 +105,7 @@ export function createSwitchStore<T>(config: SwitchStoreConfig<T>, options: Stor
     versions: config.knownVersions,
     label: config.label,
     onRefuse: (reason) => degrade(reason, null, logger, null),
+    now,
   });
 
   // Pre-§23 machines kept this switch in the SHARED directory. A profile-scoped
@@ -115,6 +122,7 @@ export function createSwitchStore<T>(config: SwitchStoreConfig<T>, options: Stor
   const parse = (raw: unknown) => config.normalize(raw);
   const cache = createStateReadCache(async () => parse(await readStateJson(filePath)), {
     ttlMs,
+    now,
     inheritFrom: legacyFile === null ? null : {
       read: async () => parse(await readStateJson(legacyFile)),
       write: async (value) => {
