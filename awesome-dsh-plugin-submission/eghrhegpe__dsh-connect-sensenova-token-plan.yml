@@ -1,29 +1,20 @@
 # Submission draft for awesome-dsh-plugin.
 #
 # Copy this file to `data/plugins/eghrhegpe__dsh-connect-sensenova-token-plan.yml` in a fork of
-# awesome-dsh-plugin/awesome-dsh-plugin and open a PR that adds only it. Do not edit that
-# repository's READMEs — both are generated from data/plugins/. Do not add an `npm:` field
-# (market CI rejects it); do not add screenshots here (the market reads this repo's root
-# screenshots.json instead).
+# awesome-dsh-plugin/awesome-dsh-plugin and open a PR that touches only it.
+# Do not edit that repository's READMEs (they are generated), do not add an `npm:` field,
+# do not put screenshots here (the market reads this repo's `screenshots.json`).
+# Rules live in `./contributing.md` (upstream copy) — do not restate them anywhere.
 #
-# The description is read as a claim and checked against the code line by line, so every noun
-# below is one the source actually has:
-#   "language and text-to-image models … opt-in switches, off by default" —
-#     src/host/provider-publish.ts and src/host/llm-adapter.ts publish the provider;
-#     src/host/draw.ts:36 registers the agent tool sensenova_draw_image (DRAW_TOOL_NAME);
-#     the off-by-default values live in src/host/host-config.ts and cordis.patch.yml.
-#   "image input and thinking levels are filled in automatically" —
-#     src/host/modality.ts decides image input; src/host/llm-models.ts and
-#     src/client/model-picker.ts carry thinkingLevels / thinkingDefault from the model roster.
-#   "rate-limit hits back off on their own" — src/host/llm-retry.ts and src/host/codes.ts
-#     classify rate limit vs drained pool before deciding whether to retry.
-#   "usage pill, credit pools and per-model consumption" — src/client/composer-usage-pill.ts,
-#     src/host/console-client.ts and src/client/cards.ts.
-#   "Xiaohuanxiong … QR code … per-model credit multipliers" — src/host/raccoon-auth.ts,
-#     src/client/raccoon-card.ts and src/host/raccoon-catalog.ts.
+# `description.zh` is the text of record; `description.en` is its sentence-by-sentence
+# counterpart. Re-check a claim against these modules, not against this comment:
+#   credit pools / per-model use    src/host/console-client.ts, src/client/cards.ts
+#   rate-limit backoff              src/host/llm-retry.ts, codes.ts
+#   draw tool                       src/host/draw.ts
+#   Xiaohuanxiong sign-in           src/host/raccoon-auth.ts, src/client/raccoon-card.ts
 url: https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan
 name: eghrhegpe/dsh-connect-sensenova-token-plan
 category: model
 description:
-  en: 'Bring the SenseNova language and text-to-image models into DSH as opt-in switches, off by default: image input and thinking levels are filled in automatically, and rate-limit hits back off on their own instead of reading as an exhausted quota. After signing in to the SenseNova console, the card shows the usage pill, credit pools and per-model consumption; Xiaohuanxiong can also be linked by QR code, with its models and per-model credit multipliers.'
+  en: 'One-tap connect SenseNova Token Plan language and text-to-image models into DSH, with image recognition and thinking level filled in automatically (off by default). On a rate limit it backs off and retries on its own instead of misreading it as an exhausted quota. After signing in to the SenseNova console you can see the card pill, credit pools and per-model consumption. Xiaohuanxiong can also be signed in by QR code, bringing in its models and their consumption multipliers.'
   zh: '一键接入商汤 Token Plan的语言、文生图模型到 DSH，自动填入图片识别与思考强度（默认关）；限频时自动退避重试，不会误判为额度耗尽；登陆商汤控制台后，可查看卡片胶囊、积分池、每模型消耗。也支持扫码登陆小浣熊，接入其模型，查看模型消耗倍率。'
