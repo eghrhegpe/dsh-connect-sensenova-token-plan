@@ -23,18 +23,25 @@
  *      `materializeStandardBinding` 仍把 keyedHooks 经 `standardHookPropName(name)`
  *      转成 `use<Name>` prop，且 session（非 `session-maybe`）作用域 `optional=false`
  *      （缺源抛 `SlotAssemblyError`）——不存在「可能没注入」的形态。
+ *   E. 渲染器仍接入：`dsh-client-ui-conversation` 的 `client.js` 仍
+ *      `require("@deepseek-ai/dsh-client-ui-slots")`（且不自己定义 `renderSlot`）。
+ *      这条**不**断言该包装在 `node_modules` 里：0.2.1-rc.2 起没有任何包声明依赖
+ *      它，shell 的模块注册表供给它，所以它不在安装树里是正常形态。按包存在性
+ *      断言（旧版的做法）只会把上游的打包方式当成契约，见 PITFALLS §58。
  *
  * ## 怎么跑
  *
  * 纯静态读文件，不装 peer、不拉 Host、不碰网络。候选 scope 根按「本机 DSH 副本」
  * 枚举：profile 的 node_modules、`dsh-asar-unpacked` / `app.asar.unpacked` 的运行时树
- * （即 peer-roots.mjs 的候选根）、`$DSH_HOME` 指向的 checkout、以及 `~/dsh-plugins`
- * 下兄弟插件的 node_modules。每个 scope 是一个**版本样本**，全部要过 A–D。
+ * （即 peer-roots.mjs 的候选根）、`$DSH_HOME` 指向的 checkout、`~/dsh-plugins`
+ * 下兄弟插件的 node_modules，以及**全局 CLI 树**（`cliRuntimeModules()`）——最后
+ * 一项是 CI runner 上唯一存在的那个，漏掉它等于让这条门禁在 CI 上只剩 SKIP。
+ * 每个 scope 是一个**版本样本**，全部要过 A–E。
  *
  * 找不到任何副本 = 醒目 SKIP 退出 0（与 `store.test.mjs` / `peer-contract.test.mjs`
  * 的 peer 缺席范式一致）：一台没装 Host 的机器上属正常。有副本却装不齐（缺
- * session / renderer / slots 任一）按失败处理，不是 SKIP——那是环境不完整，同
- * peer-roots 的处理。
+ * session / renderer / conversation 任一）按失败处理，不是 SKIP——那是环境不完整，
+ * 同 peer-roots 的处理。
  *
  * @module test/composer-slot-gate
  */
@@ -44,19 +51,34 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { envSkip } from "./env-skip.mjs";
+import { cliRuntimeModules } from "./peer-roots.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
 const LOCAL_APP_DATA = process.env.LOCALAPPDATA ?? "";
 const DSH_HOME = process.env.DSH_HOME;
 
-/** The four packages that carry the composer-slot contract, read per scope. */
+/**
+ * The three packages whose BYTES this gate reads. All three must be present.
+ *
+ * `dsh-client-ui-slots` is deliberately NOT here. It was the fourth, as an
+ * EXISTENCE assertion — but nothing in A–D ever read its bytes, so it was an
+ * install-shape proxy, and it went stale when upstream 0.2.1-rc.2 shrank
+ * `dsh-experimental-client-ui-agent-team`'s `peerDependencies` to `cordis`
+ * alone: npm had been auto-installing slots as a peer, and no package declares
+ * it anymore. The package still PUBLISHES (0.2.1-rc.2 is on npm, not
+ * deprecated) and the conversation bundle still `require`s it; the shell's
+ * module registry supplies it, so it needs to be in no `node_modules` at all.
+ * See {@link SLOT_RUNTIME_PKG} and the plugin's PITFALLS §58.
+ */
 const CONTRACT_PKGS = [
   "dsh-client-ui-conversation",
   "dsh-client-ui-session",
   "dsh-client-ui-renderer",
-  "dsh-client-ui-slots",
 ];
+
+/** The slot runtime the conversation bundle pulls from the shell's registry. */
+const SLOT_RUNTIME_PKG = "dsh-client-ui-slots";
 
 const results = [];
 function check(name, condition, detail = "") {
@@ -77,6 +99,13 @@ function fail(name, error) {
  * @returns {string[]} existing `node_modules` roots.
  */
 function candidateRoots() {
+  // `cliRuntimeModules()` is what makes this gate run on a CI runner at all:
+  // those machines have the dsh CLI (`npm install -g @deepseek-ai/dsh`) and
+  // nothing else, so every path enumerated literally below is absent. Without
+  // it the roster read a zero-scope SKIP, and `envSkip` promotes that to a
+  // FAILURE under CI (`CI=true` ⇒ STRICT) — the suite went red for having
+  // nothing to read, which is the opposite of its intent.
+  const cliRuntime = cliRuntimeModules();
   const roots = [
     ...(DSH_HOME === undefined || DSH_HOME === "" ? [] : [join(DSH_HOME, "dsh-asar-unpacked", "dsh", "node_modules")]),
     join(HERE, "..", "node_modules"),
@@ -84,6 +113,7 @@ function candidateRoots() {
     join(HOME, ".dsh", "profiles", "node_modules"),
     join(HOME, "dsh-plugins"),
     ...(LOCAL_APP_DATA === "" ? [] : [join(LOCAL_APP_DATA, "Programs", "DeepSeek Harness", "resources", "app.asar.unpacked", "dsh", "node_modules")]),
+    ...(cliRuntime === undefined ? [] : [cliRuntime]),
   ];
   const out = [];
   const seen = new Set();
@@ -141,7 +171,7 @@ function readdir(path) {
 }
 
 /**
- * Assert the four contract items for one DSH client scope.
+ * Assert the contract items for one DSH client scope.
  * @param {string} scope - the `<root>/@deepseek-ai` directory.
  * @param {string} label - a label for the failure messages.
  */
@@ -151,12 +181,36 @@ function assertScope(scope, label) {
   );
   for (const name of CONTRACT_PKGS) {
     check(
-      `${label}: ${name} 包存在（四件套缺一即环境不完整）`,
+      `${label}: ${name} 包存在（三个读到字节的包缺一即环境不完整）`,
       present.has(name),
       present.has(name) ? `${join(scope, name)} 在位` : `缺失 ${join(scope, name)}`
     );
   }
+  // Short-circuiting here is safe precisely because the three above are the
+  // packages A–D READ: a missing one makes every later check throw, not pass.
   if (present.size !== CONTRACT_PKGS.length) return;
+
+  // E. 槽位渲染器仍由 shell 递进来。
+  // 单独立一条而不是并进前面三个：slots 不在安装树里是 0.2.1 起的正常形态，
+  // 唯一能证明「渲染器仍可达」的字节是那处模块说明符。旧版这里按包存在性断言，
+  // 正是把「上游的打包方式」当成了「我们的契约」。
+  try {
+    const convTxt = readFileSync(join(scope, "dsh-client-ui-conversation", "lib", "client.js"), "utf8");
+    const specifier = `"@deepseek-ai/${SLOT_RUNTIME_PKG}"`;
+    const requires = convTxt.includes(`require(${specifier})`);
+    const definesOwn = /\bfunction\s+renderSlot\b|\brenderSlot\s*=/.test(convTxt);
+    check(
+      `${label}: conversation bundle 仍 require(${specifier})`,
+      requires && !definesOwn,
+      requires
+        ? (definesOwn
+          ? "既 require 又自造 renderSlot——打包方式又变了，重读这条门禁"
+          : "渲染器仍经 shell 模块注册表递进 bundle")
+        : `找不到 require(${specifier})：槽位渲染器不再接入，胶囊会静默消失`
+    );
+  } catch (error) {
+    fail(`${label}: 读取 conversation client.js（slots 说明符）`, error);
+  }
 
   // A. 槽位声明
   const slotsDts = join(scope, "dsh-client-ui-conversation", "lib", "types", "client", "contract", "slots.d.ts");
