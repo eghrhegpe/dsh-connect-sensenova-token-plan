@@ -191,7 +191,6 @@ async function startFake(port) {
   return import(`${new URL("./fake-platform.mjs", import.meta.url).href}?${Date.now()}`);
 }
 
-/** Boot the Host and resolve with its launch token once it prints one. */
 /**
  * Kill the Host AND everything it spawned.
  *
@@ -223,6 +222,16 @@ function killHostTree(child) {
   }
 }
 
+/**
+ * Boot the Host and resolve once it prints its launch URL.
+ *
+ * The resolved `port` is the one the Host ACTUALLY bound. The caller passes 0
+ * so the OS picks, and reading the announced URL back is the only race-free
+ * way to learn it — asking the OS for a free port ourselves, closing the
+ * probe, and hoping the Host wins the bind is what this replaces.
+ *
+ * @returns {Promise<{child: import("node:child_process").ChildProcess, url: string, port: number, output: () => string}>}
+ */
 function startHost(home, port) {
   return new Promise((resolve, reject) => {
     // The developer's own SenseNova environment is STRIPPED from the child.
@@ -248,10 +257,13 @@ function startHost(home, port) {
     const timer = setTimeout(() => reject(new Error(`the Host did not report a URL:\n${out}`)), 180_000);
     const onData = (chunk) => {
       out += String(chunk);
-      const match = out.match(/http:\/\/127\.0\.0\.1:\d+\/\?token=([A-Za-z0-9._~-]+)/);
+      const match = out.match(/http:\/\/127\.0\.0\.1:(\d+)\/\?token=([A-Za-z0-9._~-]+)/);
       if (match !== null) {
         clearTimeout(timer);
-        resolve({ child, url: `http://127.0.0.1:${port}/?token=${match[1]}`, output: () => out });
+        // The bound port, not the requested one: with `--port 0` they differ,
+        // and every request below has to target what the Host is listening on.
+        const bound = Number(match[1]);
+        resolve({ child, url: `http://127.0.0.1:${bound}/?token=${match[2]}`, port: bound, output: () => out });
       }
     };
     child.stdout.on("data", onData);
@@ -317,7 +329,19 @@ async function readJson(response, label = "the response") {
 let host = null;
 let fake = null;
 let home = null;
-const PORT = await freePort();
+// The Host's port is NOT pre-picked. `--port 0` is the CLI's own supported
+// spelling ("listen port; pass 0 to let the OS pick a free one"), and the URL
+// it prints carries the port it actually bound, so PORT is read back below.
+//
+// Pre-picking through freePort() left a real hole rather than a theoretical
+// one: the probe closes its socket, then the Host needs a second or more to
+// boot and bind. A collision inside that window surfaced as "the Host did not
+// report a URL", which reads like a boot failure — the one thing the message
+// is supposed NOT to mean.
+let PORT = 0;
+// FAKE_PORT keeps the probe pattern: the fake binds in-process, microseconds
+// after the probe closes, and buildHome() needs the value before the Host
+// starts. The Host's multi-second window is what made pre-picking unsound.
 const FAKE_PORT = await freePort();
 home = buildHome(FAKE_PORT);
 
@@ -352,7 +376,8 @@ try {
   fake = await startFake(FAKE_PORT);
   note(`fake platform on 127.0.0.1:${FAKE_PORT}`);
 
-  host = await startHost(home, PORT);
+  host = await startHost(home, 0);
+  PORT = host.port;
   note(`dsh web on 127.0.0.1:${PORT}`);
 
   const warnings = host.output();
