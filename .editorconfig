@@ -1,0 +1,50 @@
+# EditorConfig — 编辑器约定（2026-10-20 落地）
+#
+# 目的：把「别制造换行/空白噪音」从个人习惯变成仓库约定。**判据是零字节改动**：
+# 只声明那些与磁盘现状一致的键；任何会让编辑器重写存量文件的键一律不写，否则
+# 一次「保存全部」就能造出几百个纯空白 diff，把真实改动淹没（`.gitattributes`
+# 头部记的正是这类噪音的根因）。
+#
+# 实测基线（2026-10-20，仓库快照 230 个跟踪文件）：
+#   - BOM：0 个文件带 → charset=utf-8（不带 BOM）就是现状；
+#   - 换行：42 个文件工作区是 CRLF，但索引里是 LF——`.gitattributes` 已钉
+#     `* text=auto eol=lf`，故 end_of_line=lf 与既有契约同向，不是新规矩；
+#   - 行尾空白：只有 4 个文件带（14 行），其中 1 个是构建产物 lib/index.js；
+#   - 文件末换行：36 个文件没有（多为二进制与生成物），补上就是一次全文件 diff；
+#   - Tab：源码与文档里 0 处（仅 client.js / lib/*.js 生成物与二进制误报），
+#     故 indent_style=space 就是现状；
+#   - 缩进：代码文件**没有**一个以 4 空格为主（0 个），2 空格是本仓代码风格。
+#
+# 所以下面这些键是**故意不写**的（写了就会批量改字节）：
+#   trim_trailing_whitespace = true → 会吃掉 markdown 硬换行的行尾双空格
+#   insert_final_newline = true     → 会给 36 个无末尾换行的文件补行
+#   indent_size = 4 / indent_style = tab → 与现状不符
+# 一句话：这里只声明「别动」，不声明「给我改」。
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+trim_trailing_whitespace = false
+insert_final_newline = false
+indent_style = space
+
+[*.{ts,tsx,js,mjs,cjs,jsx,json,yml,yaml}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+
+# 生成物、第三方与二进制：不参与（内容由构建/上游决定，编辑器不该碰）
+[lib/**]
+indent_size = unset
+
+[client.js]
+indent_size = unset
+
+[assets/**]
+indent_size = unset
+
+[upstream/**]
+indent_size = unset
