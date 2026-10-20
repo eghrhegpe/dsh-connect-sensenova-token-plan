@@ -4,11 +4,12 @@
  * 不 import 任何 Host peer，纯函数 + 稳定协议字符串即可覆盖：
  *   - `looksLikeRateLimit`：哪些 429 体被认作限频、哪些硬额度被放行；
  *   - `reclassifyFinish`：把误判 QUOTA 的 finish 改回 RATE_LIMIT、且幂等；
- *   - `reclassifyStream`：对整条流逐 chunk 纠正，非 finish / 真 QUOTA 原样过。
+ *   - `reclassifyStream`：对整条流逐 chunk 纠正，非 finish / 真 QUOTA 原样过；
+ *   - `reclassifyReason`：429 重分类的判据路径（8 条稳定短串），布尔只是它的投影。
  *
  * 这些与 peer 缺席与否无关——干净 checkout 也能跑（符合 npm test 离线门禁）。
  */
-import { looksLikeRateLimit, extractStructuredType, shouldReclassifyQuotaToRate, reclassifyFinish, reclassifyStream, CODE } from "../src/host/llm-error-fix.ts";
+import { looksLikeRateLimit, extractStructuredType, shouldReclassifyQuotaToRate, reclassifyFinish, reclassifyStream, reclassifyReason, REASON, CODE } from "../src/host/llm-error-fix.ts";
 
 const results = [];
 function check(name, condition, detail = "") {
@@ -159,6 +160,64 @@ function fail(name, error) {
   for await (const c of reclassifyStream(src())) seen.push(c);
   check("stream corrects code:8 rpm-exhausted to RATE_LIMIT",
     seen[0]?.reason?.failure?.code === CODE.RATE_LIMIT, JSON.stringify(seen[0]?.reason?.failure));
+}
+
+// --- 5. reclassifyReason: 429 重分类的可观测理由 ----------------------------
+// 把 shouldReclassifyQuotaToRate 的判定路径翻译成稳定短串。钉死三件事：
+//   ① 8 条路径各自对应哪类报文（一条路径塌成另一条，判定逻辑就退化成了旧版）；
+//   ② 布尔是路径的投影（两条路径不得各判各的——改前它们确实是两处独立判断）；
+//   ③ 路径串是稳定契约（改名等于改日志里的 grep 键，要改就一起改文档与测试）。
+{
+  const q = (message) => ({ code: CODE.QUOTA, message });
+  const cases = [
+    // [failure, 期望 reason, 期望 shouldReclassifyQuotaToRate]
+    [null, REASON.NOT_QUOTA_CODE, false],
+    [{ code: CODE.RATE_LIMIT, message: "throttled" }, REASON.NOT_QUOTA_CODE, false],
+    [q('{"type":"rate_limit_exceeded"}'), REASON.STRUCTURED_RATE_LIMIT_TYPE, true],
+    [q('{"type":"quota_exceeded_error","detail":"tpm cap"}'), REASON.STRUCTURED_QUOTA_RATE_CAP, true],
+    [q('{"type":"quota_exceeded_error","detail":"all used up"}'), REASON.STRUCTURED_QUOTA_NO_CAP, false],
+    [q('{"type":"server_overloaded"}'), REASON.STRUCTURED_OTHER_TYPE, false],
+    [q("HTTP 429 too many requests"), REASON.TEXT_RATE_SIGNAL, true],
+    [q("requests per minute exceeded, quota exceeded"), REASON.TEXT_HARD_QUOTA, false],
+    [q("service temporarily unavailable"), REASON.TEXT_NO_RATE_SIGNAL, false]
+  ];
+  const seenPaths = new Set();
+  for (const [failure, wantReason, wantBool] of cases) {
+    const got = reclassifyReason(failure);
+    seenPaths.add(got);
+    check(`reclassifyReason = ${wantReason}`, got === wantReason, `got=${got}`);
+    check(`shouldReclassifyQuotaToRate = ${wantBool} (${wantReason})`,
+      shouldReclassifyQuotaToRate(failure) === wantBool);
+  }
+
+  // 闭合集合：8 条路径一条不多、一条不少。多一条 = 有分支没被钉住；少一条 =
+  // 两条分支共用一个串，路径信息已经丢了。
+  check("reclassifyReason 路径集合恰好 8 条", seenPaths.size === 8, `seen=${seenPaths.size}`);
+  check("REASON 导出恰好 8 个路径串", Object.keys(REASON).length === 8, `n=${Object.keys(REASON).length}`);
+
+  // 路径串是稳定契约：字面量被改名等于改了日志里的 grep 键。
+  const expectedLiterals = [
+    "not_quota_code",
+    "structured:rate_limit_type",
+    "structured:quota_rate_cap",
+    "structured:quota_no_cap",
+    "structured:other_type",
+    "text:rate_signal",
+    "text:hard_quota",
+    "text:no_rate_signal"
+  ];
+  const literals = Object.values(REASON);
+  check("REASON 的 8 个字面量与本文档一致",
+    expectedLiterals.every((lit) => literals.includes(lit)) &&
+      literals.every((value) => expectedLiterals.includes(value)),
+    JSON.stringify(literals));
+
+  // 8 条路径里恰好 3 条落到「应纠正」：改前这条分割是散在两个函数里的，
+  // 现在布尔完全由路径集合派生，比例也被钉住了。
+  const truePaths = new Set(
+    cases.filter(([failure]) => shouldReclassifyQuotaToRate(failure)).map(([, reason]) => reason)
+  );
+  check("应纠正路径恰好 3 条（其余 5 条保留 QUOTA）", truePaths.size === 3, `true=${[...truePaths].join(",")}`);
 }
 
 console.log(JSON.stringify(results, null, 2));

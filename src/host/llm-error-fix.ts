@@ -24,9 +24,10 @@
  *   - 只重写 `finish` chunk 的 `failure.code`，保留原始 `message` 以便排查，
  *     不触碰任何正常数据流，幂等（已是 RATE_LIMIT / 非 QUOTA 原样放行）。
  *
- * 阅读顺序：本文件自上而下是「判据词表 → 两个纯判据 → 决策组合 → 流出口
- * 改写」。对外契约在底部（`reclassifyStream` / `reclassifyFinish`），想找它
- * 依赖了哪些判据，就从底部逆着依赖链往上读。
+ * 阅读顺序：本文件自上而下是「判据词表 → 纯判据 → 判据路径 → 布尔派生 →
+ * 流出口改写」。对外契约在底部（`reclassifyStream` / `reclassifyFinish`），想找它
+ * 依赖了哪些判据，就从底部逆着依赖链往上读；想知道「为什么这么判」，看
+ * `reclassifyReason` 返回的路径串（{@link REASON}）——布尔只是它的投影。
  *
  * @module dsh-connect-sensenova-token-plan/llm-error-fix
  */
@@ -98,11 +99,30 @@ const STRUCTURED_TYPE = /"type"\s*:\s*"([^"]+)"/i;
  */
 export function looksLikeRateLimit(message: string): boolean {
   if (typeof message !== "string" || message.length === 0) return false;
-  const m = message.toLowerCase();
-  const hasRateSignal = RATE_SIGNAL.some((re) => re.test(m));
-  if (!hasRateSignal) return false;
-  const isHardQuota = HARD_QUOTA_WORDING.some((re) => re.test(m));
-  return !isHardQuota;
+  if (!hasRateSignal(message)) return false;
+  return !hasHardQuotaWording(message);
+}
+
+/**
+ * 文本里是否出现限频信号（{@link RATE_SIGNAL} 任一）。
+ *
+ * 与 {@link hasHardQuotaWording} 一起构成「限频 vs 真耗尽」这一对判据的共同
+ * 底座：布尔判据（{@link looksLikeRateLimit}）与路径判据（{@link
+ * reclassifyReason}）读的是同一份词表、同一次小写化，**不可能各判各的**。
+ * @param {string} message - 平台错误文本。
+ * @returns {boolean} true 表示命中限频信号。
+ */
+function hasRateSignal(message: string): boolean {
+  return RATE_SIGNAL.some((re) => re.test(message.toLowerCase()));
+}
+
+/**
+ * 文本里是否命中硬额度措辞（{@link HARD_QUOTA_WORDING} 任一）——真耗尽信号。
+ * @param {string} message - 平台错误文本。
+ * @returns {boolean} true 表示命中硬额度措辞。
+ */
+function hasHardQuotaWording(message: string): boolean {
+  return HARD_QUOTA_WORDING.some((re) => re.test(message.toLowerCase()));
 }
 
 /**
@@ -124,43 +144,105 @@ export function extractStructuredType(message: string): string | null {
 }
 
 /**
- * 一个被 peer 判为 QUOTA 的失败，是否其实是限频、应纠正为 RATE_LIMIT。
+ * 429 重分类的判据路径——{@link reclassifyReason} 返回的稳定短串（非自由文本）。
+ *
+ * 为什么要它：改之前 {@link shouldReclassifyQuotaToRate} 只吐一个布尔，于是
+ * 「这条 429 为什么判成限频 / 为什么没判」在日志与现场都查不到——同一份 peer
+ * 报文换个措辞就换个结论，而排查的人只能看到结果。改成「先给路径、再由路径
+ * 派生布尔」之后，判定路径可 grep、可钉测，且布尔与路径**不可能分叉**：布尔
+ * 只由 {@link RECLASSIFY_TRUE_REASONS} 这一个集合派生。
+ */
+export const REASON = Object.freeze({
+  /** 失败为空或 code≠QUOTA，纠正层不适用。 */
+  NOT_QUOTA_CODE: "not_quota_code",
+  /** 结构化 type 含 rate_limit：本就是限频（防御性纠正）。 */
+  STRUCTURED_RATE_LIMIT_TYPE: "structured:rate_limit_type",
+  /** 结构化 type 含 quota 且命中速率上限字样：被错命名的速率上限，纠正。 */
+  STRUCTURED_QUOTA_RATE_CAP: "structured:quota_rate_cap",
+  /** 结构化 type 含 quota 但无任何速率信号：真耗尽，保留 QUOTA。 */
+  STRUCTURED_QUOTA_NO_CAP: "structured:quota_no_cap",
+  /** 结构化 type 是其它非 quota 值：保守不纠正。 */
+  STRUCTURED_OTHER_TYPE: "structured:other_type",
+  /** 无结构化 type，纯文本命中限频信号且无硬额度字样：纠正。 */
+  TEXT_RATE_SIGNAL: "text:rate_signal",
+  /** 无结构化 type，命中硬额度字样：保留 QUOTA。 */
+  TEXT_HARD_QUOTA: "text:hard_quota",
+  /** 无结构化 type，也无限频信号：保留 QUOTA。 */
+  TEXT_NO_RATE_SIGNAL: "text:no_rate_signal"
+});
+
+/**
+ * 一个被 peer 判为 QUOTA 的失败，按哪条判据路径处理——429 重分类的**可观测
+ * 理由**。
+ *
+ * 纯函数，复用同一批词表（模块私有的 {@link RATE_SIGNAL} / {@link
+ * RATE_CAP_WORDING}、{@link HARD_QUOTA_WORDING}、结构化 type），不引入第二份
+ * 词表；返回 {@link REASON} 里的稳定短串，供日志/面板/测试引用「为什么这么
+ * 判」。
  *
  * 这是修正 v1（纯文本启发）漏判的核心：`{"message":"rpm exhausted",
  * "type":"quota_exceeded_error","code":"8"}` 这种体——商汤把**请求速率上限**
  * 复用 `quota_exceeded_error` 这个名字，纯文本里没有 “rate limit” 字样，v1 的
  * `looksLikeRateLimit` 既没命中限频信号也没命中硬额度，于是留在 QUOTA、不重试、
- * 直接失败。本函数改读结构化 `type`，逐层收窄：
+ * 直接失败。本函数改读结构化 `type`，逐层收窄，每条返回串对应一条路径：
  *
- *   1. `type` 含 `rate_limit` → 本就是限频（peer 多数已判 RATE_LIMIT，这里是防御）。
- *   2. `type` 含 `quota` 但仍带 {@link RATE_CAP_WORDING}（rpm/tpm/每分钟/限流…）
- *      → 是“被错命名为 quota 的速率上限”，纠正为 RATE_LIMIT。
- *   3. `type` 含 `quota` 且无任何速率信号（token/credit/balance 真耗尽）→ 保留 QUOTA。
- *   4. `type` 是其它非 quota 值 → 保守不纠正。
- *   5. 无结构化 `type` → 退回 v1 的 {@link looksLikeRateLimit}。
+ *   1. {@link REASON.NOT_QUOTA_CODE}             失败为空或 code≠QUOTA，不适用。
+ *   2. {@link REASON.STRUCTURED_RATE_LIMIT_TYPE} type 含 rate_limit，本就是限频（防御）。
+ *   3. {@link REASON.STRUCTURED_QUOTA_RATE_CAP}  type 含 quota 但带 {@link RATE_CAP_WORDING}
+ *      （rpm/tpm/每分钟/限流…）→ 是“被错命名为 quota 的速率上限”，纠正为 RATE_LIMIT。
+ *   4. {@link REASON.STRUCTURED_QUOTA_NO_CAP}    type 含 quota 且无任何速率信号
+ *      （token/credit/balance 真耗尽）→ 保留 QUOTA。
+ *   5. {@link REASON.STRUCTURED_OTHER_TYPE}      type 是其它非 quota 值 → 保守不纠正。
+ *   6. {@link REASON.TEXT_RATE_SIGNAL}           无结构化 type，纯文本命中限频信号
+ *      且无硬额度字样 → 纠正。
+ *   7. {@link REASON.TEXT_HARD_QUOTA}            无结构化 type，命中硬额度字样 → 保留 QUOTA。
+ *   8. {@link REASON.TEXT_NO_RATE_SIGNAL}        无结构化 type，也无限频信号 → 保留 QUOTA。
  *
  * 不纠正真配额耗尽：那是共享 Token Plan 池的硬耗尽，重试只会延长冷却窗口
  * （ROADMAP §1 纪律），所以宁可快失败。
  * @param {{code?: string, message?: string}} failure
- * @returns {boolean} true 表示应纠正为 RATE_LIMIT。
+ * @returns {string} 标记处理路径的稳定短串。
  */
-export function shouldReclassifyQuotaToRate(failure: { code?: unknown; message?: unknown }): boolean {
-  if (!failure || failure.code !== CODE.QUOTA) return false;
+export function reclassifyReason(failure: { code?: unknown; message?: unknown }): string {
+  if (!failure || failure.code !== CODE.QUOTA) return REASON.NOT_QUOTA_CODE;
   const message = typeof failure.message === "string" ? failure.message : "";
   const type = extractStructuredType(message);
 
   if (type !== null) {
     const t = type.toLowerCase();
-    if (/rate[_\s-]?limit/.test(t)) return true; // 分支 1：已是限频类型（防御）。
+    if (/rate[_\s-]?limit/.test(t)) return REASON.STRUCTURED_RATE_LIMIT_TYPE; // 分支 1（防御）
     if (/quota/.test(t)) {
-      // 分支 2 vs 3：quota_exceeded_error 但带速率上限字样 → 错命名，纠正。
-      return RATE_CAP_WORDING.test(message);
+      // 分支 2 vs 3：quota_exceeded_error 但带速率上限字样 → 错命名。
+      return RATE_CAP_WORDING.test(message)
+        ? REASON.STRUCTURED_QUOTA_RATE_CAP
+        : REASON.STRUCTURED_QUOTA_NO_CAP;
     }
-    return false; // 分支 4：其它非 quota 类型，保守不纠正。
+    return REASON.STRUCTURED_OTHER_TYPE; // 分支 4
   }
 
-  // 分支 5：无结构化 type，退回纯文本启发。
-  return looksLikeRateLimit(message);
+  // 分支 5：无结构化 type，退回纯文本启发——但**理由仍然可见**。
+  if (!hasRateSignal(message)) return REASON.TEXT_NO_RATE_SIGNAL;
+  return hasHardQuotaWording(message) ? REASON.TEXT_HARD_QUOTA : REASON.TEXT_RATE_SIGNAL;
+}
+
+/** 判为「应纠正为 RATE_LIMIT」的路径集合——布尔判定的唯一真源。 */
+const RECLASSIFY_TRUE_REASONS: ReadonlySet<string> = new Set([
+  REASON.STRUCTURED_RATE_LIMIT_TYPE,
+  REASON.STRUCTURED_QUOTA_RATE_CAP,
+  REASON.TEXT_RATE_SIGNAL
+]);
+
+/**
+ * 一个被 peer 判为 QUOTA 的失败，是否其实是限频、应纠正为 RATE_LIMIT。
+ *
+ * 布尔判定单一真源：读 {@link reclassifyReason} 的路径串是否落在「应纠正」集合
+ * 里，分支逻辑不再写第二遍（改前两处各判一遍，是漂移的温床）；「为什么这么
+ * 判」见 {@link reclassifyReason} 的返回串。
+ * @param {{code?: string, message?: string}} failure
+ * @returns {boolean} true 表示应纠正为 RATE_LIMIT。
+ */
+export function shouldReclassifyQuotaToRate(failure: { code?: unknown; message?: unknown }): boolean {
+  return RECLASSIFY_TRUE_REASONS.has(reclassifyReason(failure));
 }
 
 /** The stream chunk shape the reclassification layer reads off a finish. */
