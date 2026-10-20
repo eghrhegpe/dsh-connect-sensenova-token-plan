@@ -58,14 +58,14 @@
  * are the slowest and the most likely to be SKIPped by a missing devDependency.
  *
  * `e2e-gate` is last on purpose: it boots a real Host process, so it must not
- * hold up the 30 cheap verdicts that precede it (`render-dom.test.mjs` is
+ * hold up the 31 cheap verdicts that precede it (`render-dom.test.mjs` is
  * cheap only when its devDeps resolve; without them it prints SKIP and exits
  * 0 in milliseconds).
  *
  * @type {ReadonlyArray<{name: string, kind: "suite"|"gate", note: string}>}
  */
 export const SUITES = Object.freeze([
-  // ── the 28 *.test.mjs suites (this exact set is what package.test.mjs pins
+  // ── the 31 *.test.mjs suites (this exact set is what package.test.mjs pins
   //    against disk; the five gate files below are exempt there, as e2e-gate
   //    has been since it stopped being a *.test.mjs) ───────────────────────
   { name: "auth.test.mjs", kind: "suite", note: "login / PKCE / JWE / throttle classification" },
@@ -98,6 +98,7 @@ export const SUITES = Object.freeze([
   { name: "state-segmentation.test.mjs", kind: "suite", note: "per-profile state directories" },
   { name: "silent-catch.test.mjs", kind: "suite", note: "source hygiene: every statement-less catch explains itself" },
   { name: "host-range.test.mjs", kind: "suite", note: "peer range × version universe alignment (golden, zero install)" },
+  { name: "market-entry.test.mjs", kind: "suite", note: "the submission copy vs a mirror of the market's entry rules (js-yaml, zero network)" },
 
   // ── the five gate files. Not *.test.mjs, so the three-way roster pin
   //    exempts them (same exemption e2e-gate has always had) — but they are
