@@ -61,7 +61,7 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
 // 📦 冻结档案（2026-10-05）：时点记录，已退出持续维护面（docs/README.md 索引里标冻结、
 // 正文带冻结头注）。它们承载的是「当初怎么决策/怎么拆」的历史，不是现行规则，因此
 // 考古扫描（检查 12）与数值副本核对（检查 17）都跳过——冻结档里的旧数字是准确历史。
-const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md", "SIBLING-GAP.md"]);
+const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md", "SIBLING-GAP.md", "SIBLING-GAP-2.md"]);
 
 // 1) 内部链接全部可解析
 {
