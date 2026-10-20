@@ -16,6 +16,9 @@
 //                    版本导语 ≤ 90 字（先给结论）。
 //   索引与真源闭合（16）：TESTING.md §2 的套件表必须与 test/suites.mjs 的名册
 //                    双向闭合——新套件登了名册却忘了登表，是纯人肉步骤、不会自己变红。
+//   数值副本看守（17）：文档正文复述的配置默认值 / 缓存 TTL / 路由 body 上限必须等于
+//                    源码常量。副本本身不可怕，**没有看守的副本**才可怕——SETUP.md 的
+//                    配置表此前自称被 config.test.mjs 钉住，实际全仓没有测试读它。
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, dirname, extname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +57,11 @@ function collectMd(dir) {
 
 const mdFiles = collectMd(ROOT).sort();
 console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`);
+
+// 📦 冻结档案（2026-10-05）：时点记录，已退出持续维护面（docs/README.md 索引里标冻结、
+// 正文带冻结头注）。它们承载的是「当初怎么决策/怎么拆」的历史，不是现行规则，因此
+// 考古扫描（检查 12）与数值副本核对（检查 17）都跳过——冻结档里的旧数字是准确历史。
+const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md"]);
 
 // 1) 内部链接全部可解析
 {
@@ -556,18 +564,8 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
   // 加名字——新文档默认受检。为什么这样设计：ARCHITECTURE §5 曾叠出「修订
   // （日期）」沉积，新读者把历史读成现行规则；2026-10 起裁定沿革一律进
   // docs/ADR.md，正文只写现状。
-  const LEDGERS = new Set([
-    "ADR.md",
-    "CHANGELOG.md",
-    "PITFALLS.md",
-    "IMPROVEMENTS.md",
-    // 📦 冻结档案（2026-10-05）：时点记录，已退出持续维护面（docs/README.md 索引里标
-    // 冻结、正文带冻结头注）。它们承载的是「当初怎么决策/怎么拆」的历史，不是现行规则，
-    // 所以和账本一样豁免考古扫描。
-    "ROADMAP.md",
-    "QODER-GAP.md",
-    "TOKEN-STORE-SPLIT.md"
-  ]);
+  // 账本与冻结档都豁免考古扫描：前者记沿革，后者是时点记录（见文件头的 FROZEN_DOCS）。
+  const LEDGERS = new Set(["ADR.md", "CHANGELOG.md", "PITFALLS.md", "IMPROVEMENTS.md", ...FROZEN_DOCS]);
   const archeo = /(?:\d{4}-\d{2}-\d{2}\s*修订|修订（[一二三四五六七八九]|本节裁定已失效)/;
   let scanned = 0;
   for (const f of mdFiles) {
@@ -834,6 +832,229 @@ console.log(`docs.test.mjs —— 检查 ${mdFiles.length} 个 markdown 文件`)
   // 名册永远非空，缺行会逐条红，但先把扫描本身够没够到输入说清楚。
   if (rows.size < 20) bad(`${rel}: 只解析到 ${rows.size} 行套件表——扫描没够到输入（表被删或被改写），这一轮什么都没验到`);
   note(`${rel} 套件表 ↔ 名册：名册 ${SUITES.length} 项 / 表内 ${rows.size} 行（缺 ${missing}、僵尸 ${stale}）`);
+}
+
+// 17) 数值事实副本一致性：文档正文里复述的数值必须等于源码常量
+//
+// 「一个事实一个出处」只挡得住逐字重复，挡不住**数值副本**：同一句「余额缓存 60s」
+// 换个说法就能在几篇现行文档里各写一个数，而没有任何门禁会因为代码改了而变红。
+// 2026-10 实测到的缺口：docs/SETUP.md 的配置表自称默认值「由 test/config.test.mjs
+// 与 cordis.patch.yml 双向钉住」，但全仓没有一个测试读 docs/SETUP.md——那份表是
+// CONFIG_DEFAULTS / AUTH_DEFAULTS 的第三份副本，改代码只会让用户照着过期文档配出
+// 一个装不上的插件。小浣熊的余额/目录 TTL 与路由 body 上限同样以散文形式散着。
+//
+// 本检查做三件事：
+//   A) SETUP.md 配置表 ↔ CONFIG_DEFAULTS / AUTH_DEFAULTS（逐行比值 + 双向闭合）；
+//   B) 余额 / 目录缓存 TTL ↔ raccoon-status.ts（全文扫，新写的副本也跑不掉）；
+//   C) 路由 body 上限（4 KB / 2 KB）↔ routes/http.ts。
+// 源码一律用文本正则读，不 import 宿主模块——本文件要保持 peer-free、干净检出可跑。
+{
+  const readSrc = (rel) => readFileSync(join(ROOT, rel), "utf8");
+  const relOf = (f) => f.slice(ROOT.length + 1).replace(/\\/g, "/");
+  // 从 `export const X = Object.freeze({` 起到第一个 `\n});` 之间的字面量块。
+  const blockOf = (text, head) => {
+    const at = text.indexOf(head);
+    if (at < 0) return null;
+    const rest = text.slice(at + head.length);
+    const end = rest.indexOf("\n});");
+    return end < 0 ? null : rest.slice(0, end);
+  };
+  // 块里每个键独占一行 `  key: value,`；返回右侧原文（去掉行尾逗号）。
+  const rawOf = (block, key) => {
+    if (block === null) return undefined;
+    const m = block.match(new RegExp(`\\n  ${key}: ([^\\n]*)(?:\\n|$)`));
+    return m ? m[1].replace(/,\s*$/, "") : undefined;
+  };
+  const literal = (raw) => {
+    if (raw === undefined) return undefined;
+    const s = raw.trim();
+    if (/^".*"$/.test(s)) return JSON.parse(s);
+    if (s === "true" || s === "false") return s === "true";
+    if (/^\d[\d_]*$/.test(s)) return Number(s.replace(/_/g, ""));
+    return JSON.parse(s);
+  };
+  const constNumber = (text, name) => {
+    const m = text.match(new RegExp(`export const ${name} = ([\\d_]+)`));
+    return m ? Number(m[1].replace(/_/g, "")) : undefined;
+  };
+  // 源码值 → 文档表格里应有的那一格（去掉反引号后逐字相等）。
+  const docText = (v) => {
+    if (typeof v === "string") return v === "" ? '""' : v;
+    if (v !== null && typeof v === "object") return JSON.stringify(v);
+    return String(v);
+  };
+
+  const cfgBlock = blockOf(readSrc("src/host/host-config.ts"), "export const CONFIG_DEFAULTS = Object.freeze({");
+  const authBlock = blockOf(readSrc("src/host/auth-config.ts"), "export const AUTH_DEFAULTS = Object.freeze({");
+  const cfg = (k) => literal(rawOf(cfgBlock, k));
+  const auth = (k) => literal(rawOf(authBlock, k));
+
+  // --- A) SETUP.md 配置表 ↔ CONFIG_DEFAULTS / AUTH_DEFAULTS ---
+  const setup = readSrc("docs/SETUP.md").split(/\r?\n/);
+  const headAt = setup.findIndex((l) => /^\|\s*字段\s*\|\s*默认\s*\|\s*说明\s*\|/.test(l));
+  const rows = new Map();
+  if (headAt < 0) bad("docs/SETUP.md 找不到配置表头「| 字段 | 默认 | 说明 |」——检查 17 失去了看守对象");
+  else {
+    for (let i = headAt + 2; i < setup.length; i++) {
+      if (!setup[i].startsWith("|")) break;
+      const m = setup[i].match(/^\|\s*`([A-Za-z][A-Za-z0-9]*)`\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*$/);
+      if (!m) { bad(`docs/SETUP.md:${i + 1} 配置表有一行解析不出来（期望 | \`字段\` | \`默认\` | 说明 |）：${setup[i].slice(0, 40)}…`); continue; }
+      rows.set(m[1], { value: m[2], desc: m[3], line: i + 1 });
+    }
+  }
+
+  // 表字段 → 取值来源。`auth:` 指 AUTH_DEFAULTS（SETUP.md 声明 auth 类留空即用平台默认），
+  // `special:` 是「默认值来自别的字段」的两行，单独断言它们声明的关系仍然成立。
+  const TABLE = [
+    ["consoleBase", "cfg:consoleBase"],
+    ["trendHours", "cfg:trendHours"],
+    ["trendMultipliers", "cfg:trendMultipliers"],
+    ["cacheSeconds", "cfg:cacheSeconds"],
+    ["pollSeconds", "cfg:pollSeconds"],
+    ["allowedHosts", "special:allowedHosts"],
+    ["tokenSkewSeconds", "cfg:tokenSkewSeconds"],
+    ["apiBase", "cfg:apiBase"],
+    ["iamBase", "auth:iamOrigin"],
+    ["tokenEndpoint", "auth:tokenEndpoint"],
+    ["jwksEndpoint", "auth:jwksEndpoint"],
+    ["redirectUri", "special:redirectUri"],
+    ["clientId", "auth:clientId"],
+    ["scope", "auth:scope"],
+    ["encKeyId", "auth:encKeyId"],
+    ["maxHops", "auth:maxHops"],
+    ["loginTimeoutMs", "auth:requestTimeoutMs"],
+    ["consoleTimeoutMs", "cfg:consoleTimeoutMs"],
+    ["writeImageModelIds", "cfg:writeImageModelIds"],
+    ["registerProvider", "cfg:registerProvider"],
+    ["drawEnabled", "cfg:drawEnabled"],
+    ["drawModelId", "cfg:drawModelId"],
+    ["drawTimeoutMs", "cfg:drawTimeoutMs"],
+    ["providerRefreshMinutes", "cfg:providerRefreshMinutes"],
+    ["webSearchEnabled", "cfg:webSearchEnabled"]
+  ];
+
+  let compared = 0;
+  for (const [field, ref] of TABLE) {
+    const row = rows.get(field);
+    if (!row) {
+      bad(`docs/SETUP.md 配置表缺 \`${field}\` 一行——它的默认值由 ${ref} 提供，删掉这一行等于让操作员失去唯一的人读出处`);
+      continue;
+    }
+    const cell = row.value.replace(/`/g, "").trim();
+    if (ref === "special:allowedHosts") {
+      const defaults = row.desc.match(/（默认 (.+?)，只增不替/);
+      const hosts = defaults ? [...defaults[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]) : [];
+      const codeHosts = cfg("admittedHosts");
+      if (cell !== "—") bad(`docs/SETUP.md:${row.line} \`allowedHosts\` 默认格写的是 \`${cell}\`——该字段只增不替，默认格应为「—」，默认主机名列在说明里`);
+      if (!Array.isArray(codeHosts)) bad("docs.test.mjs 检查 17：CONFIG_DEFAULTS.admittedHosts 取不到，allowedHosts 一行失去看守对象");
+      else if (hosts.join(",") !== codeHosts.join(",")) bad(`docs/SETUP.md:${row.line} \`allowedHosts\` 说明里的默认主机 ${JSON.stringify(hosts)} 与 CONFIG_DEFAULTS.admittedHosts ${JSON.stringify(codeHosts)} 不一致——数值副本已漂移`);
+      continue;
+    }
+    if (ref === "special:redirectUri") {
+      const authText = readSrc("src/host/auth-config.ts");
+      const keepsRelation = /redirectUri: checkEndpoint\(pick\("redirectUri", consoleOrigin/.test(authText);
+      if (cell !== "同 consoleBase") bad(`docs/SETUP.md:${row.line} \`redirectUri\` 默认格写的是 \`${cell}\`，代码里它默认取 consoleOrigin（即 consoleBase）——表述与实现不一致`);
+      if (!keepsRelation) bad(`docs/SETUP.md:${row.line} 写 \`redirectUri\` 默认「同 consoleBase」，但 src/host/auth-config.ts 里它的默认来源已不是 consoleOrigin——这一行的表述需要重写`);
+      else if (auth("consoleOrigin") !== cfg("consoleBase")) bad(`\`redirectUri\` 默认「同 consoleBase」，但 AUTH_DEFAULTS.consoleOrigin = ${JSON.stringify(auth("consoleOrigin"))} 与 CONFIG_DEFAULTS.consoleBase = ${JSON.stringify(cfg("consoleBase"))} 已经不同`);
+      continue;
+    }
+    const [kind, key] = ref.split(":");
+    const v = kind === "auth" ? auth(key) : cfg(key);
+    if (v === undefined) {
+      bad(`docs.test.mjs 检查 17：${ref} 取不到值——\`${field}\` 这一行的看守对象消失，本检查已失效`);
+      continue;
+    }
+    const want = docText(v);
+    compared++;
+    if (cell !== want) bad(`docs/SETUP.md:${row.line} \`${field}\` 默认值写的是 \`${cell}\`，源码 ${ref} = \`${want}\`——数值副本已漂移（改默认值为什么不顺手改这一行？）`);
+  }
+  const specFields = new Set(TABLE.map(([f]) => f));
+  for (const [field, row] of rows) {
+    if (specFields.has(field)) continue;
+    bad(`docs/SETUP.md:${row.line} 配置表的 \`${field}\` 没有登记进 test/docs.test.mjs 检查 17 的取值规格——新增/改名的行必须同时接上看守，否则它又是一份无门禁副本`);
+  }
+  if (rows.size < 20) bad(`docs/SETUP.md 配置表只解析到 ${rows.size} 行——扫描没够到输入（表被删或改写），这一轮什么都没验到`);
+  note(`SETUP.md 配置表 ↔ 源码默认值：${compared} 行逐字比值、表内 ${rows.size} 行（规格 ${TABLE.length} 行）`);
+
+  // 表里那 9 行 auth 字段写的是**生效值**（来自 AUTH_DEFAULTS），而 CONFIG_DEFAULTS.auth
+  // 只是「留空即用平台默认」的形状。上面对的是前者的值，这里补上后者的前提：一旦有人
+  // 把某个 auth 覆盖填成具体值，生效默认就换了宿主，而表还写着旧数——只查 AUTH_DEFAULTS
+  // 看不出来。SETUP.md 自己写着「auth 类字段留空即表示使用平台默认」，这里是它的可执行版。
+  const authShape = (cfgBlock || "").split("auth: {")[1]?.split("},")[0] ?? "";
+  const UNSET = [...authShape.matchAll(/^\s+([A-Za-z]+): ([^,\n]+),?\s*$/gm)].map((m) => [m[1], m[2].trim()]);
+  if (!UNSET.length) bad("docs.test.mjs 检查 17：CONFIG_DEFAULTS.auth 子块取不到键——auth 字段的「留空 = 用平台默认」前提失去看守对象");
+  else {
+    let sentinels = 0;
+    for (const [key, raw] of UNSET) {
+      if (raw === '""' || raw === "0") { sentinels++; continue; }
+      bad(`src/host/host-config.ts 的 CONFIG_DEFAULTS.auth.${key} = ${raw}，不再是「留空即用平台默认」的哨兵值——SETUP.md 那一列写的是 AUTH_DEFAULTS 的生效值，覆盖默认一落地它就不再成立，请同步改文档与检查 17`);
+    }
+    note(`CONFIG_DEFAULTS.auth 留空哨兵：${sentinels}/${UNSET.length} 键仍为 ""/0（SETUP 的 auth 列因此等于 AUTH_DEFAULTS 生效值）`);
+  }
+
+  // --- B) 小浣熊缓存 TTL：文档全文的「余额 Ns / 目录 Ns」↔ raccoon-status.ts ---
+  const statusSrc = readSrc("src/host/raccoon-status.ts");
+  const BAL = constNumber(statusSrc, "RACCOON_BALANCE_TTL_MS");
+  const CAT = constNumber(statusSrc, "RACCOON_CATALOG_TTL_MS");
+  if (!BAL || !CAT || BAL % 1000 || CAT % 1000) {
+    bad("docs.test.mjs 检查 17：raccoon-status.ts 里取不到整数秒的 RACCOON_BALANCE_TTL_MS / RACCOON_CATALOG_TTL_MS——TTL 副本失去看守对象（常量改名或改成非整秒时，同步更新这里）");
+  } else {
+    const balS = BAL / 1000;
+    const catS = CAT / 1000;
+    let balHits = 0;
+    let catHits = 0;
+    for (const f of mdFiles) {
+      if (FROZEN_DOCS.has(basename(f)) || f.includes("sensenova-api-reference")) continue;
+      const lines = readFileSync(f, "utf8").split(/\r?\n/);
+      lines.forEach((line, i) => {
+        for (const m of line.matchAll(/余额[^0-9\n]{0,6}(\d+)\s*?s/g)) {
+          balHits++;
+          if (Number(m[1]) !== balS) bad(`${relOf(f)}:${i + 1} 余额缓存 TTL 写的是 ${m[1]}s，而 raccoon-status.ts 的 RACCOON_BALANCE_TTL_MS = ${BAL}（${balS}s）`);
+        }
+        for (const m of line.matchAll(/目录[^0-9\n]{0,6}(\d+)\s*?s/g)) {
+          catHits++;
+          if (Number(m[1]) !== catS) bad(`${relOf(f)}:${i + 1} 目录缓存 TTL 写的是 ${m[1]}s，而 raccoon-status.ts 的 RACCOON_CATALOG_TTL_MS = ${CAT}（${catS}s）`);
+        }
+      });
+    }
+    if (!balHits) bad("docs/ 里扫不到任何「余额 N s」——措辞变了或副本被删，本检查失去看守对象，请核对正则");
+    if (!catHits) bad("docs/ 里扫不到任何「目录 N s」——同上");
+    note(`小浣熊缓存 TTL 副本：余额 ${balHits} 处 / 目录 ${catHits} 处，全部等于源码常量（${balS}s / ${catS}s）`);
+  }
+
+  // --- C) 路由 body 上限：文档里的 4 KB / 2 KB ↔ routes/http.ts ---
+  const httpSrc = readSrc("src/host/routes/http.ts");
+  const ACC = constNumber(httpSrc, "MAX_ACCOUNT_BODY_BYTES");
+  const RAC = constNumber(httpSrc, "MAX_RACCOON_BODY_BYTES");
+  if (!ACC || !RAC || ACC % 1024 || RAC % 1024) {
+    bad("docs.test.mjs 检查 17：routes/http.ts 里取不到 KB 整数倍的 MAX_ACCOUNT_BODY_BYTES / MAX_RACCOON_BODY_BYTES——文档用 KB 表述，常量改动时必须同步这里");
+  } else {
+    // 每条 = 定位行（必须唯一命中，否则锚点失效）+ 该行里取数的正则 + 期望 KB + 人事描述。
+    const BODY = [
+      ["docs/API.md", /Token Plan 路由的请求体上限/, /请求体上限 \*\*(\d+) KB\*\*/, ACC / 1024, "Token Plan 路由 body 上限"],
+      ["docs/API.md", /第 7 节）的 POST 上限/, /自己的 \*\*(\d+) KB\*\*/, RAC / 1024, "小浣熊 POST body 上限"],
+      ["docs/API.md", /JSON 数组、超/, /超 (\d+) KB/, ACC / 1024, "account 非法 body 分支的阈值"],
+      ["docs/API.md", /按 body 的 `action` 分发/, /请求体上限 \*\*(\d+) KB\*\*/, RAC / 1024, "小浣熊路由 body 上限"],
+      ["docs/DSH-PLUGIN.md", /POST 校验 body ≤/, /≤ (\d+)KB/, ACC / 1024, "DSH-PLUGIN 里的 account body 上限"]
+    ];
+    let hit = 0;
+    for (const [file, where, re, want, label] of BODY) {
+      const lines = readSrc(file).split(/\r?\n/);
+      const at = lines.map((l, i) => (where.test(l) ? i : -1)).filter((i) => i >= 0);
+      if (at.length !== 1) {
+        bad(`${file} 里匹配「${where.source}」的行有 ${at.length} 行（期望 1）——${label} 的锚点失效，请更新检查 17 的定位正则`);
+        continue;
+      }
+      const m = lines[at[0]].match(re);
+      if (!m) {
+        bad(`${file}:${at[0] + 1} 找不到 ${label} 的数值（正则 ${re.source} 未命中）——副本被改写，本检查失去看守对象`);
+        continue;
+      }
+      hit++;
+      if (Number(m[1]) !== want) bad(`${file}:${at[0] + 1} ${label} 写的是 ${m[1]} KB，而 routes/http.ts 的常量 = ${want * 1024} 字节（${want} KB）`);
+    }
+    note(`路由 body 上限副本：${hit}/${BODY.length} 处定位成功并等于源码常量（${ACC / 1024} KB / ${RAC / 1024} KB）`);
+  }
 }
 
 if (fails.length) {

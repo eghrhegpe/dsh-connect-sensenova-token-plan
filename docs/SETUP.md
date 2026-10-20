@@ -71,7 +71,7 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 
 端点类字段仅在企业镜像 / 预发环境指向别的主机时才需要动；全部不配即等于平台默认值。任意端点覆盖若不是合法的 http(s) 绝对地址，插件在**挂载时**就报 `config_error`（面板顶部显示），而不是等到第一次轮询才变成莫名其妙的网络错误。
 
-> 上表主机层字段的默认值（含 `allowedHosts` 的 `localhost`/`127.0.0.1`/`[::1]`/`::1`）统一定义在 `src/host/host-config.ts` 的 `CONFIG_DEFAULTS`（`src/host/index.ts` 仅 import 并在末尾再 export，非定义处），并由 `test/config.test.mjs` 与 `cordis.patch.yml` 双向钉住；auth 类字段留空即表示"使用平台默认"，其生效值定义在 `src/host/auth-config.ts` 的 `AUTH_DEFAULTS`（2026-10 从 `sensenova-auth.ts` 拆出，见该文件头注释），不在此重复。
+> 上表主机层字段的默认值（含 `allowedHosts` 的 `localhost`/`127.0.0.1`/`[::1]`/`::1`）统一定义在 `src/host/host-config.ts` 的 `CONFIG_DEFAULTS`（`src/host/index.ts` 仅 import 并在末尾再 export，非定义处），并由 `test/config.test.mjs` 与 `cordis.patch.yml` 双向钉住；auth 类字段留空即表示"使用平台默认"，其生效值定义在 `src/host/auth-config.ts` 的 `AUTH_DEFAULTS`（2026-10 从 `sensenova-auth.ts` 拆出，见该文件头注释）。本表是这两处的**人读副本**：逐格一致性由 `test/docs.test.mjs` 检查 17 与源码对账，改默认值必须同时改这一列，否则套件红。
 
 ---
 
