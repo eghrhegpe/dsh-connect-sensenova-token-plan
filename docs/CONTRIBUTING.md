@@ -90,3 +90,13 @@ git commit -m "chore: stop tracking DSH internal _asar_extract dump"
 - 条目文件：`awesome-dsh-plugin-submission/eghrhegpe__dsh-connect-sensenova-token-plan.yml`，提 PR 时原样复制到对方仓库的 `data/plugins/` 下。**不要在这里再维护第二份 yaml**，两处一定会漂移。
 - `category: usage`。
 - 已收录：PR [#6139](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/6139)，2026-10-12 合并。之后代码继续演进，条目文案是否同步是人的判断，不写进文档当现状——要看当前状态就用 `gh` 查，别读文档。
+
+## 9. 编辑器约定（.editorconfig）
+
+仓库根有 `.editorconfig`，它的判据是**零字节改动**：只写与磁盘现状一致的键。因此它不会替你
+把 CRLF 转成 LF、不会删行尾空白、也不会补末尾换行——markdown 的行尾双空格是硬换行，补末尾
+换行会给一批文件制造纯格式 diff。缩进按本仓风格取 2 空格；`lib/**`、根 `client.js`、
+`assets/**`、`upstream/**` 是产物与参照件，排除在缩进约定外。
+
+行尾归一化由 `.gitattributes`（`* text=auto eol=lf`）负责，不在 editorconfig 的职责内。
+改完文件别顺手「格式化全仓」：那是噪声 diff，还可能把并行会话里别人的改动一起卷进来。

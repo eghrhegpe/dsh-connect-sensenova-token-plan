@@ -18,6 +18,7 @@ AI 协作会话从根目录 [AGENTS.md](../AGENTS.md) 进入：验证怎么跑�
 | [ROADMAP.md](./ROADMAP.md) 📦 | 战略执行路线图（2026-09-29 起）：P0 解耦与契约回归、429 全局自愈、§5「多 Key 池」纠偏、小浣熊网关契约复测与接入面盘点，明确不做的边界 | 📦 **历史**：当初按什么顺序做、为什么这么定（冻结，不持续维护） |
 | [DSH-PLUGIN.md](./DSH-PLUGIN.md) | DSH 插件机制总览（bundle 结构、Loader 条目、cordis.patch.yml、安装重启、peer 依赖、与兄弟插件关系） | 理解「这是一个 DSH 插件」、对照 dsh-connect-qoder 范本 |
 | [QODER-GAP.md](./QODER-GAP.md) 📦 | 与 `dsh-connect-qoder` 的 client 侧差距对照（可测边界 / 分层线 / JSX / 测试基建），事实带行号 | 📦 **历史**：一次性的两插件差距核对（冻结，不持续维护；qoder 改版后整体失真） |
+| [SIBLING-GAP.md](./SIBLING-GAP.md) 📦 | 与兄弟插件（qoder / atomcode / agnes / modelscope）的**差集核对**：只比差集不重验共用骨架；已落地三项（tsc 开关 / `.editorconfig` / 429 重分类判据理由）、明确不抄的四项、还没核的三项 | 📦 **历史**：一次性的兄弟插件差集核对（冻结，不持续维护；兄弟仓提交会过时） |
 | [SETUP.md](./SETUP.md) | 安装、配置字段表、改动后必须重启 Host、首次使用、常见信号处置、报错去哪儿看（Host 日志 vs 浏览器控制台） | 装环境、改配置、排「跑的是旧代码」、查面板报错信号、找不到报错该看哪个进程 |
 | [AUTH.md](./AUTH.md) | OIDC+PKCE、密码 JWE 加密、凭据存储、静默续期、防锁号节流 | 改登录/续期、排查登录失败 |
 | [API.md](./API.md) | 本地路由（`snapshot`/`account`）、控制台端点、配置端点清单 | 对接路由、看返回结构、调端点 |
@@ -59,4 +60,4 @@ AI 协作会话从根目录 [AGENTS.md](../AGENTS.md) 进入：验证怎么跑�
 - **冻结 = 退出持续维护面**：不再随代码改动更新，也不再要求"文档与代码一致"。描述失真是**预期内的**，头注已声明以 `src/` / `test/` / `ADR.md` 为准。
 - **现行表述永远在别处**：现行规则看 `docs/ADR.md`（裁定）+ `docs/ARCHITECTURE.md`（结构）+ `docs/PITFALLS.md`（坑）+ `docs/TESTING.md`（测试）。冻结文件里若与它们冲突，**以现行文件为准**。
 - **解除冻结才改**：若某文件的结论又要重新生效（如重做某块设计），先删头注、把结论迁进 `ADR.md` / `ARCHITECTURE.md`，再按现行文档维护——**不要**在冻结文件上打内联修订补丁。
-- 冻结清单（2026-10-05）：`ROADMAP.md`、`IMPROVEMENTS.md`、`QODER-GAP.md`、`TOKEN-STORE-SPLIT.md`。`test/docs.test.mjs` 的考古扫描把它们与账本同等豁免。
+- 冻结清单（2026-10-05）：`ROADMAP.md`、`IMPROVEMENTS.md`、`QODER-GAP.md`、`TOKEN-STORE-SPLIT.md`；`SIBLING-GAP.md` 于 2026-10-20 的兄弟插件差集核对后加入。`test/docs.test.mjs` 的考古扫描把它们与账本同等豁免。
