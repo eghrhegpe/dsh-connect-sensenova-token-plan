@@ -15,7 +15,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { resolveSettings, CONFIG_DEFAULTS, resolveAuthOverrides, credentialKey, hostName, isAdmitted, name } from "../src/host/index.ts";
-import { resolveTrendMultipliers, resolveMaxTokensOverrides } from "../src/host/host-config.ts";
+import { resolveTrendMultipliers, resolveMaxTokensOverrides, resolveDrawTimeoutMs } from "../src/host/host-config.ts";
 import { results, check, finish } from "./harness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -349,6 +349,20 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
   check("tokenSkewSeconds clamps to its 0 floor on a fractional raw", skLow === 0, String(skLow));
   const dtLow = clamp({ drawTimeoutMs: 10 }).drawTimeoutMs;
   check("drawTimeoutMs clamps to its 5000 floor", dtLow === 5000, String(dtLow));
+  const dtHigh = clamp({ drawTimeoutMs: 9_999_999_999 }).drawTimeoutMs;
+  check("drawTimeoutMs caps at 1800000", dtHigh === 1_800_000, String(dtHigh));
+  // The agent tool re-clamps the value it is handed (defineDrawTool takes a
+  // plain settings object, not the resolved config), so it must read the SAME
+  // resolver — a second inline clamp would drift the day either bound moved.
+  // The effective timeout is not observable from outside the tool, so the
+  // binding is pinned by source text rather than by behaviour.
+  check("resolveDrawTimeoutMs and the config layer agree",
+    resolveDrawTimeoutMs(9_999_999_999) === 1_800_000 && resolveDrawTimeoutMs(10) === 5_000,
+    `${resolveDrawTimeoutMs(9_999_999_999)}/${resolveDrawTimeoutMs(10)}`);
+  const drawSrc = readFileSync(join(here, "..", "src", "host", "draw.ts"), "utf8");
+  check("the draw tool reads the same resolver",
+    /resolveDrawTimeoutMs\(settings\?\.drawTimeoutMs\)/.test(drawSrc),
+    "src/host/draw.ts does not call resolveDrawTimeoutMs");
   const nanFall = clamp({ trendHours: "not a number" }).trendHours;
   check("a non-numeric trendHours falls back to default", nanFall === CONFIG_DEFAULTS.trendHours, String(nanFall));
 }

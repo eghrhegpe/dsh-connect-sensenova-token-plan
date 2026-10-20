@@ -31,6 +31,21 @@ export const name = "dsh-connect-sensenova-token-plan";
 export const inject = ["webServer"];
 
 /**
+ * The floor and the ceiling on one image request's deadline.
+ *
+ * A draw call is a SINGLE synchronous POST (src/host/draw.ts), so this
+ * deadline is the only guardrail between a stuck upstream and an agent turn
+ * that never returns. The floor keeps slow image models usable — they
+ * regularly take tens of seconds, and a chat-sized deadline would abort
+ * healthy requests. The ceiling keeps a mistyped row value (999999999) from
+ * parking a turn for months: 30 minutes is far above any sane image
+ * generation and far below "forever", and it is the same ceiling the sibling
+ * draw plugin uses.
+ */
+export const DRAW_TIMEOUT_MIN_MS = 5_000;
+export const DRAW_TIMEOUT_MAX_MS = 1_800_000;
+
+/**
  * The plugin's configuration contract in one place.
  *
  * Every default the Host half reads lives here, so the code and the
@@ -139,7 +154,7 @@ export const CONFIG_DEFAULTS = Object.freeze({
   drawEnabled: false,
   /** Preferred draw model id; empty means "first image-gen model of the catalog". */
   drawModelId: "",
-  /** Deadline for one image request. Image models are slow; chat deadlines do not apply. */
+  /** Deadline for one image request. Image models are slow; chat deadlines do not apply. Clamped into [DRAW_TIMEOUT_MIN_MS, DRAW_TIMEOUT_MAX_MS] by resolveDrawTimeoutMs. */
   drawTimeoutMs: 120_000,
   /** Opt-in: register the Raccoon hosted `web_search` provider in `ctx.web`. */
   webSearchEnabled: false,
@@ -196,6 +211,22 @@ export function resolveTrendMultipliers(raw: unknown): Record<string, number> {
  */
 export function clampInt(raw: unknown, def: number, min: number, max = Infinity): number {
   return Math.min(max, Math.max(min, Math.floor(num(raw, def))));
+}
+
+/**
+ * Resolve the draw deadline, with BOTH ends of the range enforced.
+ *
+ * One place owns the bounds so the config layer and the agent tool cannot
+ * drift: the Host settings read it through {@link clampInt}, and the tool
+ * re-clamps the value it is handed, because `defineDrawTool` takes a plain
+ * settings object (tests, future callers) rather than the resolved config —
+ * and the deadline is a REQUEST parameter, not a preference.
+ * @param {unknown} raw - the raw `drawTimeoutMs` value.
+ * @returns {number} the effective deadline in milliseconds, within
+ *   [DRAW_TIMEOUT_MIN_MS, DRAW_TIMEOUT_MAX_MS].
+ */
+export function resolveDrawTimeoutMs(raw: unknown): number {
+  return clampInt(raw, CONFIG_DEFAULTS.drawTimeoutMs, DRAW_TIMEOUT_MIN_MS, DRAW_TIMEOUT_MAX_MS);
 }
 
 /**
@@ -343,11 +374,13 @@ export function resolveSettings(config: unknown): { settings: ResolvedSettings; 
         maxTokensOverrides: resolveMaxTokensOverrides(source.maxTokensOverrides),
         // Draw absorption opt-in (strict boolean, same reasoning as
         // registerProvider) plus its two knobs. The deadline has its own
-        // floor: image models regularly take tens of seconds, and a chat-
-        // sized deadline would abort healthy requests.
+        // floor AND ceiling: image models regularly take tens of seconds (a
+        // chat-sized deadline would abort healthy requests), and a draw is
+        // the only guardrail an agent turn has against a stuck upstream (a
+        // mistyped value must not park the turn for months).
         drawEnabled: source.drawEnabled === true,
         drawModelId: str(source.drawModelId, ""),
-        drawTimeoutMs: clampInt(source.drawTimeoutMs, CONFIG_DEFAULTS.drawTimeoutMs, 5_000),
+        drawTimeoutMs: resolveDrawTimeoutMs(source.drawTimeoutMs),
         webSearchEnabled: source.webSearchEnabled === true,
         // NOT `clampInt`: `num` reads 0 as "unset", but 0 here is the LOADED
         // answer ("the background refresher is off"), so an explicit number —

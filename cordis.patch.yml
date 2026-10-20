@@ -141,7 +141,8 @@
         #   -> preferred image model id; empty = first of the catalog
         #      (e.g. sensenova-u1-fast).
         # drawTimeoutMs: 120000
-        #   -> deadline for one image request (image models are slow).
+        #   -> deadline for one image request (image models are slow);
+        #      clamped into [5000, 1800000] (30 min is the ceiling).
         # ------------------------------------------------------------------
         # Web-search absorption (docs/ROADMAP.md §6.1.7): when true AND the
         # Host exposes a `ctx.web` service, the Raccoon hosted `web_search` MCP

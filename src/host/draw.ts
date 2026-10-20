@@ -29,6 +29,7 @@
  */
 
 import { str, num, redactSecrets } from "./util.ts";
+import { resolveDrawTimeoutMs } from "./host-config.ts";
 import { isImageGenModel } from "./modality.ts";
 import type { DrawRequest } from "./types.ts";
 
@@ -349,7 +350,11 @@ export function defineDrawTool({
   cooldown?: ReturnType<typeof createDrawCooldown>;
   isDisposed?: () => boolean;
 }) {
-  const timeoutMs = Math.max(5_000, Math.floor(num(settings?.drawTimeoutMs, DRAW_DEFAULT_TIMEOUT_MS)));
+  // The SAME resolver the config layer uses: the deadline is a request
+  // parameter, so both ends of its range are enforced here too — this
+  // function is callable with a raw settings object, not only with the
+  // resolved config.
+  const timeoutMs = resolveDrawTimeoutMs(settings?.drawTimeoutMs);
   return defineTool({
     name: DRAW_TOOL_NAME,
     description:

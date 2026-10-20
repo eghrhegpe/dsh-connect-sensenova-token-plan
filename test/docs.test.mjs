@@ -976,6 +976,24 @@ const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md
   if (rows.size < 20) bad(`docs/SETUP.md 配置表只解析到 ${rows.size} 行——扫描没够到输入（表被删或改写），这一轮什么都没验到`);
   note(`SETUP.md 配置表 ↔ 源码默认值：${compared} 行逐字比值、表内 ${rows.size} 行（规格 ${TABLE.length} 行）`);
 
+  // drawTimeoutMs 的区间是代码里的硬夹取（resolveDrawTimeoutMs），文档只写一半
+  // 就会漂：两个边界都在源码里，说明格必须同时写出，否则操作员按文档配出来的
+  // 值与实际生效的值对不上——而默认格只对默认值，这一格没有任何门禁替它比对。
+  {
+    const row = rows.get("drawTimeoutMs");
+    const src = readSrc("src/host/host-config.ts");
+    const min = constNumber(src, "DRAW_TIMEOUT_MIN_MS");
+    const max = constNumber(src, "DRAW_TIMEOUT_MAX_MS");
+    if (!min || !max) bad("检查 17：host-config.ts 的 DRAW_TIMEOUT_MIN_MS / DRAW_TIMEOUT_MAX_MS 取不到——drawTimeoutMs 的区间失去看守对象");
+    else if (!row) bad("检查 17：SETUP.md 配置表缺 drawTimeoutMs 行");
+    else {
+      const nums = [...new Set([...row.desc.matchAll(/\b\d{3,}\b/g)].map((m) => Number(m[0])))];
+      if (!nums.includes(min)) bad(`SETUP.md:${row.line} 的 drawTimeoutMs 说明里没有下限 ${min}——源码夹取的下限必须写出来`);
+      if (!nums.includes(max)) bad(`SETUP.md:${row.line} 的 drawTimeoutMs 说明里没有上限 ${max}——源码夹取的上限必须写出来`);
+      else if (nums.length !== 2) bad(`SETUP.md:${row.line} 的 drawTimeoutMs 说明里有 ${nums.length} 个三位以上数字 ${JSON.stringify(nums)}——只应有两个（下限 ${min} 与上限 ${max}），多出来的多半是漂移的旧副本`);
+    }
+  }
+
   // 表里那 9 行 auth 字段写的是**生效值**（来自 AUTH_DEFAULTS），而 CONFIG_DEFAULTS.auth
   // 只是「留空即用平台默认」的形状。上面对的是前者的值，这里补上后者的前提：一旦有人
   // 把某个 auth 覆盖填成具体值，生效默认就换了宿主，而表还写着旧数——只查 AUTH_DEFAULTS
