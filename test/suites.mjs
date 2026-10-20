@@ -97,6 +97,7 @@ export const SUITES = Object.freeze([
   { name: "raccoon-web.test.mjs", kind: "suite", note: "search selection takeover/restore" },
   { name: "state-segmentation.test.mjs", kind: "suite", note: "per-profile state directories" },
   { name: "silent-catch.test.mjs", kind: "suite", note: "source hygiene: every statement-less catch explains itself" },
+  { name: "host-range.test.mjs", kind: "suite", note: "peer range × version universe alignment (golden, zero install)" },
 
   // ── the five gate files. Not *.test.mjs, so the three-way roster pin
   //    exempts them (same exemption e2e-gate has always had) — but they are
