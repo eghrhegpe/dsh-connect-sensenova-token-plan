@@ -388,4 +388,71 @@ check("no hand-written .js source sits at the package root", stray.length === 0,
   check("edit-then-build passes: the mtime tiebreak is what keeps it usable", built === "", built);
 }
 
+// --- the card copy has FOUR copies, and they must say the same thing --------
+// The plugin card reads `locale/*.json`; npm's English fallback reads
+// `package.json.description`; the marketplace listing reads the draft under
+// `awesome-dsh-plugin-submission/`. Nothing used to compare them, and in the
+// sibling agnes repo the draft and the live entry had disagreed about
+// `category` for a week without a single red build — while the copy itself had
+// already been edited twice through those two surfaces separately.
+//
+// This is the OFFLINE half of that fence, so it runs on every push. What it
+// cannot see is what the upstream entry actually says: a draft that is
+// internally consistent but stale against upstream passes here. That is
+// `test/submission-drift.mjs`, which needs the network and therefore lives in
+// the scheduled tier — a red build caused by someone else's `main` would be
+// nobody's regression, and that is how a gate stops being read.
+//
+// `category` is deliberately NOT asserted here: the valid set lives in the
+// upstream `contributing.md`, moves over time, and pinning a copy of it in this
+// repo is the hardcoded-count drift class `docs.test.mjs` already forbids.
+{
+  const repoUrl = String(manifest.repository?.url ?? "")
+    .replace(/^git\+/, "")
+    .replace(/\.git$/, "");
+  const slug = repoUrl.replace(/^https:\/\/github\.com\//, "");
+  const draftPath = join(root, "awesome-dsh-plugin-submission", `${slug.replace("/", "__")}.yml`);
+
+  const en = JSON.parse(readFileSync(join(root, "locale", "en.json"), "utf8")).meta.description;
+  // The English fallback is not a second translation: a card rendered in
+  // English must not say something different from `locale/en.json` depending on
+  // whether the dictionary loaded.
+  check("package.json description equals the English card copy",
+    manifest.description === en,
+    manifest.description === en ? "" : "package.json.description drifted from locale/en.json (that is the silent-English fallback)");
+
+  if (existsSync(draftPath)) {
+    const draft = readFileSync(draftPath, "utf8");
+    // Scanned line by line rather than by regex on purpose: inside a template
+    // literal `\s` is silently eaten as an escape, so the pattern that reaches
+    // the engine is `^url:s*(S+)s*$` — a "gate" that can only ever pass. The
+    // draft has a dozen fields; finding them is cheaper than escaping them.
+    //
+    // A single-quoted scalar escapes a quote by DOUBLING it (`model''s` is
+    // `model's`), so unescape before comparing — otherwise every apostrophe in
+    // the copy reads as drift.
+    const lines = draft.split("\n").map((line) => line.trim());
+    const scalar = (key) => {
+      const prefix = `${key}: '`;
+      const line = lines.find((candidate) => candidate.startsWith(prefix) && candidate.endsWith("'"));
+      return line === undefined ? undefined : line.slice(prefix.length, -1).replaceAll("''", "'");
+    };
+    /** A bare top-level scalar (`url`, `name`, `category`). */
+    const field = (key) => {
+      const prefix = `${key}: `;
+      const line = lines.find((candidate) => candidate.startsWith(prefix));
+      return line === undefined ? undefined : line.slice(prefix.length).trim();
+    };
+    const zh = JSON.parse(readFileSync(join(root, "locale", "zh.json"), "utf8")).meta.description;
+
+    check("the submission draft carries both descriptions",
+      scalar("en") !== undefined && scalar("zh") !== undefined,
+      "one of description.en / description.zh is missing or not a single-quoted scalar");
+    check("the submission draft's url is this repo", field("url") === repoUrl, `draft url = ${field("url")}, package.json says ${repoUrl}`);
+    check("the submission draft's name is owner/repo", field("name") === slug, `draft name = ${field("name")}, expected ${slug}`);
+    check("the submission draft's English equals locale/en.json", scalar("en") === en, "edit one, edit both — the marketplace and the card are the same sentence");
+    check("the submission draft's Chinese equals locale/zh.json", scalar("zh") === zh, "edit one, edit both — the marketplace and the card are the same sentence");
+  }
+}
+
 finish();
