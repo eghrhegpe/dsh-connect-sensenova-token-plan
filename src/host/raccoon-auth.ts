@@ -13,7 +13,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { obj, str, errMsg } from "./util.ts";
+import { obj, str, verbatim, errMsg } from "./util.ts";
 import { RACCOON_API_BASE, RACCOON_AUTH_PREFIX } from "./raccoon-consts.ts";
 import {
   parseRaccoonEnvelope,
@@ -81,11 +81,11 @@ export async function pollRaccoonQrLogin(code: string, fetcher?: typeof fetch): 
     return { status: RACCOON_QR_STATUS.LOGGING, ...(str(envelope.data.expired_at, "") !== "" ? { expiredAt: str(envelope.data.expired_at, "") } : {}) };
   }
   if (rawStatus === RACCOON_QR_STATUS.SUCCESS) {
-    const accessToken = str(envelope.data.access_token, "");
+    const accessToken = verbatim(envelope.data.access_token, "");
     // A success without a token is "not done yet": an empty credential would
     // stall the flow, so it stays pending for the next poll.
     if (accessToken === "") return { status: RACCOON_QR_STATUS.PENDING };
-    const refreshToken = str(envelope.data.refresh_token, "");
+    const refreshToken = verbatim(envelope.data.refresh_token, "");
     const expMs = decodeRaccoonJwtExpMs(accessToken);
     return {
       status: RACCOON_QR_STATUS.SUCCESS,
@@ -118,7 +118,7 @@ export async function refreshRaccoonCredential(
   fetcher?: typeof fetch
 ): Promise<{ ok: boolean; code?: RaccoonCodeValue; message?: string; accessToken?: string; refreshToken?: string; expiresAtMs?: number }> {
   const effective = fetcher ?? globalThis.fetch;
-  const refreshToken = str(obj(credential).refresh_token, "");
+  const refreshToken = verbatim(obj(credential).refresh_token, "");
   if (refreshToken === "") return { ok: false, code: RACCOON_CODE.NO_REFRESH_TOKEN, message: "the stored credential has no refresh token" };
   let envelope;
   try {
@@ -157,9 +157,9 @@ export async function refreshRaccoonCredential(
       message: envelope.message || `refresh refused (code ${envelope.code})`
     };
   }
-  const accessToken = str(envelope.data.access_token, "");
+  const accessToken = verbatim(envelope.data.access_token, "");
   if (accessToken === "") return { ok: false, code: RACCOON_CODE.REFRESH_REJECTED, message: "the refresh response carried no access token" };
-  const refreshTokenOut = str(envelope.data.refresh_token, "");
+  const refreshTokenOut = verbatim(envelope.data.refresh_token, "");
   const expMs = decodeRaccoonJwtExpMs(accessToken);
   return { ok: true, accessToken, refreshToken: refreshTokenOut, ...(expMs !== undefined ? { expiresAtMs: expMs } : {}) };
 }

@@ -11,7 +11,7 @@
  */
 
 import { readJwtExpiry } from "../sensenova-auth.ts";
-import { str, obj, num, numOrNull } from "../util.ts";
+import { str, verbatim, obj, num, numOrNull } from "../util.ts";
 import { LEGACY_SCOPE, RECORD_ID } from "./constants.ts";
 import type { StoredGrant, StoreContextWiring, TokenStoreState } from "./state.ts";
 
@@ -31,7 +31,7 @@ export function parseGrant(record: unknown): StoredGrant | undefined {
   if (record === undefined || record === null || obj(record).kind !== "grant") return undefined;
   const payload = obj(obj(record).payload);
   if (num(payload.version) !== GRANT_VERSION) return undefined;
-  const accessToken = str(payload.accessToken, "");
+  const accessToken = verbatim(payload.accessToken, "");
   if (accessToken === "") return undefined;
   return {
     accessToken,

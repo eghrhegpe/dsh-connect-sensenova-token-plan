@@ -25,7 +25,7 @@
  */
 
 import { isEphemeral, resolveCredentialsService } from "./credentials-service.ts";
-import { obj, str } from "./util.ts";
+import { obj, str, verbatim } from "./util.ts";
 import {
   decodeRaccoonJwtExpMs,
   refreshRaccoonCredential,
@@ -54,9 +54,9 @@ export function parseRaccoonCredential(value: unknown): { accessToken: string; r
     return null;
   }
   const source = obj(parsed);
-  const accessToken = str(source.access_token, "");
+  const accessToken = verbatim(source.access_token, "");
   if (accessToken === "") return null;
-  const refresh = str(source.refresh_token, "");
+  const refresh = verbatim(source.refresh_token, "");
   const expiresAtMs = decodeRaccoonJwtExpMs(accessToken) ?? (typeof source.expires_at_ms === "number" ? source.expires_at_ms : undefined);
   return {
     accessToken,
@@ -136,7 +136,7 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
      * @param {object} credential - `{ accessToken, refreshToken?, ... }`.
      */
     async save(credential: { accessToken?: unknown; refreshToken?: unknown; expiresAtMs?: unknown; officeIdentity?: unknown; nickname?: unknown }) {
-      const accessToken = str(credential?.accessToken, "");
+      const accessToken = verbatim(credential?.accessToken, "");
       if (accessToken === "") throw new Error("a Raccoon access token is required");
       // A fresh scan is the ONLY thing that recovers a dead session, so it must
       // clear the latch on the way in — otherwise a re-scan would store a valid

@@ -12,7 +12,7 @@
  * @module dsh-connect-sensenova-token-plan/sensenova-crypto
  */
 import { CODE } from "./codes.ts";
-import { str, obj, pluginError } from "./util.ts";
+import { str, verbatim, obj, pluginError } from "./util.ts";
 import type { JwksOptions } from "./types.ts";
 
 /**
@@ -61,7 +61,7 @@ export function b64urlDecode(segment: string): string {
  * @returns {Record<string, unknown>} the payload, or `{}` when unreadable.
  */
 export function readJwtClaims(token: string): Record<string, unknown> {
-  const segments = str(token, "").split(".");
+  const segments = verbatim(token, "").split(".");
   if (segments.length < 2) return {};
   try {
     const parsed = JSON.parse(b64urlDecode(segments[1] ?? ""));

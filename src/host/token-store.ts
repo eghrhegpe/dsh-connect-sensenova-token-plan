@@ -198,7 +198,7 @@ export function createTokenStore(options: {
      *   cached one.
      */
     invalidate(token?: string) {
-      const refused = str(token, state.cached?.accessToken ?? "");
+      const refused = verbatim(token, state.cached?.accessToken ?? "");
       if (refused !== "") {
         rejected.add(refused);
         // Bounded: only the most recent refusals can still be in play, since a

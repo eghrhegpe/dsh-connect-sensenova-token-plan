@@ -94,7 +94,7 @@ async function readTokenResponse(response: { status: number; jsonText?: string; 
   const body = obj(response.jsonText !== undefined
     ? (() => { try { return JSON.parse(response.jsonText as string); } catch { return {}; } })()
     : await (response as { json: () => Promise<unknown> }).json().catch(() => ({})));
-  const accessToken = str(body.access_token, "");
+  const accessToken = verbatim(body.access_token, "");
   if (accessToken === "") {
     const detail = str(body.error_description, str(body.error, `HTTP ${status}`));
     throw pluginError(CODE.TOKEN_REJECTED, `token endpoint did not return an access token: ${detail}`);
@@ -122,7 +122,7 @@ async function readTokenResponse(response: { status: number; jsonText?: string; 
  * @returns {Promise<{accessToken: string, refreshToken: string, expiresIn: number, scope: string}>}
  */
 export async function refreshWith(cfg: AuthConfig, refreshToken: string, options: { timeoutMs?: number } = {}): Promise<{ accessToken: string; refreshToken: string; expiresIn: number; scope: string }> {
-  const token = str(refreshToken, "");
+  const token = verbatim(refreshToken, "");
   if (token === "") throw pluginError(CODE.NO_REFRESH_TOKEN, "no refresh token is stored");
   const response = await fetch(cfg.tokenEndpoint, {
     method: "POST",
