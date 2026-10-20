@@ -55,13 +55,13 @@ export const RACCOON_FALLBACK_MODELS = Object.freeze([
  * day the adapter learns to carry `extra_body`, the spelling does not have to
  * be re-probed.
  *
- * **Not exported** (2026-10-05): an exported symbol with no production caller
- * is debt on the module's public face — it invites a call site that the
- * provider cannot honour (`reasoning: false` means the adapter drops the
- * field). The test suite reaches it by named import from THIS module, which
- * is what keeps it honest: the day the adapter learns to carry `extra_body`,
- * the right move is to export it deliberately from `raccoon-models.ts`, not
- * to widen this leaf's surface by accident.
+ * **Not re-exported from the barrel** (2026-10-05): an exported symbol with no
+ * production caller is debt on the module's public face — it invites a call
+ * site that the provider cannot honour (`reasoning: false` means the adapter
+ * drops the field). The test suite reaches it by named import from THIS module,
+ * which is what keeps it honest: the day the adapter learns to carry
+ * `extra_body`, the right move is to export it deliberately from
+ * `raccoon-models.ts`, not to widen this leaf's surface by accident.
  * @param {string|undefined} effort - `undefined` = send nothing (server default
  *   = thinking on); `"off"` = disabled; anything else = enabled.
  * @returns {object|undefined} the `extra_body` value, or `undefined`.

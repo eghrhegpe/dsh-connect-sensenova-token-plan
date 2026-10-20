@@ -92,7 +92,7 @@ export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" 
           // persist to this row's settings, so the later image-routing plugin
           // reads a stale or empty set with no trace to explain why. Log it; the
           // in-memory body the panel already got is unaffected.
-          void visionPublish.current?.(body.visionModels, body.visionModels.map((entry: any) => entry.id))
+          void visionPublish.current?.(body.visionModels, body.visionModels.map((entry) => entry.id))
             .catch((error) => logger?.warn?.(`${name}: vision model list write failed`, error));
         }
         writeJson(response, 200, body, { "cache-control": "no-store" });

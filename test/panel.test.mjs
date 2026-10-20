@@ -14,6 +14,8 @@ import { readFile, readdir } from "node:fs/promises";
 import { decidePanelView, dictionaries, interpretSnapshot, tables, RENDER } from "./panel-decision.js";
 import { AUTH_FAILURE_CODES, CODE, CREDENTIAL_REFUSALS, NO_LOGIN_CODES } from "../src/host/codes.ts";
 import { CONFIG_DEFAULTS } from "../src/host/host-config.ts";
+import { LLM_PROVIDER_ID } from "../src/host/llm-models.ts";
+import { RACCOON_PROVIDER_ID } from "../src/host/raccoon-models.ts";
 import { results, check, fail, finish } from "./harness.mjs";
 
 
@@ -502,6 +504,24 @@ const healthy = {
   check("the English hint matches the Chinese one on this point",
     !/\babove\b|\bbelow\b/.test(dictionaries.en["llm.rosterEmpty"] ?? ""),
     dictionaries.en["llm.rosterEmpty"]);
+}
+
+// === F5b. the composer pill's provider ids are the Host's own ==============
+// The pill sorts models into two buckets by the provider id (Token Plan vs.
+// Raccoon) — that attribution is what keeps the two data sources from bleeding
+// into each other. The ids are declared ONCE in the Host's model tables, but
+// the pill carries its own literals; a drift there would silently file every
+// Token Plan model under Raccoon's balance and vice versa, and no suite would
+// go red. Pin the copies to the Host's declarations.
+{
+  const pill = await readFile(new URL("../src/client/composer-usage-pill.ts", import.meta.url), "utf8");
+  const own = (name) => pill.match(new RegExp(`const\\s+${name}\\s*=\\s*"([^"]+)"`))?.[1];
+  check("the composer pill's Token Plan id is the Host's own",
+    own("TOKEN_PLAN") === LLM_PROVIDER_ID,
+    `${own("TOKEN_PLAN") ?? "not found"} vs ${LLM_PROVIDER_ID}`);
+  check("the composer pill's Raccoon id is the Host's own",
+    own("RACCOON") === RACCOON_PROVIDER_ID,
+    `${own("RACCOON") ?? "not found"} vs ${RACCOON_PROVIDER_ID}`);
 }
 
 // === F6. every key the panel ASKS for exists, in both languages ============

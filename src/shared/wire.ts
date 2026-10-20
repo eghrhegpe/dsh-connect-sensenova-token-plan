@@ -35,6 +35,14 @@ export interface QuotaWindowData {
   limit?: number;
   used?: number;
   remaining?: number;
+  /**
+   * The wall-clock instant the window resets, **in SECONDS since the epoch** —
+   * not milliseconds. This is the one field in the snapshot whose unit the
+   * panel mixes into expressions that also carry millisecond timestamps
+   * (`updatedAt`), so the unit is the whole point: `parsers.ts` normalizes
+   * `reset_at` to seconds, and a seconds-for-milliseconds swap drew no reset
+   * time on screen at all until 2026-10-16.
+   */
   resetAt?: number | null;
 }
 
@@ -47,6 +55,7 @@ export interface PoolData {
   window5h?: QuotaWindowData | null;
   window7d?: QuotaWindowData | null;
   grantBalance?: number;
+  /** SECONDS since the epoch — same unit rule as {@link QuotaWindowData.resetAt}. */
   nearestGrantExpiry?: number | null;
   nearestGrantExpiringBalance?: number;
   /** Filled by the Host when a catalog was available. */
@@ -104,6 +113,7 @@ export interface AuthData {
   hasAccount?: boolean;
   autoRecoverArmed?: boolean;
   hasRefreshToken?: boolean;
+  /** SECONDS since the epoch — the access token's own expiry (`retryAfterMs` below is the exception that really is milliseconds). */
   expiresAt?: number | null;
   needsAccount?: boolean;
   ephemeral?: boolean;

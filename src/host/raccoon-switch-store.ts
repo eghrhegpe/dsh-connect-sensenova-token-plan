@@ -14,8 +14,6 @@
  * @module dsh-connect-sensenova-token-plan/raccoon-switch-store
  */
 import { obj } from "./util.ts";
-import { name } from "./host-config.ts";
-import { profileStateDir } from "./state-store.ts";
 import { createSwitchStore, normalizeSwitchEnabled } from "./switch-store.ts";
 import type { StoreOptions } from "./types.ts";
 
@@ -28,15 +26,6 @@ export const RACCOON_SWITCH_VERSION = 1;
  * ADR-006 write-side guard's whitelist.
  */
 export const KNOWN_RACCOON_SWITCH_VERSIONS: readonly number[] = [1];
-
-/**
- * The directory this switch lives in — per-profile when the Host names one.
- * @param {string|null} [profile] - the profile name; `null` means shared.
- * @returns {string} the directory.
- */
-export function raccoonSwitchDir(profile: string | null) {
-  return profileStateDir(name, profile);
-}
 
 // The on/off normaliser is shared; re-export under this store's historical name
 // (the suite imports `normalizeRaccoonEnabled` from here).

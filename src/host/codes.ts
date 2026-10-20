@@ -3,8 +3,9 @@
  *
  * A code is declared ONCE here; every consumer reads THIS table rather than
  * carrying its own copy:
- *   - `sensenova-auth.ts` throws them — it folds the platform's own machine
- *     reasons onto this table via {@link IAM_REASON_CODES}, declared here;
+ *   - `sensenova-auth.ts` throws them, folding the platform's own machine
+ *     reasons onto this table via {@link rejectionCode} (`auth-iam.ts`), which
+ *     matches against {@link IAM_REASON_CODES}, declared here;
  *   - `token-store.ts` decides which ones are credential-shaped (parked rather
  *     than timed) by reading {@link CREDENTIAL_REFUSALS}, declared here;
  *   - `snapshot-aggregate.ts` decides which ones mean "we never got a token"
@@ -78,7 +79,7 @@ export const CODE = Object.freeze({
  * IAM answers with a `google.rpc.Status` envelope whose real cause sits in
  * `details[].reason` (`invalidAccountOrPassword`, `accountLocked`,
  * `tooManyAttempts`, …). Matching that code exactly — and treating the
- * substring scan in `sensenova-auth.ts` as a fallback for a reason this table
+ * substring scan in `auth-iam.ts` as a fallback for a reason this table
  * has not learned yet — is the difference between a reworded message and a
  * silently reclassified lockout.
  *

@@ -385,7 +385,11 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
     ...(loginError !== null && loginError !== "" ? { loginError } : {}),
     balance,
     ...pickDefined({ balanceBreakdown }),
-    ...pickDefined({ balanceDetail }),
+    // `balanceDetail` is the gateway's raw 4xx body (see `raccoon-catalog.ts`)
+    // and may echo a token back; the sibling `error` field above is already
+    // scrubbed, so this one must be too — a panel-facing response is one of
+    // `redactSecrets`'s named surfaces.
+    ...pickDefined({ balanceDetail: balanceDetail === null ? null : redactSecrets(balanceDetail) }),
     ...diagnostics,
     models: roster,
     modelsSource,

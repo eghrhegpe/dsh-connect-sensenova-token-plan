@@ -51,8 +51,8 @@ export * from "./raccoon-codes.ts";
 export * from "./raccoon-http.ts";
 export * from "./raccoon-auth.ts";
 export * from "./raccoon-catalog.ts";
-// NOT `export *`: `raccoonThinkingExtraBody` is deliberately unexported from
-// the leaf — it has no production caller, and the suite reaches it by named
+// NOT `export *`: `raccoonThinkingExtraBody` is deliberately not re-exported
+// from here — it has no production caller, and the suite reaches it by named
 // import from `raccoon-fallback.ts` directly. Re-exporting it here would put it
-// back on the public face this split removed it from.
+// back on the public face this split took it off.
 export { RACCOON_FALLBACK_MODELS } from "./raccoon-fallback.ts";

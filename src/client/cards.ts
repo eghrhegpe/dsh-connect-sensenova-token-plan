@@ -28,7 +28,14 @@ import type { PoolData, PoolsData, QuotaWindowData, TrendData } from "./wire.ts"
  */
 type QuotaWindow = QuotaWindowData;
 
-/** The bar fill and figure tone for a usage percentage: 70 warn / 90 danger. */
+/**
+ * The bar fill and figure tone for a usage percentage: 70 warn / 90 danger.
+ *
+ * These are the QUOTA TAB's numbers, and they differ from the composer pill's
+ * ON PURPOSE — the pill uses 0.8 warn / 1.0 exhausted (`composer-usage-pill.ts`
+ * `tierOf`), and `render-dom.test.mjs` pins both because two tiers disagreeing
+ * inside one screenshot is worse than either number. Do not "unify" this one.
+ */
 function usageTone(pct: number): { fill: Record<string, unknown>; color: string } {
   if (pct >= 90) return { fill: S.barFillError, color: "var(--dsw-alias-state-error-primary)" };
   if (pct >= 70) return { fill: S.barFillWarn, color: "var(--dsw-alias-state-warn-primary)" };

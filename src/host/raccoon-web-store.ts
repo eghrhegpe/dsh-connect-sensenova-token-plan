@@ -17,8 +17,6 @@
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-web-store
  */
-import { name } from "./host-config.ts";
-import { profileStateDir } from "./state-store.ts";
 import { createSwitchStore, normalizeSwitchEnabled } from "./switch-store.ts";
 import type { StoreOptions } from "./types.ts";
 
@@ -27,15 +25,6 @@ export const RACCOON_WEB_SWITCH_VERSION = 1;
 
 /** Every persisted shape THIS build can read (current + history). */
 export const KNOWN_RACCOON_WEB_SWITCH_VERSIONS: readonly number[] = [1];
-
-/** The state directory; per-profile when the Host names one. */
-export function raccoonWebDir(profile: string | null) {
-  return profileStateDir(name, profile);
-}
-
-// The on/off normaliser is shared; re-export under this store's historical name
-// (the suite imports `normalizeWebSearchEnabled` from here).
-export { normalizeSwitchEnabled as normalizeWebSearchEnabled };
 
 interface RaccoonWebRecord {
   enabled: boolean | null;

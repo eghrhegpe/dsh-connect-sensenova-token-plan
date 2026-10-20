@@ -2611,7 +2611,14 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 
 //#endregion
 //#region src/client/cards.ts
-/** The bar fill and figure tone for a usage percentage: 70 warn / 90 danger. */
+/**
+	* The bar fill and figure tone for a usage percentage: 70 warn / 90 danger.
+	*
+	* These are the QUOTA TAB's numbers, and they differ from the composer pill's
+	* ON PURPOSE — the pill uses 0.8 warn / 1.0 exhausted (`composer-usage-pill.ts`
+	* `tierOf`), and `render-dom.test.mjs` pins both because two tiers disagreeing
+	* inside one screenshot is worse than either number. Do not "unify" this one.
+	*/
 	function usageTone(pct) {
 		if (pct >= 90) return {
 			fill: S.barFillError,
@@ -3634,36 +3641,22 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const [modelsNote, setModelsNote] = useState(null);
 		const [idsBusy, setIdsBusy] = useState(false);
 		/**
-		* The last failed read, held as state so a failure ALWAYS re-renders.
+		* Whether the last read failed — the shared loop's back-off input, held as
+		* state so a failure ALWAYS re-renders.
 		*
-		* `lastError` (below) is the value the loop reads; this is the re-render
-		* trigger that makes a ref-based read observable. Keeping them separate is
-		* deliberate: the loop must not depend on a render it causes, yet a pure
-		* failure with no `onReportStatus` produces no other state change. See the
-		* note on `fail` and the H group in `test/render.test.mjs`.
+		* State, not a ref, and that is load-bearing rather than lazy: the loop
+		* reads this DURING render to decide its cadence, and a ref change renders
+		* nothing on its own. A pure failure with no `onReportStatus` produces no
+		* other state change — nothing about the data changed — so this is the only
+		* thing that makes the back-off observable. The unconditional write is the
+		* whole trick: `fail` sets this on every failure, even to the same string,
+		* so React sees a real state change. Do not "optimise" that away — an
+		* earlier draft stranded the back-off by writing only to a ref, and a tab
+		* talking to a dead Host kept polling at full speed. See the note on `fail`
+		* and the H group in `test/render.test.mjs`.
 		*/
 		const [readFailure, setReadFailure] = useState(null);
 		const alive = useRef(true);
-		/**
-		* Whether the last read failed — the shared loop's back-off input.
-		*
-		* A ref, and that is load-bearing rather than lazy: the shared loop reads it
-		* DURING render to decide its cadence, so the back-off must not depend on the
-		* render it causes. A ref change is picked up on the NEXT render, and `load`
-		* guarantees one exists — every failure path calls `report(...)`, which calls
-		* `setLoginNote(...)` unconditionally and therefore re-renders. The record is
-		* written in exactly that one function, so it cannot drift from what the
-		* header shows.
-		*
-		* The unconditional part is the whole trick. An earlier draft could strand
-		* the back-off: with `onReportStatus` omitted there was no other state write
-		* on a pure-failure path (nothing about the data changed), so a tab talking
-		* to a dead Host kept polling at full speed. `setLoginNote` on every failure
-		* is what makes the ref version correct, so do not "optimise" it away — the
-		* H group in `test/render.test.mjs` drives this tab through a failing Host
-		* with NO `onReportStatus` and asserts the cadence backs off.
-		*/
-		const lastError = useRef(null);
 		/**
 		* Which read is allowed to write.
 		*
@@ -3706,7 +3699,6 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		*/
 		const loadRef = useRef(() => {});
 		const report = useCallback((err) => {
-			lastError.current = err;
 			if (onReportStatus !== void 0 && alive.current) onReportStatus({
 				updatedAt: lastGoodAt.current,
 				error: err,
@@ -3724,7 +3716,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			* Record a failed read: forward it to the header, the only place that
 			* renders it, AND make sure a render happens.
 			*
-			* The second half is not decoration. The shared loop reads `lastError`
+			* The second half is not decoration. The shared loop reads `readFailure`
 			* during render to decide its cadence, so a failure that changed no state
 			* would never re-render — and with `onReportStatus` omitted (this tab
 			* mounted without a header) nothing else on the failure path writes state

@@ -36,8 +36,6 @@ export const RACCOON_SEARCH_TOOL_NAME = "web_search";
 export const RACCOON_SEARCH_PROVIDER_ID = "raccoon";
 /** Default result count. */
 export const RACCOON_SEARCH_DEFAULT_COUNT = 5;
-/** Cap the gateway states for `SearchType`. */
-export const RACCOON_SEARCH_TYPES = Object.freeze(["web", "image"]);
 
 /** The Accept header MCP streamable transport requires. */
 const MCP_ACCEPT = "application/json, text/event-stream";

@@ -297,7 +297,7 @@ export function deriveSymptoms(scopes: DoctorScope[]): { id: SymptomValue; hint:
  * silently misses.
  * @returns {SymptomValue[]} the declared ids, declaration order.
  */
-export function symptomIds(): SymptomValue[] {
+function symptomIds(): SymptomValue[] {
   return Object.values(SYMPTOM);
 }
 

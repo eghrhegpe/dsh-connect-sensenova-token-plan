@@ -83,36 +83,22 @@ export function RaccoonTab({
   const [modelsNote, setModelsNote] = useState<string | null>(null);
   const [idsBusy, setIdsBusy] = useState(false);
   /**
-   * The last failed read, held as state so a failure ALWAYS re-renders.
+   * Whether the last read failed — the shared loop's back-off input, held as
+   * state so a failure ALWAYS re-renders.
    *
-   * `lastError` (below) is the value the loop reads; this is the re-render
-   * trigger that makes a ref-based read observable. Keeping them separate is
-   * deliberate: the loop must not depend on a render it causes, yet a pure
-   * failure with no `onReportStatus` produces no other state change. See the
-   * note on `fail` and the H group in `test/render.test.mjs`.
+   * State, not a ref, and that is load-bearing rather than lazy: the loop
+   * reads this DURING render to decide its cadence, and a ref change renders
+   * nothing on its own. A pure failure with no `onReportStatus` produces no
+   * other state change — nothing about the data changed — so this is the only
+   * thing that makes the back-off observable. The unconditional write is the
+   * whole trick: `fail` sets this on every failure, even to the same string,
+   * so React sees a real state change. Do not "optimise" that away — an
+   * earlier draft stranded the back-off by writing only to a ref, and a tab
+   * talking to a dead Host kept polling at full speed. See the note on `fail`
+   * and the H group in `test/render.test.mjs`.
    */
   const [readFailure, setReadFailure] = useState<string | null>(null);
   const alive = useRef(true);
-  /**
-   * Whether the last read failed — the shared loop's back-off input.
-   *
-   * A ref, and that is load-bearing rather than lazy: the shared loop reads it
-   * DURING render to decide its cadence, so the back-off must not depend on the
-   * render it causes. A ref change is picked up on the NEXT render, and `load`
-   * guarantees one exists — every failure path calls `report(...)`, which calls
-   * `setLoginNote(...)` unconditionally and therefore re-renders. The record is
-   * written in exactly that one function, so it cannot drift from what the
-   * header shows.
-   *
-   * The unconditional part is the whole trick. An earlier draft could strand
-   * the back-off: with `onReportStatus` omitted there was no other state write
-   * on a pure-failure path (nothing about the data changed), so a tab talking
-   * to a dead Host kept polling at full speed. `setLoginNote` on every failure
-   * is what makes the ref version correct, so do not "optimise" it away — the
-   * H group in `test/render.test.mjs` drives this tab through a failing Host
-   * with NO `onReportStatus` and asserts the cadence backs off.
-   */
-  const lastError = useRef<string | null>(null);
   /**
    * Which read is allowed to write.
    *
@@ -164,10 +150,10 @@ export function RaccoonTab({
   // the poll kept running — the "silently shows old data" outcome
   // `docs/AUTH.md` forbids for the token path, which applied here too.
   const report = useCallback((err: string | null) => {
-    // The back-off input is recorded here, in the one place every read outcome
-    // passes through — including the "Host answered but said no" ones, which
-    // are failures even though the request succeeded.
-    lastError.current = err;
+    // The back-off input is recorded in `readFailure`, set by `fail`; this
+    // channel carries the same outcome to the header, in the one place every
+    // read passes through — including the "Host answered but said no" ones,
+    // which are failures even though the request succeeded.
     if (onReportStatus !== undefined && alive.current) {
       onReportStatus({ updatedAt: lastGoodAt.current, error: err, onRefresh: () => void loadRef.current() });
     }
@@ -185,7 +171,7 @@ export function RaccoonTab({
      * Record a failed read: forward it to the header, the only place that
      * renders it, AND make sure a render happens.
      *
-     * The second half is not decoration. The shared loop reads `lastError`
+     * The second half is not decoration. The shared loop reads `readFailure`
      * during render to decide its cadence, so a failure that changed no state
      * would never re-render — and with `onReportStatus` omitted (this tab
      * mounted without a header) nothing else on the failure path writes state
@@ -292,11 +278,9 @@ export function RaccoonTab({
   // still has something to read, and the generation bump on rebuild keeps a
   // slow read from the OLD cadence (60 s ↔ 2 s) from overwriting the new loop's
   // fresher answer — that rebuild re-sets `alive` to true on the way back in.
-  // Driven by STATE, not by `lastError.current`: the loop's effect must rebuild
-  // when the failure flips, and a ref change renders nothing on its own. The
-  // ref remains the record `report` writes (it is also what a late answer
-  // compares against); this is the observable that makes the back-off real
-  // even with no `onReportStatus` mounted.
+  // Driven by STATE: the loop's effect must rebuild when the failure flips, and
+  // a ref change renders nothing on its own. `readFailure` is the observable
+  // that makes the back-off real even with no `onReportStatus` mounted.
   const failed = readFailure !== null;
   const fire = useCallback(() => {
     alive.current = true;

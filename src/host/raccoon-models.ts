@@ -105,7 +105,7 @@ export function filterRaccoonRows(rows: unknown, enabledIds: string[] | null | u
  */
 export function raccoonToDescriptor(row: any, options: { officeIdentity?: string } = {}) {
   const id = str(row?.id, "");
-  if (id === "") throw new Error("racconToDescriptor: row has no id");
+  if (id === "") throw new Error("raccoonToDescriptor: row has no id");
   const vision = row?.vision === true;
   // The credit multiplier is billing metadata pi-ai has no channel for (the
   // descriptor's `cost` is per-token USD, which this credit-gated gateway

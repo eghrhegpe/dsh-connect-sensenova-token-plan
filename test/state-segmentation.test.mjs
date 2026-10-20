@@ -29,6 +29,7 @@ const catalogStore = src("catalog-store.ts");
 const providerStore = src("provider-store.ts");
 const drawStore = src("draw-store.ts");
 const raccoonSwitchStore = src("raccoon-switch-store.ts");
+const switchStore = src("switch-store.ts");
 const throttleStore = src("throttle-store.ts");
 const indexTs = src("index.ts");
 const doctorTs = src("doctor.ts");
@@ -65,17 +66,25 @@ const doctorTs = src("doctor.ts");
     "state-store.ts reads DSH_PROFILE from the environment — env must not be an input");
 }
 
-// --- 2. the four switch-shaped states ARE partitioned -----------------------
+// --- 2. the switch-shaped states ARE partitioned ---------------------------
 for (const [file, text] of [
   ["catalog-store.ts", catalogStore],
   ["provider-store.ts", providerStore],
   ["draw-store.ts", drawStore],
-  ["raccoon-switch-store.ts", raccoonSwitchStore],
 ]) {
   check(`${file} writes under the profile partition`,
     /profileStateDir\(\s*name\s*,\s*profile\s*\)/.test(text),
     `${file} does not call profileStateDir(name, profile)`);
 }
+// The Raccoon switch no longer carries its own directory call — it rides
+// `createSwitchStore`, whose `stateDir` IS `profileStateDir(name, profile)`
+// (switch-store.ts). Guard that shared scaffold, and prove the store rides it.
+check("switch-store.ts partitions under the profile (the shared scaffold)",
+  /profileStateDir\(\s*name\s*,\s*profile\s*\)/.test(switchStore),
+  "switch-store.ts does not call profileStateDir(name, profile)");
+check("raccoon-switch-store.ts rides createSwitchStore, not a stale dir call",
+  /createSwitchStore/.test(raccoonSwitchStore),
+  "raccoon-switch-store.ts does not ride createSwitchStore");
 
 // --- 3. the throttle is deliberately shared (no profile argument) -----------
 {

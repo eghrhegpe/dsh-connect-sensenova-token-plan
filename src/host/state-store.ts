@@ -367,7 +367,7 @@ export async function readStateJson(file: string) {
  * @param {string} file - the state file path.
  * @returns {Promise<number|null>} the persisted version, or `null`.
  */
-export async function readStateVersion(file: string): Promise<number | null> {
+async function readStateVersion(file: string): Promise<number | null> {
   const raw = await readStateJson(file);
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
   const version = (raw as Record<string, unknown>).version;
@@ -384,7 +384,7 @@ export async function readStateVersion(file: string): Promise<number | null> {
  * @param {readonly number[]} known - the versions this build understands.
  * @returns {boolean} true when writing may proceed.
  */
-export function isKnownStateVersion(version: number | null, known: readonly number[]): boolean {
+function isKnownStateVersion(version: number | null, known: readonly number[]): boolean {
   return version === null || known.includes(version);
 }
 
