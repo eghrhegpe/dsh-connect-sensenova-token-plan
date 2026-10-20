@@ -232,7 +232,8 @@ export interface Wiring {
   resolveRaccoonToken: () => Promise<string>;
   /** The Raccoon `web_search` provider switch; may be absent on some Hosts. */
   webSearchStore: ReturnType<typeof import("./raccoon-web-store.ts").createFileRaccoonWebStore> | null;
-  /** Hand the displaced `ctx.web` search selection back. A SLOT, always present
+  /** Hand the `ctx.web` search selection back (clearing the empty slot this
+   plugin took over). A SLOT, always present
    *  in `apply()`'s literal — `current === null` means "we hold no takeover".
    *
    *  It was `webSearchRestore?: () => void` until 2026-10-05, i.e. the

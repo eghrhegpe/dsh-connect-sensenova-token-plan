@@ -14,9 +14,10 @@
  * Selection: DSH reads a private `searchProviderId` field per search call.
  * When a second provider is registered without being selected, every search
  * throws `WEB_PROVIDER_AMBIGUOUS` — the commandcode issue #26 lesson. So
- * enabling this plugin takes the selection over (remembering whatever it
- * displaced) and `teardown` (lifecycle.ts) hands it back. The write is a
- * bounded dependency on the runtime shape, mirrored from commandcode.
+ * enabling this plugin takes the selection over (Option B: only an EMPTY slot
+ * or one we already own; a foreign provider's selection is refused and the
+ * module goes absent) and `teardown` (lifecycle.ts) hands it back. The write is
+ * a bounded dependency on the runtime shape, mirrored from commandcode.
  * The ORDER is load-bearing and inverted from the naive one: take the
  * selection over, VERIFY the field actually reads our id, and only THEN
  * register. A hardened/frozen runtime that swallows the write must degrade to
@@ -58,23 +59,26 @@ export interface WebSearchRuntime {
 export interface WebSearchSelection {
   /** Whether this plugin currently owns the selection. */
   owner: boolean;
-  /** The backend it displaced; `undefined` means "nothing was configured". */
-  displaced: string | undefined;
   /** Whether the field already read our id when we took it over. */
   preexisting: boolean;
 }
 
 /** Fresh selection state: the plugin starts out not owning the selection. */
 export function webSearchSelection(): WebSearchSelection {
-  return { owner: false, displaced: undefined, preexisting: false };
+  return { owner: false, preexisting: false };
 }
 
 /**
  * Reach one end of the web-search selection without trampling siblings.
- * Never throws: a hardened runtime shape degrades to registered-but-unselected.
+ * Never throws: the caller's read-back judges the outcome, and a runtime that
+ * swallowed the write simply ends up with nothing registered (see
+ * {@link registerWebSearchProvider}) — "registered but unselected" is the live
+ * ambiguity we cite as the reason this takeover exists, not a degradation.
  * Option B (P1 backlog): take over only an EMPTY slot or one we already own;
  * a FOREIGN provider's selection is refused, so the module goes ABSENT
- * (caller registers nothing) rather than displacing the sibling.
+ * (caller registers nothing) rather than displacing the sibling. The hand-back
+ * therefore only ever CLEARS the empty slot we took over — there is no
+ * displaced id to restore, which is why the selection state carries none.
  * @param {WebSearchRuntime} web - the `ctx.web` runtime.
  * @param {WebSearchSelection} state - the tracked selection.
  * @param {boolean} enable - take the selection over, or hand it back.
@@ -83,7 +87,7 @@ export function applyWebSearchSelection(web: WebSearchRuntime, state: WebSearchS
   try {
     if (enable) {
       if (state.owner) {
-        // Still on across a re-apply: re-assert without forgetting whom we displaced.
+        // Still on across a re-apply: re-assert the pin we already hold.
         web.searchProviderId = RACCOON_SEARCH_PROVIDER_ID;
         return;
       }
@@ -96,14 +100,16 @@ export function applyWebSearchSelection(web: WebSearchRuntime, state: WebSearchS
       // not ours, so this whole module stays absent (no registration, no
       // restore) rather than stomping the global `searchProviderId`.
       if (!state.preexisting && prior !== undefined) return; // foreign-owned: refuse
-      state.displaced = undefined; // we only ever hold an empty slot or ours
       web.searchProviderId = RACCOON_SEARCH_PROVIDER_ID;
       state.owner = true;
       return;
     }
     if (state.owner) {
       state.owner = false;
-      if (!state.preexisting) web.searchProviderId = state.displaced;
+      // Option B only ever took over an EMPTY slot (or one we already owned,
+      // guarded by `preexisting`), so the hand-back clears the slot instead of
+      // restoring a displaced sibling's id — there is none to restore.
+      if (!state.preexisting) web.searchProviderId = undefined;
       state.preexisting = false;
     }
   } catch {
@@ -157,11 +163,11 @@ export async function registerWebSearchProvider(ctx: { get?: (n: string) => unkn
   // a frozen runtime leaves the read-back as the judge.
   applyWebSearchSelection(web, selection, true);
   if (web.searchProviderId !== RACCOON_SEARCH_PROVIDER_ID) {
-    // The write did not land (or was swallowed): hand back whatever we thought
-    // we displaced — idempotent, and a failed hand-back is equally swallowed —
-    // register NOTHING, and put the silent bail on voice (PITFALLS §29/§37:
-    // a bail with no log line is how "the switch is on but search never
-    // moved" becomes unanswerable).
+    // The write did not land (or was refused): hand back whatever we took over
+    // (a no-op when nothing was owned) — idempotent, and a failed hand-back is
+    // equally swallowed — register NOTHING, and put the silent bail on voice
+    // (PITFALLS §29/§37: a bail with no log line is how "the switch is on but
+    // search never moved" becomes unanswerable).
     applyWebSearchSelection(web, selection, false);
     degrade("web-search: the runtime would not accept the search-provider selection; registering no provider (the switch stays visibly on, search keeps its current backend)", null, wiring.logger, null);
     return;

@@ -415,7 +415,8 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // Web-search absorption (ROADMAP §6.1.7): opt-in, doubly degraded, and the
   // selection is taken over only when the switch is on. Fire-and-forget, like
   // the draw tool — and the restore is remembered on `wiring` so `teardown`
-  // hands the selection back to whichever backend it displaced. `reconcile`
+  // hands the selection back (clearing the empty slot it took over — Option B
+  // never displaces a sibling, so there is no backend to restore). `reconcile`
   // rather than the bare register, so the panel's in-session flip can drop
   // and re-apply the same way this mount does.
   effects.add("web-search", () => reconcileWebSearch(ctx, wiring));

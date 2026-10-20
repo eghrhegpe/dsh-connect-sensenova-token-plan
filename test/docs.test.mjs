@@ -1055,6 +1055,31 @@ const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md
     }
     note(`路由 body 上限副本：${hit}/${BODY.length} 处定位成功并等于源码常量（${ACC / 1024} KB / ${RAC / 1024} KB）`);
   }
+
+  // --- D) client 面板的回退字面量 ↔ CONFIG_DEFAULTS ---
+  // The trend card quotes the cache age from the SNAPSHOT, not from a local
+  // literal (see the comment at src/client/panel-page.ts). The `?? 60` /
+  // `?? 24` there are backstops for a snapshot that stops carrying the
+  // fields; that comment already declares them lies and says the fix is to
+  // DROP the fallbacks, never to retune the numbers. This sub-check pins the
+  // backstops to CONFIG_DEFAULTS, so a Host default change trips the gate
+  // instead of silently retuning what the panel would show if the contract
+  // ever breaks.
+  const clientSrc = readSrc("src/client/panel-page.ts");
+  const bsCache = (clientSrc.match(/data\?\.cacheSeconds \?\? (\d+)/) || [])[1];
+  const bsHours = (clientSrc.match(/trend\?\.hours \?\? (\d+)/) || [])[1];
+  if (bsCache === undefined || bsHours === undefined) {
+    bad("docs.test.mjs 检查 17：src/client/panel-page.ts 找不到趋势卡的 cacheSeconds / hours 回退字面量——D) 失去看守对象，请核对 `?? 60` / `?? 24` 那两行是否被改写");
+  } else {
+    const wantCache = cfg("cacheSeconds");
+    const wantHours = cfg("trendHours");
+    if (Number(bsCache) !== wantCache)
+      bad(`src/client/panel-page.ts 趋势卡回退 cache = ${bsCache}，但 CONFIG_DEFAULTS.cacheSeconds = ${wantCache}——回退字面量已漂移（该卡注释明写：fix 是 drop the fallback，不是 retune the numbers）`);
+    if (Number(bsHours) !== wantHours)
+      bad(`src/client/panel-page.ts 趋势卡回退 hours = ${bsHours}，但 CONFIG_DEFAULTS.trendHours = ${wantHours}——回退字面量已漂移`);
+    if (Number(bsCache) === wantCache && Number(bsHours) === wantHours)
+      note(`client 趋势卡回退字面量 ↔ CONFIG_DEFAULTS：cache ${bsCache} / hours ${bsHours}`);
+  }
 }
 
 if (fails.length) {

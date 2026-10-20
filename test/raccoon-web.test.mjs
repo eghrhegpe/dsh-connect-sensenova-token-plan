@@ -2,9 +2,11 @@
  * Unit checks for the Raccoon `ctx.web` web-search mount (`lifecycle.ts`) and
  * its opt-in switch store (`raccoon-web-store.ts`) — PEER-FREE:
  *
- * - `applyWebSearchSelection`: take-over remembers the displaced backend,
- *   re-assert does not forget it, hand-back restores only what it displaced,
- *   a pre-existing own pin is left alone, and a non-owner hand-back is a no-op;
+ * - `applyWebSearchSelection`: Option B — take-over only ever grabs an EMPTY
+ *   slot or one we already own, a FOREIGN selection is refused (the module
+ *   goes absent), hand-back clears the empty slot we took (there is no
+ *   displaced id to restore, so the state carries none), a pre-existing own
+ *   pin is left alone, and a non-owner hand-back is a no-op;
  * - `registerWebSearchProvider`: off / config-error / no-web-service bail, and
  *   the happy path — one provider registered, selection taken over, and the
  *   restore remembered on `wiring.webSearchRestore`; plus the ORDER (§2a): the
@@ -65,7 +67,7 @@ try {
     const state = webSearchSelection();
     applyWebSearchSelection(web, state, true);
     check("a foreign-occupied slot is refused: no takeover, sibling keeps its selection",
-      web.searchProviderId === "deepseek-official" && state.owner === false && state.displaced === undefined && state.preexisting === false, JSON.stringify({ web: web.searchProviderId, state }));
+      web.searchProviderId === "deepseek-official" && state.owner === false && state.preexisting === false && !("displaced" in state), JSON.stringify({ web: web.searchProviderId, state }));
 
     applyWebSearchSelection(web, state, false);
     check("a hand-back with nothing owned is a no-op", web.searchProviderId === "deepseek-official" && state.owner === false, JSON.stringify({ id: web.searchProviderId, state }));
@@ -76,11 +78,11 @@ try {
     const web = makeWeb();
     const state = webSearchSelection();
     applyWebSearchSelection(web, state, true);
-    check("an empty slot is taken over and remembered as nothing displaced",
-      web.searchProviderId === PROVIDER_ID && state.owner === true && state.displaced === undefined && state.preexisting === false, JSON.stringify({ web: web.searchProviderId, state }));
+    check("an empty slot is taken over (nothing is remembered to hand back)",
+      web.searchProviderId === PROVIDER_ID && state.owner === true && state.preexisting === false && !("displaced" in state), JSON.stringify({ web: web.searchProviderId, state }));
 
     applyWebSearchSelection(web, state, true);
-    check("a re-assert on an empty slot keeps the owner with nothing displaced", state.owner === true && state.displaced === undefined, JSON.stringify(state));
+    check("a re-assert on an empty slot keeps the owner (and carries no displaced id)", state.owner === true && !("displaced" in state), JSON.stringify(state));
 
     applyWebSearchSelection(web, state, false);
     check("hand-back clears the empty slot we took over",
@@ -92,8 +94,8 @@ try {
     const web = makeWeb(PROVIDER_ID);
     const state = webSearchSelection();
     applyWebSearchSelection(web, state, true);
-    check("a pre-existing own pin is remembered, not treated as displacement",
-      state.preexisting === true && state.displaced === undefined, JSON.stringify(state));
+    check("a pre-existing own pin is remembered, not treated as a takeover",
+      state.preexisting === true && !("displaced" in state), JSON.stringify(state));
     applyWebSearchSelection(web, state, false);
     check("hand-back leaves a pre-existing own pin alone", web.searchProviderId === PROVIDER_ID && state.owner === false, web.searchProviderId);
   }
