@@ -299,8 +299,12 @@ const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md
       }
     }
   }
-  if (claims < 2) bad(`只找到 ${claims} 处「N 条」引用，检查本身可能已经失效`);
-  else note(`PITFALLS 条目数 ${actual}，${claims} 处总数引用与 ${pointed} 处条号引用全部有效`);
+  // 2026-10-21：README 与 TROUBLESHOOTING 都不再复述总数（改成「条数见该文件头，别写死」），
+  // 于是「检查还有没有看守对象」不能再用「≥2 处写总数」判——那等于逼人把会腐坏的数字写回去。
+  // 新判据：**总数副本 0 处是目标**，但指向具体条号的引用仍必须 ≥2 处且可解析；
+  // 若有人重新写死一个总数，上面的循环照旧比值，不会因此放过。
+  if (pointed < 2) bad(`现行文档里只有 ${pointed} 处指向 PITFALLS 具体条号（总数副本 ${claims} 处），检查本身可能已经失效`);
+  else note(`PITFALLS 条目数 ${actual}：条号引用 ${pointed} 处全部可解析，总数副本 ${claims} 处（本仓已不再复述总数）`);
 }
 
 // 8) src/ 注释里的模块名引用完整性
@@ -955,6 +959,7 @@ const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md
     ["consoleTimeoutMs", "cfg:consoleTimeoutMs"],
     ["writeImageModelIds", "cfg:writeImageModelIds"],
     ["registerProvider", "cfg:registerProvider"],
+    ["maxTokensOverrides", "cfg:maxTokensOverrides"],
     ["drawEnabled", "cfg:drawEnabled"],
     ["drawModelId", "cfg:drawModelId"],
     ["drawTimeoutMs", "cfg:drawTimeoutMs"],

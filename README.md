@@ -8,11 +8,17 @@
 
 后台另有 429 自愈：限频被误判为"额度耗尽"时在 Host 侧纠正回退避重试，模型不会无端"消失"。
 
-> **AI 协作会话请先读 [AGENTS.md](AGENTS.md)**——验证入口、红线与文档地图都在那里；过程文档与提交历史本身就是本仓库工作面的一部分。
+> **AI 协作会话请先读 [AGENTS.md](https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan/blob/master/AGENTS.md)**——验证入口、红线与文档地图都在那里；过程文档与提交历史本身就是本仓库工作面的一部分。
 > 三个常被外部审读问起的疑问，预答在这里：
 > - `lib/` 与根 `client.js` 是**入库的构建产物**：`github:` 安装源不跑 prepack，不入库则直装即坏（[docs/ADR.md](docs/ADR.md) ADR-005）
 > - `docs/sensenova-api-reference/` 是商汤**官方文档的本地容器**，逐文件出处与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 > - 本仓库由 AI 协作开发，其提交历史里的过程痕迹是工作方式的一部分，不是疏漏
+>
+> **分发面**：npm 包只含 `package.json#files` 那 10 项（`lib/`、`client.js`、`icon.svg`、`locale/`、
+> `cordis.patch.yml`、`README.md`、`CHANGELOG.md`、`THIRD_PARTY_NOTICES.md`、`LICENSE`、
+> `screenshots.json`）。`docs/`、`AGENTS.md`、`src/`、`test/`、`assets/` **不在包里**——registry
+> 页面上点 `docs/…` 会 404、写相对路径的截图会裂，所以本文的截图一律是
+> `raw.githubusercontent.com` 绝对地址，细则链接请到 GitHub 仓库看。
 
 ## ① 积分额度
 
@@ -22,7 +28,7 @@
 - **模型清单**：套餐覆盖 vs 当前 Key 实际能调，一眼看出哪些模型需要开通
 - **每模型消耗**：近 N 小时各模型积分排名，"烧分大户"一目了然
 
-![「积分额度」tab](assets/panel-credit.png)
+![「积分额度」tab](https://raw.githubusercontent.com/eghrhegpe/dsh-connect-sensenova-token-plan/master/assets/panel-credit.png)
 
 首次使用在「连接商汤控制台」填一次账号和密码，之后令牌自动续期。
 - 登录失败时表单会直接显示商汤返回的原因（含「3 次错误锁 15 分钟」这类平台硬规则）；
@@ -36,7 +42,7 @@
 - **出图工具**：Host 给 agent 注册工具 `sensenova_draw_image`；模型由 catalog 的 `output_modalities` 结构化判定。
 - 开关与勾选都在面板热生效，无需重启**，**但工具的实际挂载 / 缺席发生在**下一次 Host 启动**。细节见 [docs/SETUP.md](docs/SETUP.md) §4 与 [docs/PROVIDER-HOT-RELOAD.md](docs/PROVIDER-HOT-RELOAD.md)。
 
-![「接入 API」tab](assets/panel-API-provider.png)
+![「接入 API」tab](https://raw.githubusercontent.com/eghrhegpe/dsh-connect-sensenova-token-plan/master/assets/panel-API-provider.png)
 
 ## ③ 小浣熊（可选，默认关）
 
@@ -47,7 +53,7 @@
 - 每个模型带**上下文窗口 / 最大输出**与积分倍率（`free` / `×0.75` 这类，由网关目录声明；目录没给就不显示，不猜）
 - **联网搜索**（默认关）：开启后 DSH 的 `web_search` 工具后端换成小浣熊托管的 MCP，复用小浣熊凭据，无需再单独配搜索端点 key
 
-![「小浣熊」tab](assets/panel-xiaohuanxiong.png)
+![「小浣熊」tab](https://raw.githubusercontent.com/eghrhegpe/dsh-connect-sensenova-token-plan/master/assets/panel-xiaohuanxiong.png)
 
 ## 输入框用量胶囊
 
@@ -57,7 +63,7 @@
 - 两档读数各自归口：商汤档读 5 小时 / 每周两个滚动窗口，小浣熊档读积分余额（网关未声明上限，不换算百分比）
 - 套餐名前缀（`商汤 · ` / `浣熊 · `）说明下面的数字属于哪套额度
 
-![输入框用量胶囊与展开的额度卡](assets/sensenova-usage-capsule.png)
+![输入框用量胶囊与展开的额度卡](https://raw.githubusercontent.com/eghrhegpe/dsh-connect-sensenova-token-plan/master/assets/sensenova-usage-capsule.png)
 
 ## 边界
 
@@ -94,7 +100,7 @@
 - [docs/API.md](docs/API.md) — 路由与控制台端点
 - [docs/TESTING.md](docs/TESTING.md) — 测试体系
 - [docs/SENSENOVA-API.md](docs/SENSENOVA-API.md) — 商汤接口全集（实测）
-- [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（44 条）
+- [docs/PITFALLS.md](docs/PITFALLS.md) — 真实踩坑（现象→根因→修法；条数见该文件头，别在这里写死）
 - [CHANGELOG.md](CHANGELOG.md) — 版本变化
 - [docs/README.md](docs/README.md) — docs/ 全量索引（含 ADR / ROADMAP / PROVIDER-HOT-RELOAD / TROUBLESHOOTING 等上表未列的）
 
