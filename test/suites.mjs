@@ -73,6 +73,7 @@ export const SUITES = Object.freeze([
   { name: "store-baseline.test.mjs", kind: "suite", note: "frozen behaviour frames — zero drift allowed" },
   { name: "routes.test.mjs", kind: "suite", note: "the HTTP route family" },
   { name: "credential-guard.test.mjs", kind: "suite", note: "AST fence: no str() read of a credential, whole Host tree" },
+  { name: "redaction-closure.test.mjs", kind: "suite", note: "the redaction surface stays closed: one copy of the rules, every route error through the shared collector" },
   { name: "panel.test.mjs", kind: "suite", note: "panel decisions + zh/en dictionary parity" },
   { name: "render.test.mjs", kind: "suite", note: "the client render surface" },
   { name: "render-dom.test.mjs", kind: "suite", note: "shipped client.js in jsdom + REAL react (SKIPs without the devDeps)" },
