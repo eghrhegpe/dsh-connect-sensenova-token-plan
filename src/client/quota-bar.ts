@@ -4,7 +4,7 @@
  * rows all paint a track with an optional fill and report the same number to
  * assistive tech.
  *
- * Extracted 2026-10-19 (P1 review). The three call sites had drifted on the one
+ * This primitive exists because the three call sites had drifted on the one
  * thing they must not: `aria-valuenow` was a STRING in the quota card
  * (`pct.toFixed(1)`) and a NUMBER in the other two. An ARIA value is a number —
  * the string form was a latent type error that only the DOM's own attribute

@@ -2,12 +2,12 @@
  * The Raccoon read operations: normalize a catalogue row, fetch the live
  * catalogue, and read the credit balance.
  *
- * Split out of the former single `raccoon.ts` (2026-10-05). What binds these
- * three together is not a call site but a decision they share: a gateway read
- * that comes back unusable degrades to `null` (the caller falls back to the
- * static roster / shows nothing) rather than throwing, and a *successful* read
- * that simply lists nothing is NOT a failure — the `onFail` split is what lets
- * the panel say "the gateway offered nothing" instead of "the gateway is down".
+ * What binds these three together is not a call site but a decision they share:
+ * a gateway read that comes back unusable degrades to `null` (the caller falls
+ * back to the static roster / shows nothing) rather than throwing, and a
+ * *successful* read that simply lists nothing is NOT a failure — the `onFail`
+ * split is what lets the panel say "the gateway offered nothing" instead of
+ * "the gateway is down".
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-catalog
  */

@@ -2,10 +2,10 @@
  * The Raccoon Work（商汤小浣熊）protocol layer — the pure, peer-free half of the
  * second upstream provider (ROADMAP §6.1 "second upstream provider").
  *
- * **This file is a barrel** (2026-10-05). It was one 683-line module; it is now
- * six modules split along the dependency DAG its own segments formed, and this
- * re-exports all of them so every consumer's import line is unchanged. Nothing
- * is defined here.
+ * **This file is a barrel**: the protocol lives in six modules split along the
+ * dependency DAG their own segments form, and this re-exports all of them, so
+ * consumers take one import line and get the whole layer. Nothing is defined
+ * here.
  *
  * | module | carries | depends on |
  * |---|---|---|

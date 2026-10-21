@@ -1,14 +1,14 @@
 /**
  * Raccoon gateway constants — the endpoint prefixes and the QR-login timings.
  *
- * Split out of the former single `raccoon.ts` (2026-10-05) along the dependency
- * DAG its own segments formed: every other protocol module needs these, so they
- * are the roots. Nothing here depends on anything else in the Raccoon half.
+ * These are the roots of the Raccoon dependency DAG: every other protocol
+ * module needs them, and nothing here depends on anything else in the Raccoon
+ * half.
  *
- * The header comment that used to sit on the old monolith — the wire facts, the
- * "mechanism reference, not ported" stance, the rejected desktop-token route —
- * moved to {@link ./raccoon.ts}, which is now the barrel every consumer imports.
- * What stays here is the knowledge that is *about the wire itself*.
+ * The stance-level knowledge — the wire facts, the "mechanism reference, not
+ * ported" position, the rejected desktop-token route — lives on
+ * {@link ./raccoon.ts}, the barrel every consumer imports. What stays here is
+ * knowledge that is *about the wire itself*.
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-consts
  */

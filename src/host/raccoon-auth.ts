@@ -4,10 +4,9 @@
  * flow (mechanism reference, not ported) are the second upstream's core wire
  * knowledge.
  *
- * Split out of the former single `raccoon.ts` (2026-10-05). The login ORCHESTRATION
- * (the timed walk, the store hand-off) was already elsewhere — `raccoon-walk.ts`
- * drives the cadence and `raccoon-store.ts` owns the credential write-back; this
- * module is the protocol half they call.
+ * The login ORCHESTRATION (the timed walk, the store hand-off) lives elsewhere —
+ * `raccoon-walk.ts` drives the cadence and `raccoon-store.ts` owns the
+ * credential write-back; this module is the protocol half they call.
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-auth
  */

@@ -2,11 +2,10 @@
  * The wire primitives every Raccoon call shares: the header set, the envelope
  * reader, and the two JWT-payload readers (expiry + display name).
  *
- * Split out of the former single `raccoon.ts` (2026-10-05). This is the layer
- * that knows the gateway's SHAPE; it makes no policy decision beyond "a
- * malformed answer reads as a refusal" and "a credential may arrive in either
- * of two document shapes". Every request-shaped module (auth, catalogue) sits
- * above it.
+ * This is the layer that knows the gateway's SHAPE; it makes no policy
+ * decision beyond "a malformed answer reads as a refusal" and "a credential
+ * may arrive in either of two document shapes". Every request-shaped module
+ * (auth, catalogue) sits above it.
  *
  * The JWT readers live here rather than next to their callers because both the
  * auth walk (`pollRaccoonQrLogin`) and the store (`decodeRaccoonJwtExpMs` on

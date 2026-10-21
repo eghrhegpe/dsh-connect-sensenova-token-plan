@@ -8,9 +8,9 @@
 //                    screenshots.json 声明的图真实存在于磁盘。这三条与 1-8 有本质区别：
 //                    前两组验的是「文档格式对不对」，它们验的是「文档有没有说实话」——
 //                    形式全绿而语义已漂，是本仓库踩过两次的坑（见 PITFALLS §25）。
-//   裁定账本闭合（12-13）：现行文档无内联考古补丁、账本条目形状齐；
-//                    且代码/测试里引用的 ADR-NNN 必须在账本里存在（曾有 ADR-006 被引用
-//                    27 处却不在账本，而只校验形状的门禁全绿放过）。
+//   裁定账本闭合（12-13）：现行文档与 src/ 注释无内联考古补丁/搬家叙述（ADR-014）、
+//                    账本条目形状齐；且代码/测试里引用的 ADR-NNN 必须在账本里存在
+//                    （曾有 ADR-006 被引用 27 处却不在账本，而只校验形状的门禁全绿放过）。
 //   变更日志分工（15）：CHANGELOG 只记公开行为变化——不写实现坐标（src/、test/）、
 //                    测试工程词（变异 / 断言级 / 套件 / fixture）与 commit hash；
 //                    版本导语 ≤ 90 字（先给结论）。
@@ -577,6 +577,35 @@ const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md
       if (hit) bad(`${f}:${i + 1} 内联考古层「${hit[0]}」——现行正文只写现状，裁定沿革进 docs/ADR.md`);
     });
   }
+  // src/ 代码注释同一条纪律（ADR-014）：红的是「搬家叙述」——「某日从前一个文件
+  // 拆出／移到某处」式沿革句，那属于账本；模块头部该留的只是当下的职责与邻接。
+  // 实测/probe/复核日期**不在**此列：证据不是考古——这里只列本仓真实出现过的形态，
+  // 不搞「凡带日期的行都红」，llm-models 的 probe 日期照常绿着过。
+  const SRC = join(ROOT, "src");
+  const srcArcheo = [
+    [/Split out of the former/, "搬家叙述「Split out of the former …」"],
+    [/Extracted 20\d\d/, "搬家叙述「Extracted <年份>」"],
+    [/（20\d\d-\d\d-\d\d\s*(?:落地|修)）/, "日期内联补丁「（YYYY-MM-DD 落地/修）」"],
+    [/\*\* \(20\d\d-\d\d-\d\d\)/, "标题后的日期内联补丁「**…** (YYYY-MM-DD)」"],
+  ];
+  const tsFiles = [];
+  (function collect(dir) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) collect(p);
+      else if (e.name.endsWith(".ts")) tsFiles.push(p);
+    }
+  })(SRC);
+  for (const f of tsFiles) {
+    const lines = readFileSync(f, "utf8").split(/\r?\n/);
+    lines.forEach((line, i) => {
+      for (const [re, what] of srcArcheo) {
+        if (re.test(line)) {
+          bad(`${f.slice(ROOT.length + 1)}:${i + 1} ${what}——注释只写当下的形状，何时搬去过哪写进 docs/ADR.md`);
+        }
+      }
+    });
+  }
   // 账本自身的最小形状：存在、有条目、每条目带日期与状态——账本缺行等于没记账。
   const adrPath = join(ROOT, "docs", "ADR.md");
   if (!existsSync(adrPath)) {
@@ -591,7 +620,7 @@ const FROZEN_DOCS = new Set(["ROADMAP.md", "QODER-GAP.md", "TOKEN-STORE-SPLIT.md
       const block = adr.slice(at, next === -1 ? adr.length : next);
       if (!/日期/.test(block) || !/状态/.test(block)) bad(`ADR 条目缺日期/状态行：${title.trim()}`);
     }
-    note(`考古纪律：受检 ${scanned} 篇现行文档零内联补丁；账本 ${heads.length} 条目形状合格（日期/状态齐）`);
+    note(`考古纪律：受检 ${scanned} 篇现行文档与 src/ 的 ${tsFiles.length} 个 .ts 零搬家叙述；账本 ${heads.length} 条目形状合格（日期/状态齐）`);
   }
 }
 

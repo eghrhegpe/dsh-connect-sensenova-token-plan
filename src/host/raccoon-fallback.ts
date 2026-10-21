@@ -1,10 +1,9 @@
 /**
  * The static fallback roster and the pinned-but-unwired thinking dialect.
  *
- * Split out of the former single `raccoon.ts` (2026-10-05). This is the leaf of
- * the Raccoon dependency DAG: nothing here imports another Raccoon module, and
- * nothing imports this except the three consumers that need a roster when the
- * live read came back empty.
+ * This is the leaf of the Raccoon dependency DAG: nothing here imports another
+ * Raccoon module, and nothing imports this except the three consumers that need
+ * a roster when the live read came back empty.
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-fallback
  */
@@ -55,13 +54,13 @@ export const RACCOON_FALLBACK_MODELS = Object.freeze([
  * day the adapter learns to carry `extra_body`, the spelling does not have to
  * be re-probed.
  *
- * **Not re-exported from the barrel** (2026-10-05): an exported symbol with no
- * production caller is debt on the module's public face — it invites a call
- * site that the provider cannot honour (`reasoning: false` means the adapter
- * drops the field). The test suite reaches it by named import from THIS module,
- * which is what keeps it honest: the day the adapter learns to carry
- * `extra_body`, the right move is to export it deliberately from
- * `raccoon-models.ts`, not to widen this leaf's surface by accident.
+ * **Not re-exported from the barrel**: an exported symbol with no production
+ * caller is debt on the module's public face — it invites a call site that the
+ * provider cannot honour (`reasoning: false` means the adapter drops the
+ * field). The test suite reaches it by named import from THIS module, which is
+ * what keeps it honest: the day the adapter learns to carry `extra_body`, the
+ * right move is to export it deliberately from `raccoon-models.ts`, not to
+ * widen this leaf's surface by accident.
  * @param {string|undefined} effort - `undefined` = send nothing (server default
  *   = thinking on); `"off"` = disabled; anything else = enabled.
  * @returns {object|undefined} the `extra_body` value, or `undefined`.

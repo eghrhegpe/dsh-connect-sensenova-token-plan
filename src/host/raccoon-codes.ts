@@ -2,10 +2,9 @@
  * Why a Raccoon credential rotation failed — the second upstream's OWN
  * taxonomy, plus the two predicates that read it.
  *
- * Split out of the former single `raccoon.ts` (2026-10-05). This module has no
- * dependency on any other Raccoon module: it is a pure classification table,
- * and keeping it that way is what lets a test pin the table and the mapping
- * separately from the call sites that consult them.
+ * This module has no dependency on any other Raccoon module: it is a pure
+ * classification table, and keeping it that way is what lets a test pin the
+ * table and the mapping separately from the call sites that consult them.
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-codes
  */
