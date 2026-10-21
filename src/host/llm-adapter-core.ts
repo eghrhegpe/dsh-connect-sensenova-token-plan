@@ -24,6 +24,7 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { resolveRetryPolicy, resolveImageAttachmentAccess } from "@deepseek-ai/dsh-llm";
 import { name as pluginName } from "./host-config.ts";
+import { assertProviderOwnership } from "./llm-models.ts";
 import { buildRetryPolicyConfig } from "./llm-retry.ts";
 import { reclassifyStream } from "./llm-error-fix.ts";
 
@@ -176,6 +177,10 @@ export function assemblePiAiAdapter({
   reasoning,
   requestImagePixelBudget
 }: PiAiAdapterParts) {
+  // One upstream owns exactly the id it registers under: the Host compares a
+  // message's route id against the descriptor's `provider` on every replay and
+  // degrades the turn on any difference. Checked here, where both facts meet.
+  assertProviderOwnership(models, providerId);
   const provider = {
     ...createProvider({
       id: providerId,

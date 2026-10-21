@@ -32,8 +32,10 @@ import {
   rosterWithAvailability,
   maxTokensFor,
   HIDE_ALL_MODELS,
-  summarizeCatalog
+  summarizeCatalog,
+  assertProviderOwnership
 } from "../src/host/llm-models.ts";
+import { RACCOON_PROVIDER_ID, buildRaccoonDescriptors } from "../src/host/raccoon-models.ts";
 import { isImageGenModel } from "../src/host/modality.ts";
 import {
   CATALOG_VERSION,
@@ -1598,6 +1600,38 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       "a publisher grew its own disposed flag — the gate is shared or it is not");
   } catch (error) {
     fail("the publish control plane is shared by both upstreams", error);
+  }
+}
+
+// --- 15. provider identity: one upstream owns exactly one id ---------------
+// The Host compares a message's route id against the descriptor's `provider`
+// on every replay. A shared identity across two upstreams makes that check
+// fail on whichever route is named differently, and pi-ai then replays the
+// thinking blocks as plain text. These checks pin the guard that refuses such
+// a descriptor at assembly time.
+{
+  const refusalOf = (fn) => {
+    try { fn(); return null; } catch (error) { return String(error?.message ?? error); }
+  };
+  try {
+    const entries = [{ id: "SenseNova-Lite", name: "SenseNova Lite" }];
+    const owned = buildDescriptors(entries, { providerId: LLM_PROVIDER_ID });
+    check("descriptors pass the guard for the id they were built with",
+      assertProviderOwnership(owned, LLM_PROVIDER_ID) === owned);
+    check("a descriptor stamped with another upstream's id is rejected",
+      /sensenova-raccoon/.test(refusalOf(() => assertProviderOwnership(owned, "sensenova-raccoon")) ?? ""),
+      String(refusalOf(() => assertProviderOwnership(owned, "sensenova-raccoon"))));
+    check("a descriptor built on the DEFAULTED id is still checked, not waved through",
+      /sensenova-token-plan/.test(refusalOf(() => assertProviderOwnership(buildDescriptors(entries, {}), "sensenova-raccoon")) ?? ""));
+    check("an empty id is rejected before any descriptor is trusted",
+      /providerId is required/.test(refusalOf(() => assertProviderOwnership(owned, "")) ?? ""));
+    const raccoon = buildRaccoonDescriptors(null);
+    check("the raccoon roster is owned by its own id, not the Token Plan's",
+      raccoon.length > 0 &&
+        assertProviderOwnership(raccoon, RACCOON_PROVIDER_ID).length === raccoon.length &&
+        refusalOf(() => assertProviderOwnership(raccoon, LLM_PROVIDER_ID)) !== null);
+  } catch (error) {
+    fail("one upstream owns exactly one provider identity", error);
   }
 }
 

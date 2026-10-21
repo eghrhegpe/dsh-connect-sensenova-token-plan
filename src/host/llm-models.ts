@@ -657,3 +657,40 @@ export function summarizeCatalog(entries: unknown) {
     visionIds
   };
 }
+
+/**
+ * Enforces one upstream = one provider identity, before the descriptors reach
+ * the Host.
+ *
+ * DSH stamps `source.provider` on every assistant message from the ROUTE id it
+ * resolved, while `replayState.response.provider` is copied from the
+ * descriptor's own `provider` field. The Host's replay check compares the two
+ * and, on a mismatch, drops that assistant turn to a foreign message — pi-ai
+ * then replays every thinking block as plain text. A descriptor must therefore
+ * carry exactly the id the adapter registers under. Two upstreams sharing one
+ * identity constant break that check on whichever route is named differently,
+ * which is why the two routes here own separate ids (`LLM_PROVIDER_ID`,
+ * `RACCOON_PROVIDER_ID`) rather than one shared one.
+ *
+ * Throws instead of repairing: a mismatched descriptor means every replayed
+ * turn on that route is already degraded, so assembly time is the last cheap
+ * place to report it — once, instead of silently on each request.
+ * @param {object[]} models - the descriptors this upstream will publish.
+ * @param {string} providerId - the id this upstream registers under.
+ * @returns {object[]} the same descriptors, when the invariant holds.
+ */
+export function assertProviderOwnership(models: unknown, providerId: unknown): object[] {
+  const owner = str(providerId, "");
+  if (owner === "") throw new Error("assertProviderOwnership: providerId is required");
+  const list = Array.isArray(models) ? models : [];
+  for (const model of list) {
+    const stamp = str((model as { provider?: unknown })?.provider, "");
+    if (stamp !== owner) {
+      const id = str((model as { id?: unknown })?.id, "?");
+      throw new Error(
+        `assertProviderOwnership: descriptor "${id}" is stamped "${stamp}" but this upstream registers as "${owner}"`
+      );
+    }
+  }
+  return list as object[];
+}

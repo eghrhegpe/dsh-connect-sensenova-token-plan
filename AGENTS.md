@@ -122,6 +122,13 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
    "浏览器能登、面板不能"就无法对照排查。
 6. **密码必须走 JWE 封包**（平台 JWKS 公钥 RSA-OAEP + A256GCM），明文不上网；
    算法组合是平台钉死的，不是自由参数。
+7. **一个上游 = 一个 provider id，descriptor 的 `provider` 只能等于本路由注册的 id**。
+   DSH 在每条 assistant 消息上记 `source.provider`（解析到的**路由 id**），而
+   `replayState.response.provider` 抄自 descriptor 的 `provider` 字段；宿主重放校验
+   比对这两个值，不等即判为外来消息，pi-ai 把整段思考块重放成正文。所以**禁止**引入
+   跨上游共享的 identity 常量：名字与章不同的那条路由会每轮静默降级。装配期的
+   `assertProviderOwnership`（`llm-models.ts`，由 `assemblePiAiAdapter` 首行调用）对它
+   直接抛错，**别放宽成 warn 或自动改写**。新增上游先给它新 id，再走同一个装配函数。
 
 ## 并行会话纪律
 

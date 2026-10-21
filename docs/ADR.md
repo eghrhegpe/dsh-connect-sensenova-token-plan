@@ -129,3 +129,12 @@
 - **理由**：docs 早有 ARCHAEOLOGY 闸，src 却一直没人管：本轮改造清点了 9 个文件共 12 行「带日期的搬家叙述」（`raccoon-auth/catalog/codes/consts/http.ts` 五块协议模块头、`raccoon.ts` 桶头与 `raccoon-fallback.ts` 两处、`composer-usage-pill.ts` 三处日期补丁、`quota-bar.ts` 的 Extracted 句），全部改写为现在时。它的病和 docs 那份同构：把来历当现行信息，下一次再拆之后句子就烂成真不了伪的坏坐标——新读者会按注释去已搬空的旧住址找东西。门禁只列这 12 行真实出现过的四个形态（`Split out of the former` / `Extracted 20xx` / `（YYYY-MM-DD 落地|修）` / 标题后 `(YYYY-MM-DD)`），不搞「凡带日期皆红」——判据收窄到能被现有注释逐个对照验证，误伤面为零，将来要扩也要有实例才动。
 - **边界**：只扫 `src/**/*.ts`；docs/ 各表的沿革注记（如 `ARCHITECTURE.md` 拆分行的日期、`PROVIDER-HOT-RELOAD.md` 变更表）是台账性质，保留；测试套件里引用搬家史的注释与检查名不受检。写新拆分时正确落点是加 ADR 条目，不是在头部留日期。
 - **复核条件**：哪天出现第五种搬家叙述形态、或有人真需要按日期考古，按实例扩清单，不预先放宽任何一条。
+
+## ADR-015 多上游的身份边界：一条路由一个 provider id，章不得共用
+
+- **日期**：2026-10-21
+- **状态**：现行（实现见 `src/host/llm-models.ts` 的 `assertProviderOwnership`、`src/host/llm-adapter-core.ts` 的 `assemblePiAiAdapter` 首行调用；门禁见 `test/provider.test.mjs` 第 15 段 5 条）
+- **裁定**：本插件两条上游路由继续各持一个 provider id（`sensenova-token-plan`、`sensenova-raccoon`），且每个 descriptor 的 `provider` 必须等于它所属路由注册的那个 id。**禁止**引入跨上游共享的 identity 常量。该不变式在装配期由 `assertProviderOwnership` 强制：不符即抛错——拒绝分支，不是补偿分支；不 warn、不自动改写。
+- **理由**：DSH 里「身份」有两个来源。assistant 消息的 `source.provider` 来自解析到的**路由 id**；`replayState.response.provider` 抄自 descriptor 的 `provider` 字段。宿主重放校验比对二者，不等即把该条 assistant 消息降级为外来消息（`api` 变 `dsh-foreign`），pi-ai 随之把其中的 thinking 块当正文重放。所以「多条路由共用一章」的代价不是某次请求报错，而是那条路由的**每一轮历史都静默降级**，日志里没有任何 error。本机对同类插件的一份扫描（179 会话 / 13,951 条 model 消息 / 11 个 provider）给出了量级：共用 identity 的那条 global 路由 1,332 条消息**全部**分叉（章 `workbuddy` ≠ 路由 `workbuddy-global`），而同机其余 10 个 provider 全部同名通过。该扫描只作判据证据，不在本插件的改动范围。ADR-007 的「共享凭据则合并，否则分裂」管的是插件级归属；本条是它的 provider 级同源推论：**同一插件内不共享凭据的两条上游，也不共享身份**。
+- **边界**：`toPiDescriptor` / `buildDescriptors` 的 `providerId` 默认值（`LLM_PROVIDER_ID`）**保留**。约十五处离线测试在验过滤、去重、视觉识别等与身份无关的行为，强制传参只会给它们添噪音，且默认值本身不会把错误章发到 Host——真正注册的 descriptor 必经 `assemblePiAiAdapter`，两个上游共用这一个入口。守卫因此落在装配期而非构造期：构造期的默认值是测试便利，装配期才是上线路径。
+- **复核条件**：若 DSH 改为按 descriptor 的 `provider` 统一记 `source.provider`（两侧同源、不再比对），本条可撤销。在此之前，新增上游一律先申请新 id 再走同一个装配函数。
