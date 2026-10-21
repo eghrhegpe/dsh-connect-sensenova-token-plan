@@ -1,5 +1,6 @@
 /**
- * Shared value readers and the error constructor used across the Host half.
+ * Shared value readers, the bounded mount-time service resolver, and the error
+ * constructor used across the Host half.
  *
  * These are the small "read X or fall back" primitives every module reaches
  * for. Centralising them stops copies from drifting apart the way the error-code
@@ -179,10 +180,10 @@ export function obj(value?: any): any {
  * credentials, settings, tools and `llm` services may all register AFTER this
  * plugin mounts, and a one-shot read that misses one leaves a capability
  * absent for the whole session with no line anywhere naming the reason. This
- * is the one loop both such callers use — `resolveServiceWithRetry` in
- * `lifecycle.ts` (retries a service READ) and the Raccoon mount seed in
- * `index.ts` (retries a whole seed pass) — so the backoff shape cannot drift
- * between them.
+ * is the one loop both such callers use — `resolveServiceWithRetry`
+ * (retries a service READ, right below) and `seedRaccoonOnMount` in
+ * `lifecycle.ts` (retries a whole seed pass) — so the backoff shape cannot
+ * drift between them.
  *
  * The window LENGTH stays with the caller: those two need different budgets
  * (a single service read settles in a few hundred ms; a seed that must wait
@@ -210,6 +211,94 @@ export async function retryBounded({ attempts, delayMs, run }: {
     }
   }
   return false;
+}
+
+/** How many times a mount-time optional-service read is retried. */
+const SERVICE_RETRY_ATTEMPTS = 3;
+/** Base backoff between service-read attempts (× attempt index). */
+const SERVICE_RETRY_DELAY_MS = 300;
+
+/**
+ * Read an optional Host service with a bounded retry.
+ *
+ * A service may register AFTER this plugin mounts — the vision step two note
+ * in `lifecycle.ts` said so — and a mount-time read is the only window for a
+ * capability the Host cannot later remove: the tools registry has no
+ * unregister call, and the settings row is only written by a poll that finds
+ * `visionPublish.current` already filled. A one-shot read therefore misses a
+ * service that arrives a moment late for the WHOLE session, silently — the
+ * draw tool would be absent with the switch visibly on, the vision list never
+ * written, and no line on any panel naming the reason. The Raccoon publisher
+ * got the same bounded retry for its mount seed.
+ *
+ * This retries the READ ONLY. Whatever it returns is used exactly once by the
+ * caller: retrying a call that mutates (a tool registration) would register
+ * the same tool twice, and the tools registry cannot tell.
+ *
+ * The loop is `retryBounded` directly above — the same backoff
+ * shape the Raccoon mount seed uses; only the window length is set here.
+ * @template T - the shape of the service being waited for. The reader knows
+ *   what it wants (`{ register }` for tools, `{ update }` for settings); this
+ *   function only knows a name, so the shape is declared at the call site and
+ *   the `as T` below is the single place that claim is trusted. Defaulting to
+ *   `unknown` means a caller that forgets the parameter gets a type it cannot
+ *   accidentally dereference — which is the failure the old `Promise<any>`
+ *   invited on every one of its seven property reads.
+ * @param {object} ctx - the host root context.
+ * @param {string} service - the service name for `ctx.get`.
+ * @param {object} [options]
+ * @param {() => boolean} [options.isDisposed] - stop early when the plugin is
+ *   withdrawing; a late registration into a withdrawing Host is worse than
+ *   absence.
+ * @param {number} [options.attempts] - test seam for the attempt count.
+ * @param {number} [options.delayMs] - test seam for the backoff base.
+ * @returns {Promise<T|null>} the service, or `null` when it never appeared
+ *   inside the window.
+ */
+export async function resolveServiceWithRetry<T = unknown>(
+  ctx: { get?: (n: string) => unknown; [key: string]: unknown },
+  service: string,
+  // Typed explicitly rather than left to inference, and NOT via JSDoc: a
+  // parameter with a default initializer is typed from that initializer (`{}`),
+  // and in a `.ts` file `@param` / `@type` are comments, not type sources — so
+  // the destructuring below would read three properties off `{}` (TS2339).
+  options: { isDisposed?: () => boolean; attempts?: number; delayMs?: number } = {}
+): Promise<T | null> {
+  const {
+    isDisposed = () => false,
+    attempts = SERVICE_RETRY_ATTEMPTS,
+    delayMs = SERVICE_RETRY_DELAY_MS
+  } = options;
+  // Annotated `T | null` rather than inferred from the `null` initializer,
+  // which under strictNullChecks would pin the type to `null` and make every
+  // assignment below — and every `tools.register` / `settings.update` at the
+  // call sites — read as `never`.
+  let found: T | null = null;
+  await retryBounded({
+    attempts,
+    delayMs,
+    run: () => {
+      if (isDisposed()) return true;
+      try {
+        const value = ctx.get?.(service) ?? ctx[service] ?? null;
+        if (value !== null && value !== undefined) {
+          // The one trusted claim in this module: `ctx.get` hands back
+          // `unknown` because the Host is dynamically typed, so the shape is
+          // whatever the caller's `T` says it is. Every call site
+          // (`registerDrawTool` in `draw-mount.ts`, `publishVisionStepTwo` in
+          // `lifecycle.ts`, the web-search mount in `web-search.ts`) keeps its
+          // own `typeof x.method !== "function"` guard, which is what makes the
+          // wrong `T` a degraded path rather than a crash.
+          found = value as T;
+          return true;
+        }
+      } catch {
+        // A resolver that refuses a read is treated like an absent service.
+      }
+      return false;
+    }
+  });
+  return found;
 }
 
 /**

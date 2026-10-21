@@ -71,12 +71,12 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 |---|---|
 | `draw-store.ts`（新增） | 出图开关状态文件 `$DSH_HOME/state/<profile>/<plugin>/draw.json`；完整性纪律与 `provider-store.ts` 完全一致。同文件还存**首选出图模型偏好 `drawModelId`**——`POST /api/<name>/draw` 三个载荷分支（`enabled` / `drawModelId` / `forget`），其中 `forget` 只清开关、刻意保留模型偏好 |
 | `index.ts` | wiring 里增补 `drawStore`；传给 `registerRoutes` 与 `startSideEffects` |
-| `lifecycle.ts` | `registerDrawTool` 改为读「面板保存值 > 配置默认值」的生效值，而不是直接读 `settings.drawEnabled` |
+| `draw-mount.ts` | `registerDrawTool` 改为读「面板保存值 > 配置默认值」的生效值，而不是直接读 `settings.drawEnabled`（现居 `draw-mount.ts`，经 `lifecycle.ts` 门面再导出） |
 | `routes/draw.ts` | 新增 `POST /api/<name>/draw`（2026-10 路由拆分后按资源归入 `routes/` 家族），与 `/provider` 同一信任形状 |
 | `snapshot-aggregate.ts` | 快照 `llm.drawEnabled` / `llm.drawSource` 回显生效值与来源 |
 | `src/client/provider-controls.ts`（原 `client.js` 内联） | `ApiKeyForm` 区新增「出图工具」卡片，含 `DrawSwitch` 控件 |
 
 与 provider 开关的一个**语义差异**需要说明：provider 开关改的是「当前请求立刻重新发布注册对」，改完立即生效；draw 开关改的是「挂载时是否注册 agent 工具」，**当前 Host 进程里已经注册的工具不会因为改开关而消失或出现**——要真正生效需要在**下一个 Host (re)mount**（即重启 `dsh web` 或重新安装插件）时，`lifecycle.ts` 的 `startSideEffects` 重新读生效值。面板开关本身是「立即生效、无需重启」的**状态读写**；工具的实际挂载/卸载要等到下次 Host 启动。面板文案里「立即生效」指的是**开关值**本身，不是 agent 工具的实时性。
 
-**已知边界**：两个 Host 进程共享同一状态目录时，后写者胜（与 provider / throttle / catalog 文件语义一致）。`POST /draw` 只改开关值，不直接操作 tools registry——这是有意的：tools registry 没有 `unregister` 语义（见 `lifecycle.ts` 注释），强行卸载要等 Host 生命周期自然结束。
+**已知边界**：两个 Host 进程共享同一状态目录时，后写者胜（与 provider / throttle / catalog 文件语义一致）。`POST /draw` 只改开关值，不直接操作 tools registry——这是有意的：tools registry 没有 `unregister` 语义（见 `draw-mount.ts` 注释），强行卸载要等 Host 生命周期自然结束。
 

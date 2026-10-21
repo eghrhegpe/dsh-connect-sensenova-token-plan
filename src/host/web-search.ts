@@ -27,23 +27,22 @@
  * the reason this takeover exists. Absence is the safe direction; a live
  * ambiguity is not degradation.
  *
- * Home: this section lived inside `lifecycle.ts`, which already owned the
- * Token Plan mount seed, the draw tool, the vision writer AND the raccoon
- * seed — a third upstream concern in a mount-lifecycle file. It moved out
- * on 2026-10-05; `lifecycle.ts` re-exports every name below as the facade,
- * so the import surface (`from "./lifecycle.ts"`) is unchanged — the same
- * zero-change split precedent the raccoon publisher/store move used.
+ * Home: its own module — `lifecycle.ts` already owned the Token Plan mount
+ * seed, the draw tool, the vision writer AND the raccoon seed, and a third
+ * upstream's selection mechanics is the wrong neighbour for them.
+ * `lifecycle.ts` re-exports every name below as the facade (ADR-013), so the
+ * import surface (`from "./lifecycle.ts"`) is unchanged — the same zero-change
+ * split precedent the raccoon publisher/store move used.
  *
- * The `resolveServiceWithRetry` import from `lifecycle.ts` is a deliberate
- * single cycle (lifecycle re-exports this module as the facade, this module
- * imports one helper back): it is used only inside function bodies, so the
- * partial module graph at evaluation time never dereferences it — and the
- * shipped bundle inlines both files into `lib/index.js` anyway.
+ * `resolveServiceWithRetry` comes from `util.ts`, beside `retryBounded`
+ * (ADR-013) — importing the helper from the facade that re-exports this module
+ * would be a deliberate single cycle; `util.ts` removes it, and the shipped
+ * bundle inlines all of them into `lib/index.js` anyway.
  *
  * @module dsh-connect-sensenova-token-plan/web-search
  */
 
-import { resolveServiceWithRetry } from "./lifecycle.ts";
+import { resolveServiceWithRetry } from "./util.ts";
 import { RaccoonSearchProvider, RACCOON_SEARCH_PROVIDER_ID } from "./raccoon-search.ts";
 import { resolveSwitchEnabled } from "./switch-precedence.ts";
 import { degrade } from "./util.ts";

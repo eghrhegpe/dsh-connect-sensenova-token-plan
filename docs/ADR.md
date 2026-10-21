@@ -111,3 +111,12 @@
 - **理由**：全局 `searchProviderId` 是宿主的一份单值状态，插件单方面写入必然是零和——写进去那一刻就替用户做了选择，而 teardown 的归还逻辑只能表达「我顶掉了谁」，无法表达「我们俩都该在」。Option B 把风险收敛到「不抢别人的」，但没有消除域归属问题本身。
 - **边界**：本条不否决宿主未来给出的选择面；届时把 `applyWebSearchSelection` 换成注册式调用即可，不需要重写 provider 发布链。
 - **复核条件**：宿主 API 出现插件级选择面（或 `searchProviderId` 改为可多值）时重开。在那之前，任何「再包一层 try/catch」的补丁都属于重复解决同一个问题。
+
+## ADR-013 lifecycle 的搬家裁定：按邻聚拆，门面不动 import 面
+
+- **日期**：2026-10-21
+- **状态**：现行（实现见 `src/host/lifecycle.ts` 门面块与 `src/host/draw-mount.ts`；门禁见 `test/draw.test.mjs` 的 degrade-marker 栅栏——两处 catch 的锚点已随住址改指 `draw-mount.ts`，检查名不变）
+- **裁定**：`registerDrawTool` 本体（含 `DrawToolWiring` / `DrawFetchResponse`）搬出 `lifecycle.ts` → `draw-mount.ts`；`resolveServiceWithRetry` 的有界重试搬去 `util.ts`，坐在 `retryBounded` 旁边。`lifecycle.ts` 保留门面：全部外名照常从这里 re-export，import 面零改动。`web-search.ts` 此前对 `lifecycle.ts` 的那条刻意 import 环，随助手迁 `util.ts` 而消失。
+- **理由**：拆的依据是**内聚，不是行数**——ADR-011 拒绝过「为行数拆」，这次同样不是行数：是第二个上游与出图工具先后住进来之后，lifecycle 成了「谁都得往里塞一块」的杂物间。先例两条：ADR-003 的路由拆分（先冻结行为再搬），以及 `web-search.ts` 早先同型的门面拆分——本条把那个模式收编命名。degrade-marker 测试栅栏与代码同批改指新住址，保证搬家始终有闸盯着「静默失败纪律没被搬丢」。
+- **边界**：`startSideEffects` 仍收完整 `Wiring` 包（effect 装配者：把各 handler 的 Pick 并起来≈全集，收窄只是数字游戏）；teardown 顺序（PITFALLS §18）一字未动。
+- **复核条件**：门面哪天出现「转发别名」（re-export 时改名）时收掉门面，让调用方直连真住址——门面存在的唯一意义是 import 面不变，名字都要转发的门面只剩指路成本。

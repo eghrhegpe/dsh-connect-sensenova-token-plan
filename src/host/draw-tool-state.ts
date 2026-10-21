@@ -1,7 +1,7 @@
 /**
  * The draw tool's mount-time absence note, in memory only.
  *
- * `registerDrawTool` (lifecycle.ts) is the single place that decides whether
+ * `registerDrawTool` (draw-mount.ts) is the single place that decides whether
  * the opt-in draw tool actually got registered. Three of its bail-outs are
  * "the tool is absent" with the switch visibly on:
  *

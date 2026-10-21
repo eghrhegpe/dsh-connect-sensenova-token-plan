@@ -383,7 +383,8 @@ async function rejects(fn) {
 // the draw switch visibly on and nothing on any panel naming the reason.
 // The read retries; the registration must stay exactly once.
 {
-  const { resolveServiceWithRetry, registerDrawTool, startSideEffects } = await import(
+  const { resolveServiceWithRetry } = await import("../src/host/util.ts");
+  const { registerDrawTool, startSideEffects } = await import(
     "../src/host/lifecycle.ts"
   );
   const { createEffectRegistry } = await import("../src/host/effects.ts");
@@ -557,13 +558,13 @@ async function rejects(fn) {
 // throw. Grep the source for the markers instead — a bare `catch {` on either
 // path is a real bug this repo has already shipped once.
 {
-  const lifecycleSrc = readFileSync(new URL("../src/host/lifecycle.ts", import.meta.url), "utf8");
+  const drawMountSrc = readFileSync(new URL("../src/host/draw-mount.ts", import.meta.url), "utf8");
   check("draw peer-load failure is not silent (degrade marker present)",
-    lifecycleSrc.includes('degrade("draw: tools peer module failed to load"'),
-    "lifecycle.ts tools-peer load catch");
+    drawMountSrc.includes('degrade("draw: tools peer module failed to load"'),
+    "draw-mount.ts tools-peer load catch");
   check("draw registry refusal is not silent (degrade marker present)",
-    lifecycleSrc.includes('degrade("draw: tools registry refused the registration"'),
-    "lifecycle.ts registry-refusal catch");
+    drawMountSrc.includes('degrade("draw: tools registry refused the registration"'),
+    "draw-mount.ts registry-refusal catch");
   // The absence note must reach the snapshot BY INJECTION, not by a global
   // import: `buildSnapshotBody` is the pure aggregator and its only state
   // sources are parameters. The reason union widens freely — but only if

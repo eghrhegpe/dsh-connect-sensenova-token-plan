@@ -5,8 +5,8 @@
  * `wiring` object and hands it to {@link registerRoutes}; each route is its
  * own module (one per resource) that closes over the wiring, so a route never
  * imports a service directly. Nothing here imports a Host peer — the only
- * lazy peer loads (the adapter / tools modules) live in `lifecycle.ts` and
- * are injected from `apply` via `deps`.
+ * lazy peer loads (the adapter / tools modules) happen in `draw-mount.ts` /
+ * the provider publish chain, injected from `apply` via `deps`.
  *
  * 2026-10 split (the token-store playbook: behaviour frozen first —
  * `routes.test.mjs` + `wiring.test.mjs` ran green against THIS facade,

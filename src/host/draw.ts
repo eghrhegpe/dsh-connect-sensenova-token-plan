@@ -5,7 +5,8 @@
  * Like `llm-models.ts` this module imports no runtime peer: it maps catalog
  * entries, builds wire bodies and classifies failures as plain functions, so
  * every decision here is testable on a clean checkout. The peer-dependent
- * half lives in `lifecycle.ts` (`startSideEffects` → `registerDrawTool`):
+ * half lives in `draw-mount.ts` (`registerDrawTool`, called by
+ * `startSideEffects`):
  * the `@deepseek-ai/dsh-tools` import and the `ctx.tools` registration are
  * loaded lazily and only when the `drawEnabled` opt-in is on — `index.ts`
  * just injects the `loadToolsModule`/`drawFetch` seams. A Host without the
@@ -315,16 +316,17 @@ export function createDrawCooldown(cooldownMs = DRAW_COOLDOWN_MS) {
  * Pure wiring: the peer's `defineTool` factory arrives as a parameter (so this
  * module stays importable without the peer), and every side effect the tool
  * needs — key resolution, the live catalog, the fetch, disposal — is injected.
- * `lifecycle.ts` (`registerDrawTool`) calls this only when `drawEnabled` is on AND a tools service is
- * present; every failure inside `execute` throws so the agent reads the
- * reason, and the panel is never involved (no snapshot key, no route).
+ * `draw-mount.ts` (`registerDrawTool`) calls this only when `drawEnabled` is
+ * on AND a tools service is present; every failure inside `execute` throws so
+ * the agent reads the reason, and the panel is never involved (no snapshot
+ * key, no route).
  * @param {object} options - wiring.
  * @param {Function} options.defineTool - the peer's tool factory.
  * @param {Function} options.resolveApiKey - async `() => Promise<string>`, the
  *   live `SENSENOVA_API_KEY` value (empty when unset).
  * @param {Function} options.getEntries - `() => catalog entries` (sync or
  *   async), read at call time so a catalog refresh is picked up without
- *   re-registration. The caller (`lifecycle.ts`) hands the FULL persisted catalog,
+ *   re-registration. The caller (`draw-mount.ts`) hands the FULL persisted catalog,
  *   not the picker's allow-list-filtered offer — the curation binds the picker,
  *   never the agent's tools.
  * @param {object} options.settings - `{ apiBase, drawModelId, drawTimeoutMs }`.

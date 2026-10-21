@@ -7,255 +7,39 @@
  *
  *   - the mount seed (`seedPublisherFromCatalog`): offer models before the
  *     first poll, tracked in the effect registry (ADR-008);
- *   - the draw tool registration (opt-in `drawEnabled`, doubly degraded);
- *   - vision step two: the settings-row writer filled for the snapshot route.
+ *   - the draw tool registration (opt-in `drawEnabled`, doubly degraded) —
+ *     the registration itself lives in `draw-mount.ts`, re-exported below;
+ *   - the Raccoon mount seed (`seedRaccoonOnMount`);
+ *   - vision step two: the settings-row writer filled for the snapshot route;
+ *   - the web-search mount and selection takeover (`web-search.ts`,
+ *     re-exported below as the same facade).
  *
  * and {@link teardown} for the unmount order that PITFALLS §18 pins: dispose
  * both publishers, release both pairs, then run the route `off` callbacks —
  * the Raccoon publisher is disposed in the order it registered, so a late
  * publish cannot register into a withdrawing Host. It must NOT be simplified.
  *
+ * What this file owns after {@link startSideEffects} is the mount itself: the
+ * wiring fan-out (refresh arm, provider-reconcile seed) plus {@link teardown}
+ * — the two directions that must stay sequenced together. The work each
+ * effect *does* is its own neighbour-shaped module (`draw-mount.ts`,
+ * `web-search.ts`); this file re-exports every name below as the facade
+ * (ADR-013), so the import surface (`from "./lifecycle.ts"`) never changes.
+ *
  * Peer-free discipline: no Host peer is imported here. The only lazy peer
  * loads (the adapter / tools modules) are injected from `apply` via `deps`.
  *
  * @module dsh-connect-sensenova-token-plan/lifecycle
  */
-import { defineDrawTool } from "./draw.ts";
 import { seedPublisherFromCatalog } from "./provider-publish.ts";
-import { retryBounded, errMsg, degrade } from "./util.ts";
+import { retryBounded, errMsg, resolveServiceWithRetry } from "./util.ts";
 import { armProviderRefresher } from "./provider-refresh.ts";
-import { resetDrawToolNote, setDrawToolNote } from "./draw-tool-state.ts";
+import { registerDrawTool, type DrawFetchResponse } from "./draw-mount.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
-import { resolveSwitchEnabled } from "./switch-precedence.ts";
 import { type EffectRegistry } from "./effects.ts";
 import type { Wiring } from "./types.ts";
-
-/** How many times a mount-time optional-service read is retried. */
-const SERVICE_RETRY_ATTEMPTS = 3;
-/** Base backoff between service-read attempts (× attempt index). */
-const SERVICE_RETRY_DELAY_MS = 300;
-
-/**
- * Read an optional Host service with a bounded retry.
- *
- * A service may register AFTER this plugin mounts — the note on vision step
- * two below said so — and a mount-time read is the only window for a
- * capability the Host cannot later remove: the tools registry has no
- * unregister call, and the settings row is only written by a poll that finds
- * `visionPublish.current` already filled. A one-shot read therefore misses a
- * service that arrives a moment late for the WHOLE session, silently — the
- * draw tool would be absent with the switch visibly on, the vision list never
- * written, and no line on any panel naming the reason. The Raccoon publisher
- * got the same bounded retry for its mount seed.
- *
- * This retries the READ ONLY. Whatever it returns is used exactly once by the
- * caller: retrying a call that mutates (a tool registration) would register
- * the same tool twice, and the tools registry cannot tell.
- *
- * The loop itself is the shared `retryBounded` (`util.ts`) — the same backoff
- * shape the Raccoon mount seed uses; only the window length is set here.
- * @template T - the shape of the service being waited for. The reader knows
- *   what it wants (`{ register }` for tools, `{ update }` for settings); this
- *   function only knows a name, so the shape is declared at the call site and
- *   the `as T` below is the single place that claim is trusted. Defaulting to
- *   `unknown` means a caller that forgets the parameter gets a type it cannot
- *   accidentally dereference — which is the failure the old `Promise<any>`
- *   invited on every one of its seven property reads.
- * @param {object} ctx - the host root context.
- * @param {string} service - the service name for `ctx.get`.
- * @param {object} [options]
- * @param {() => boolean} [options.isDisposed] - stop early when the plugin is
- *   withdrawing; a late registration into a withdrawing Host is worse than
- *   absence.
- * @param {number} [options.attempts] - test seam for the attempt count.
- * @param {number} [options.delayMs] - test seam for the backoff base.
- * @returns {Promise<T|null>} the service, or `null` when it never appeared
- *   inside the window.
- */
-export async function resolveServiceWithRetry<T = unknown>(
-  ctx: { get?: (n: string) => unknown; [key: string]: unknown },
-  service: string,
-  // Typed explicitly rather than left to inference, and NOT via JSDoc: a
-  // parameter with a default initializer is typed from that initializer (`{}`),
-  // and in a `.ts` file `@param` / `@type` are comments, not type sources — so
-  // the destructuring below would read three properties off `{}` (TS2339).
-  options: { isDisposed?: () => boolean; attempts?: number; delayMs?: number } = {}
-): Promise<T | null> {
-  const {
-    isDisposed = () => false,
-    attempts = SERVICE_RETRY_ATTEMPTS,
-    delayMs = SERVICE_RETRY_DELAY_MS
-  } = options;
-  // Annotated `T | null` rather than inferred from the `null` initializer,
-  // which under strictNullChecks would pin the type to `null` and make every
-  // assignment below — and every `tools.register` / `settings.update` at the
-  // call sites — read as `never`.
-  let found: T | null = null;
-  await retryBounded({
-    attempts,
-    delayMs,
-    run: () => {
-      if (isDisposed()) return true;
-      try {
-        const value = ctx.get?.(service) ?? ctx[service] ?? null;
-        if (value !== null && value !== undefined) {
-          // The one trusted claim in this module: `ctx.get` hands back
-          // `unknown` because the Host is dynamically typed, so the shape is
-          // whatever the caller's `T` says it is. Both call sites below keep
-          // their own `typeof x.method !== "function"` guard, which is what
-          // makes the wrong `T` a degraded path rather than a crash.
-          found = value as T;
-          return true;
-        }
-      } catch {
-        // A resolver that refuses a read is treated like an absent service.
-      }
-      return false;
-    }
-  });
-  return found;
-}
-
-/** The minimal fetch response `defineDrawTool`'s `fetchImpl` needs. */
-type DrawFetchResponse = {
-  ok: boolean;
-  status: number;
-  text(): Promise<string>;
-  json(): Promise<unknown>;
-};
-
-/**
- * The wiring subset {@link registerDrawTool} reads — its own `Pick`, not the
- * whole bag.
- *
- * This function is exported so a test can mount the tool standalone, and
- * {@link DrawToolWiring} names exactly the fields it touches. Declaring the
- * subset as a type (rather than naming it in prose) is what lets the compiler
- * catch a field that stopped being read, or a new one that starts being read
- * without a declaration.
- *
- * No count is written here on purpose: this comment used to say "eight of the
- * twenty-two" while the `@param` below said "the seven fields read below", and
- * both were stale — `Wiring` had twenty fields, and there are eight here of
- * which only seven are destructured (`logger` is read straight off the bag by
- * the `degrade` call, so a count of the destructuring line is not a count of
- * what the function reads). The list in the type is the contract; a number next
- * to it is a second source with no compiler behind it.
- */
-export type DrawToolWiring = Pick<Wiring,
-  | "settings"
-  | "configError"
-  | "providerState"
-  | "catalogStore"
-  | "resolveApiKey"
-  | "publisher"
-  | "drawStore"
-  | "logger"
->;
-
-/**
- * Register the `sensenova_draw_image` agent tool (ARCHITECTURE.md §5.4,
- * route B). Opt-in (`drawEnabled`, default off) and doubly degraded — a Host
- * with no tools service never sees it, and a peer that fails to load leaves
- * the panel and the provider untouched. Named as a separate export so a test
- * can inject its own `ctx`/`wiring`; `startSideEffects` calls it when enabled.
- * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context (reads `ctx.get("tools")` / `ctx.tools`).
- * @param {DrawToolWiring} wiring - the fields listed in that type.
- * @param {object} side - test seams from `apply`'s `deps`.
- * @param {Function} side.loadToolsModule - lazy `@deepseek-ai/dsh-tools` loader.
- * @param {Function} side.drawFetch - draw request fetch (stubbed in tests).
- * @returns {Promise<void>}
- */
-export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: DrawToolWiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
-  const { settings, configError, providerState, catalogStore, resolveApiKey, publisher, drawStore } = wiring;
-  const { loadToolsModule, drawFetch } = side;
-  // Recompute the absence note on every attempt: a late tools service that
-  // finally registers must CLEAR it, not leave a stale "absent" on the panel.
-  resetDrawToolNote();
-  if (configError !== null) return;
-  // The panel's saved switch beats the patch default — resolved by the one
-  // adjudicator (`switch-precedence.ts`), not a hand-copied `?? settings.x`
-  // dialect. A tool has no source to report (unlike the panel snapshot, which
-  // tells the user WHICH side is in charge), so only the effective boolean is
-  // taken here.
-  const effectiveDrawEnabled = resolveSwitchEnabled(
-    drawStore ? await drawStore.enabled().catch(() => null) : null,
-    settings.drawEnabled
-  );
-  if (effectiveDrawEnabled !== true) return;
-  // Same precedence as the switch: a panel-saved model preference beats the
-  // patch's `drawModelId` (empty string = auto-pick from the catalog).
-  const panelModelId = drawStore ? await drawStore.modelId().catch(() => null) : null;
-  const effectiveSettings = panelModelId !== null ? { ...settings, drawModelId: panelModelId } : settings;
-  // The tools service is optional and may register a moment AFTER this
-  // plugin mounts; retry the read, never the registration — a tool cannot be
-  // unregistered, so registering it twice would be a worse failure than
-  // missing it.
-  const tools = await resolveServiceWithRetry<{ register: (definition: unknown) => void }>(ctx, "tools", {
-    isDisposed: () => publisher.isDisposed()
-  });
-  // The ONE normal absence the panel should state: the switch is on but this
-  // Host exposes no tools service, so nothing is broken and no log line is due
-  // — the copy (`draw.noTools`) is. The two bails below are Host bugs, so they
-  // log (`degrade`) AND state their own reason on the panel.
-  if (tools === null || typeof tools.register !== "function") {
-    setDrawToolNote("no-tools-service");
-    return;
-  }
-  let defineTool;
-  try {
-    const mod = await Promise.resolve(loadToolsModule());
-    defineTool = (mod as { defineTool?: (definition: object) => unknown; default?: { defineTool?: (definition: object) => unknown } })?.defineTool
-      ?? (mod as { default?: { defineTool?: (definition: object) => unknown } })?.default?.defineTool ?? null;
-  } catch (error) {
-    // No tools peer on this Host: the draw tool stays absent and the panel is
-    // untouched — but not silent. Before `degrade` this catch was empty, so a
-    // Host whose bundled peer could not be imported lost the tool with the
-    // switch visibly on and no log line anywhere.
-    setDrawToolNote("peer-load-failed");
-    degrade("draw: tools peer module failed to load", error, wiring.logger, null);
-    return;
-  }
-  if (typeof defineTool !== "function") {
-    // A peer that loaded but shipped no `defineTool` factory is the same Host
-    // bug as one that failed to load: the peer is not the version this plugin
-    // expects.
-    setDrawToolNote("peer-load-failed");
-    return;
-  }
-  try {
-    tools.register(
-      defineDrawTool({
-        defineTool,
-        resolveApiKey,
-        // The draw's discovery set is the catalog, NOT the LLM offer: the
-        // picker's allow-list is a filter on what the picker OFFERS, and
-        // silently binding the agent's image tools to that curation would
-        // drop a draw model from the tool's world the moment a user trimmed
-        // the picker. The full persisted catalog is read at call time
-        // (after mount an empty read is a no-op — `catalog-store.list()` is
-        // cached in memory), so a catalog refresh lands without re-registering.
-        getEntries: async () => {
-          const live = Array.isArray(providerState.entries) && providerState.entries.length > 0
-            ? providerState.entries
-            : await catalogStore.list().catch(() => []);
-          return Array.isArray(live) ? live : [];
-        },
-        settings: effectiveSettings,
-        fetchImpl: drawFetch,
-        isDisposed: () => publisher.isDisposed()
-      })
-    );
-  } catch (error) {
-    // A registry that refuses the tool degrades identically — tool absent,
-    // panel fine — and is a Host problem, not a config one: say it, and state
-    // the reason on the panel too.
-    setDrawToolNote("registry-refused");
-    degrade("draw: tools registry refused the registration", error, wiring.logger, null);
-  }
-}
 
 
 /**
@@ -304,7 +88,7 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
   // "logged in". Every attempt re-reads BOTH, and the loop stops when
   // `state.registered` flips.
   //
-  // Six attempts, where the service-read window in this file uses three: a
+  // Six attempts, where the service-read window in `util.ts` uses three: a
   // seed pass has to wait for two separate services and then fetch the
   // catalogue, so it needs the longer budget. The extra time is only spent
   // when something really is late — an early success returns at once.
@@ -371,8 +155,9 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
  * (when opted in), and vision step two's settings-row writer.
  * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
  * @param {Wiring} wiring - assembled by `apply()`; the fields read here are
- *   `settings` / `visionPublish` / `logger` plus the whole {@link DrawToolWiring}
- *   it forwards to {@link registerDrawTool}. The per-field notes that used to
+ *   `publisher` / `catalogStore` / `settings` / `visionPublish` / `logger`,
+ *   plus the whole bag it forwards to `registerDrawTool` (`draw-mount.ts`,
+ *   which declares the subset it reads). The per-field notes that used to
  *   sit here are what the {@link Wiring} declaration now says instead.
  * @param {object} side - test seams from `apply`'s `deps`
  *   (`loadToolsModule`, `drawFetch`).
@@ -460,11 +245,10 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
 }
 
 /**
- * Vision step two's mount-time effect (ARCHITECTURE.md §5.1), now a named
- * function instead of the anonymous IIFE `startSideEffects` used to wrap:
- * the effect registry (ADR-008) tracks it under `"vision"` like every
- * other mount-time effect, so the label shows up in a unmount-drain
- * straggler report instead of being unnameable.
+ * Vision step two's mount-time effect (ARCHITECTURE.md §5.1). A named
+ * function so the effect registry (ADR-008) can track it under `"vision"`
+ * like every other mount-time effect — the label then shows up in a
+ * unmount-drain straggler report instead of the effect being unnameable.
  * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
  * @param {Wiring} wiring - assembled by `apply()`; the fields read here are
  *   `settings` / `visionPublish` / `publisher` / `logger`.
@@ -526,15 +310,16 @@ async function publishVisionStepTwo(ctx: { get?: (n: string) => unknown; [key: s
 }
 
 // ------------------------------------------------------------------
-// The `ctx.web` web-search mount moved to `web-search.ts` on 2026-10-05:
-// this file already owned the Token Plan mount seed, the draw tool, the
-// vision writer and the raccoon seed, and a third upstream's selection
-// mechanics was the wrong neighbour for them. Re-exported below as the
-// facade — every name still imports from this module, exactly as the
-// raccoon publisher/store split did.
+// Facade (ADR-013): `web-search.ts` owns the `ctx.web` mount and selection
+// takeover, `draw-mount.ts` owns the draw tool's mount logic; every name
+// still imports from this module, so the split never moved the import
+// surface — the same zero-change precedent the raccoon publisher/store
+// split used.
 // ------------------------------------------------------------------
 export type { WebSearchRuntime, WebSearchSelection, WebSearchToolWiring } from "./web-search.ts";
 export { webSearchSelection, applyWebSearchSelection, registerWebSearchProvider } from "./web-search.ts";
+export { registerDrawTool } from "./draw-mount.ts";
+export type { DrawToolWiring, DrawFetchResponse } from "./draw-mount.ts";
 import { reconcileWebSearch } from "./web-search.ts";
 export { reconcileWebSearch };
 
