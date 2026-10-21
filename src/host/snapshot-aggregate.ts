@@ -174,7 +174,7 @@ export async function buildSnapshotBody({
     // case came to be treated as a landed one.
     publish: (entries: unknown, enabledIds: unknown, unavailableModelIds?: string[]) => Promise<PublishResult>;
   };
-  catalogStore: { listEnabledIds(): Promise<string[]>; replace(entries: unknown, enabledIds?: unknown, unavailableIds?: unknown): Promise<void>; setUnavailable(ids: string[]): Promise<void> };
+  catalogStore: { listEnabledIds(): Promise<string[]>; replace(entries: unknown, enabledIds?: unknown, unavailableIds?: unknown): Promise<boolean>; setUnavailable(ids: string[]): Promise<boolean> };
   panelSwitch: () => Promise<boolean | null>;
   drawSwitch?: () => Promise<boolean | null>;
   drawModelId?: () => Promise<string | null>;
@@ -349,6 +349,14 @@ export async function buildSnapshotBody({
   // signature for it, or the whole point of not syncing here is undone one
   // line later.
   let catalogPublishOk = true;
+  // Whether the catalogue write actually LANDED on the disk. The signature is
+  // the poll's "did the offer change?" signal, and it also gates the NEXT
+  // write (an equal signature skips it), so it must not advance past a write
+  // that never reached the disk: the next poll would serve the cached
+  // catalogue, see an equal signature, skip the write that would fix it, and
+  // the disk would keep the old catalogue until a restart re-seeded it. The
+  // publish side has its own gate below; this one is about the disk.
+  let catalogPersisted = true;
   if (Array.isArray(catalog)) {
     const freshSignature = catalogSignature(catalog, enabledIds);
     if (freshSignature !== providerState.signature) {
@@ -356,7 +364,7 @@ export async function buildSnapshotBody({
       // The quota dimension travels with the catalog write (`undefined` when
       // this poll never answered quota = keep the stored statement): a restart
       // must inherit the LAST KNOWN exhausted set, not a wide-open offer.
-      await catalogStore.replace(catalog, enabledIds, unavailableModelIds ?? undefined).catch(() => {});
+      catalogPersisted = await catalogStore.replace(catalog, enabledIds, unavailableModelIds ?? undefined).catch(() => false);
       // `effectiveUnavailable`, never the raw three-state value: a catalogue
       // change still re-registers, and it must re-register with the LAST
       // KNOWN unavailable set rather than an empty one.
@@ -371,7 +379,7 @@ export async function buildSnapshotBody({
       // changed again or the Host restarted. That is why this class of bug
       // always presented as "a restart fixes it".
       catalogPublishOk = published?.ok !== false;
-      if (catalogPublishOk) {
+      if (catalogPublishOk && catalogPersisted) {
         // Keep the signatures in lock-step with what was just published — the SAME
         // formulas the route path uses, so the "did the offer change?" signal has a
         // single source and cannot drift between the two publish paths.
@@ -396,12 +404,15 @@ export async function buildSnapshotBody({
     const quotaSig = quotaSignatureOf(unavailableModelIds);
     if (quotaSig !== providerState.quotaSignature) {
       let publishOk = catalogPublishOk;
+      // Same reason as the catalogue branch: a quota write that never reached
+      // the disk must not let the signature skip the retry.
+      let quotaPersisted = true;
       if (!catalogChanged) {
         // Persist the flipped quota even when the catalogue branch did not
         // write (it is cached an hour, a quota pool flips per poll): the seed
         // reads THIS on the next restart. When the catalogue branch DID
         // publish, it stamped the same set already — one write per poll.
-        await catalogStore.setUnavailable(unavailableModelIds).catch(() => {});
+        quotaPersisted = await catalogStore.setUnavailable(unavailableModelIds).catch(() => false);
         const published = await publisher.publish(providerState.entries, providerState.enabledIds, unavailableModelIds);
         publishOk = published?.ok !== false;
       }
@@ -409,7 +420,9 @@ export async function buildSnapshotBody({
       // from the published offer so the next poll sees a stable signal. Gated on
       // the publish having landed, for the reason stated there — and gated on the
       // CATALOGUE publish too, so a failure up there is not silently adopted here.
-      if (publishOk) {
+      // The write gate is the same story one level down: a quota write that never
+      // reached the disk must not let the signature skip the retry.
+      if (publishOk && catalogPersisted && quotaPersisted) {
         syncSignaturesAfterPublish(providerState);
       }
     }

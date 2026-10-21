@@ -68,7 +68,7 @@ const TREND_OK = { series: [], models: [] };
  * registered — stubbing it as `{}` would let these checks pass for the wrong
  * reason.
  */
-function harness({ stateOverrides = {}, published = [], publishResult = { ok: true }, quotaWrites = [], replaceCalls = [], apiKey = "" } = {}) {
+function harness({ stateOverrides = {}, published = [], publishResult = { ok: true }, quotaWrites = [], replaceCalls = [], apiKey = "", writeFails = false } = {}) {
   const state = {
     entries: [],
     enabledIds: [],
@@ -124,11 +124,18 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
         // The quota dimension of a catalog write is RECORDED, not dropped:
         // the restart seed reads it (review #1a), and the checks below say
         // which poll must have stamped it.
+        // The store's write methods now REPORT whether the record reached the
+        // disk (that is the contract the aggregator gates the signature on),
+        // so the stub reports it too: `writeFails` drives the "the write never
+        // landed" branch. A stub that returned nothing here would make the
+        // aggregator's own gate look like a failure.
         replace: async (entries, enabledIds, unavailableIds) => {
           replaceCalls.push({ entries, enabledIds, unavailableIds });
+          return !writeFails;
         },
         setUnavailable: async (ids) => {
           quotaWrites.push(ids);
+          return !writeFails;
         }
       },
       panelSwitch: async () => null
@@ -483,6 +490,86 @@ function harness({ stateOverrides = {}, published = [], publishResult = { ok: tr
     Array.isArray(body?.llm?.models) && body.llm.models.length === 2 &&
       body.llm.models.every((row) => row.available === false),
     JSON.stringify(body?.llm?.models));
+}
+
+// --- J. a write that never reached the disk must not adopt the signature -----
+// The F group covers the PUBLISH side of the gate: a publish that failed must
+// not stamp the signature. This is the WRITE side, the other half of the same
+// gate. The signature does double duty — it is the poll's "did the offer
+// change?" signal AND the "should the next poll write anything?" signal (an
+// equal signature skips the write). A signature advanced past a write that
+// never reached the disk therefore makes the next poll skip the write that
+// would fix it: the disk keeps the old catalogue until a restart re-seeded
+// it, and the restart IS the thing that "fixes" it — which is why this class
+// of bug always presented as "a restart fixes it".
+{
+  const CATALOG = { data: [{ id: "glm-5.2" }, { id: "glm-4.6" }] };
+
+  // J1-J3: the catalogue branch — the write failed, the publish still happened.
+  const J = harness({ apiKey: "sk-test", writeFails: true });
+  const net = stubFetch({
+    "pool-usage": EXHAUSTED_POOL,
+    "credit-usage-trend": TREND_OK,
+    "/v1/models": CATALOG
+  });
+  try {
+    await buildSnapshotBody(J.params);
+  } finally {
+    net.restore();
+  }
+  check("J1 a write that never landed does not adopt the catalogue signature",
+    J.state.signature === "", `${J.state.signature}`);
+  check("J2 …nor the quota signature that rides the same write",
+    J.state.quotaSignature === "", `${J.state.quotaSignature}`);
+  check("J3 the offer is still published (a failed WRITE is not a failed offer)",
+    J.published.length === 1, `published=${J.published.length}`);
+
+  // J4: the negative control — the same poll, a write that lands.
+  const K = harness({ apiKey: "sk-test" });
+  const net2 = stubFetch({
+    "pool-usage": EXHAUSTED_POOL,
+    "credit-usage-trend": TREND_OK,
+    "/v1/models": CATALOG
+  });
+  try {
+    await buildSnapshotBody(K.params);
+  } finally {
+    net2.restore();
+  }
+  check("J4 a write that landed still adopts the signature (the gate did not just delete the sync)",
+    K.state.signature === catalogSignature([{ id: "glm-5.2" }, { id: "glm-4.6" }], []),
+    `${K.state.signature}`);
+
+  // J5-J6: the quota branch on its own — the catalogue did not change, so the
+  // flipped quota is persisted through `setUnavailable`, and THAT write is the
+  // one that decides the quota signature.
+  const quotaWrites = [];
+  const L = harness({
+    apiKey: "sk-test",
+    quotaWrites,
+    writeFails: true,
+    stateOverrides: {
+      entries: [{ id: "glm-5.2" }, { id: "glm-4.6" }],
+      enabledIds: [],
+      unavailableIds: ["glm-5.2"],
+      signature: catalogSignature([{ id: "glm-5.2" }, { id: "glm-4.6" }], []),
+      quotaSignature: quotaSignatureOf(["glm-5.2"])
+    }
+  });
+  const net3 = stubFetch({
+    "pool-usage": EXHAUSTED_POOL,
+    "credit-usage-trend": TREND_OK,
+    "/v1/models": CATALOG
+  });
+  try {
+    await buildSnapshotBody(L.params);
+  } finally {
+    net3.restore();
+  }
+  check("J5 a quota write that never landed leaves the quota signature where it was",
+    L.state.quotaSignature === quotaSignatureOf(["glm-5.2"]), `${L.state.quotaSignature}`);
+  check("J6 …and the write was still ATTEMPTED (the retry path exists)",
+    quotaWrites.length === 1, JSON.stringify(quotaWrites));
 }
 
 // --- report ----------------------------------------------------------------

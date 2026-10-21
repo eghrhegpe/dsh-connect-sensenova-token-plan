@@ -9,7 +9,7 @@ import { createVersionedJsonWriter } from "../src/host/state-store.ts";
 import { loadPeer, installNetworkGuard, findPeerRoot, isolateStateDir } from "./peer-roots.mjs";
 import { skipOnMissingPeer, suiteName } from "./env-skip.mjs";
 import { createRequire } from "node:module";
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -916,6 +916,39 @@ async function withNetwork(stub, body) {
     (await credentials.readRecord(THROTTLE_KEY)) === undefined);
 }
 
+// --- 16a. a legacy parked refusal is NOT deleted when the copy fails ---------
+// The legacy record is the ONLY copy of a parked refusal. The adoption path
+// used to write the new copy and delete the old one unconditionally, so a
+// write that never landed (an unwritable Home, a read-only disk) destroyed the
+// only copy: the next start found nothing to adopt and retried the password
+// the user has not changed — the exact outcome the throttle exists to prevent.
+// The store now reports whether the record reached the disk, and the old copy
+// is only swept once the new one is there.
+{
+  const legacy = {
+    kind: "grant",
+    payload: {
+      version: 1, marker: "signin-throttle", code: "login_rejected",
+      parked: true, until: null, attempt: 1
+    }
+  };
+  const credentials = fakeCredentials(null, {
+    refs: { SENSENOVA_USERNAME: "u", SENSENOVA_PASSWORD: "wrong" }
+  });
+  credentials.records.set(THROTTLE_KEY, legacy);
+  // A store whose write never lands — the failure this check is about.
+  const failing = {
+    read: async () => null,
+    write: async () => false,
+    clear: async () => true
+  };
+  const store = createTokenStore({ credentials, credentialKey: credentialKeyFn, env: {}, throttleStore: failing });
+  await store.state();
+  check("a legacy parked refusal survives a failed adoption write",
+    (await credentials.readRecord(THROTTLE_KEY)) !== undefined,
+    `records=${[...credentials.records.keys()].join(",") || "(empty)"}`);
+}
+
 // --- 16b. a grant saved under the pre-rename namespace is adopted ----------
 // Renaming the plugin must not log the user out: a console grant (and its
 // refresh token) saved under the old namespace is moved to the current one
@@ -1150,6 +1183,59 @@ async function withNetwork(stub, body) {
       refused[0] ?? "");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// --- the throttle store reports a write that never landed --------------------
+// The throttle is the one state file whose failed write is INVISIBLE until
+// something else goes wrong: the panel keeps honouring the wait in memory, so
+// the user sees a working throttle, while a SECOND Host process on the same
+// machine knows nothing about the wait — and walks into the lock the throttle
+// exists to prevent. ADR-006 says a refused write must degrade the reason and
+// hand it to the caller. The other five versioned stores do that; this one did
+// not (no `onRefuse`, and the writer's return value was dropped), so a refusal
+// was computed and thrown away. These checks pin the report:
+//   1. a write that reached the disk reports true and says nothing;
+//   2. a REFUSED write (an on-disk version this build does not know) reports
+//      false AND says why, without clobbering the foreign file;
+//   3. a write that could not happen at all reports false AND says why.
+{
+  const dir = mkdtempSync(join(tmpdir(), "throttle-report-"));
+  const blocked = mkdtempSync(join(tmpdir(), "throttle-blocked-"));
+  try {
+    const warnings = [];
+    const store = createFileThrottleStore({ dir, now: () => 1_000, logger: { warn: (m) => warnings.push(m) } });
+
+    const landed = await store.write({ code: "account_locked", parked: false, until: 2_000, attempt: 1 });
+    check("throttle: a write that reached the disk reports true", landed === true, `write()=${landed}`);
+    check("throttle: a write that reached the disk says nothing",
+      warnings.length === 0, warnings.join(" | "));
+
+    // The ADR-006 guard: an on-disk version this build does not know must not
+    // be clobbered, and the refusal must be REPORTED, not just computed.
+    const file = join(dir, "throttle.json");
+    writeFileSync(file, JSON.stringify({ version: 99, code: "x" }), "utf8");
+    const refused = await store.write({ code: "account_locked", parked: true, until: null, attempt: 2 });
+    check("throttle: a refused write reports false", refused === false, `write()=${refused}`);
+    check("throttle: a refused write says why",
+      warnings.length === 1 && warnings[0].includes("refusing to overwrite"),
+      warnings.join(" | "));
+    check("throttle: the foreign file was not clobbered",
+      readFileSync(file, "utf8").includes("\"version\":99"), readFileSync(file, "utf8"));
+
+    // A write that cannot happen at all: the "directory" is a plain file.
+    const blockedWarnings = [];
+    const unwritable = createFileThrottleStore({
+      dir: join(blocked, "blocker", "no"), now: () => 1_000, logger: { warn: (m) => blockedWarnings.push(m) }
+    });
+    writeFileSync(join(blocked, "blocker"), "x", "utf8");
+    const failed = await unwritable.write({ code: "account_locked", parked: true, until: null, attempt: 1 });
+    check("throttle: a write that could not happen reports false", failed === false, `write()=${failed}`);
+    check("throttle: a failed write says why",
+      blockedWarnings.length >= 1, blockedWarnings.join(" | "));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(blocked, { recursive: true, force: true });
   }
 }
 

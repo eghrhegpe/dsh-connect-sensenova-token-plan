@@ -118,8 +118,13 @@ function makeWiring({ registerProvider = true, panelEnabled = null, storeThrows 
       },
       catalogStore: {
         listEnabledIds: async () => [],
-        replace: async (entries, enabledIds, unavailableIds) => { replaceCalls.push({ entries, enabledIds, unavailableIds }); },
-        setUnavailable: async (ids) => { quotaWrites.push(ids); }
+        // The store's write methods REPORT whether the record reached the disk —
+        // that is the contract the aggregator gates the signature on — so the
+        // stub reports it too. A stub that returned nothing would make every
+        // poll look like a failed write, and the "a stable reading does not
+        // re-publish" check below would be measuring the stub.
+        replace: async (entries, enabledIds, unavailableIds) => { replaceCalls.push({ entries, enabledIds, unavailableIds }); return true; },
+        setUnavailable: async (ids) => { quotaWrites.push(ids); return true; }
       },
       providerStore: {
         enabled: storeThrows ? () => { throw new Error("store exploded"); } : async () => panelEnabled

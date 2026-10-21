@@ -19,7 +19,7 @@
 import { readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { str, num } from "./util.ts";
+import { str, num, degrade } from "./util.ts";
 import { name } from "./host-config.ts";
 import { ensureStateDir, readStateJson, stateDir as pluginStateDir, createVersionedJsonWriter } from "./state-store.ts";
 import type { HeldThrottle } from "./token-store/state.ts";
@@ -47,9 +47,11 @@ const THROTTLE_FILE_VERSION = 1;
  * `catalog-store.ts` / `provider-store.ts` / `draw-store.ts` /
  * `raccoon-switch-store.ts` (78df0d1 → 3b4aea6): an on-disk version not in
  * this list was written by a NEWER build and must not be clobbered. The throttle
- * is the one store that patch missed — which is exactly the hole P0-B names,
- * because the value it carries (a parked wrong-password refusal) is the one the
- * red line says must never be lost to a cross-build overwrite.
+ * is the one store that patch missed, because the value it carries (a parked
+ * wrong-password refusal) is the one the red line says must never be lost to a
+ * cross-build overwrite. It carries the guard like the other five now — and
+ * unlike them it also REPORTS the refusal, because a throttle whose write
+ * failed is silent until a second Host process walks into the lock.
  */
 export const KNOWN_THROTTLE_VERSIONS: readonly number[] = [THROTTLE_FILE_VERSION];
 
@@ -109,24 +111,50 @@ function parse(raw: unknown, now: () => number): HeldThrottle | null {
 }
 
 /**
+ * Options the file-backed throttle store accepts.
+ *
+ * Deliberately NOT the shared `StoreOptions`: that type carries a `profile`,
+ * and the throttle is shared on purpose (see {@link throttleDir}). Naming the
+ * options here keeps the "no profile" property in the type, not only in a
+ * comment.
+ */
+export interface ThrottleStoreOptions {
+  /** Directory the throttle file lives in. */
+  dir?: string;
+  /** Clock override for tests. */
+  now?: () => number;
+  /** `ctx.logger`, for the ADR-006 write-side version-guard degrade signal. */
+  logger?: { warn?: (message: string) => void };
+}
+
+/**
  * A throttle store backed by one file.
  *
  * Writes are atomic — a temporary file, then a rename — because two Host
  * processes share this path: a half-written file read by the other process
  * would read as "no throttle", which for a parked refusal means an automatic
  * retry of a password the user has not changed.
- * @param {object} [options] - wiring.
- * @param {string} [options.dir] - directory; defaults to {@link throttleDir}.
- * @param {() => number} [options.now] - clock source; injected by the tests.
+ * @param {ThrottleStoreOptions} [options] - wiring.
  * @returns {{read: Function, write: Function, clear: Function}} the store.
  */
-export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } = {}) {
+export function createFileThrottleStore(options: ThrottleStoreOptions = {}) {
+  const { dir = throttleDir(), now = Date.now, logger } = options;
   const file = join(dir, "throttle.json");
   // ADR-006 write-side guard + atomic write shared via createVersionedJsonWriter
-  // (state-store.ts). A refusal is SILENT — this store is deliberately
-  // logger-less (see state-segmentation.test.mjs) — so `onRefuse` is omitted and
-  // the in-memory record keeps serving, the "degrade, not error" the others log.
-  const writeThrottle = createVersionedJsonWriter({ file, versions: KNOWN_THROTTLE_VERSIONS, label: "throttle" });
+  // (state-store.ts). A refusal is NOT silent: the guard's whole contract
+  // (docs/ADR.md) is that a version this build does not know is refused, the
+  // reason is recorded, and the reason reaches the caller — so `onRefuse`
+  // degrades through the same logger the other five stores use. (The store
+  // used to omit it on the grounds that it is "deliberately logger-less"; the
+  // shape test it cited pins the CALL SITE, not the absence of a signal, and
+  // a throttle is the one store whose missing write is invisible until a
+  // second Host process retries a password the user never fixed.)
+  const writeThrottle = createVersionedJsonWriter({
+    file,
+    versions: KNOWN_THROTTLE_VERSIONS,
+    label: "throttle",
+    onRefuse: (reason) => degrade(reason, null, logger, null)
+  });
 
   /**
    * Move a throttle written before the rename into the current location.
@@ -163,6 +191,17 @@ export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } 
       // returns null): the safe direction for a time window.
       return parse(await readStateJson(file), now);
     },
+    /**
+     * Park a refusal on disk.
+     *
+     * Reports whether the record REACHED the disk. A caller that keeps
+     * honouring the wait in memory while the disk never learned about it is
+     * the failure this file exists to prevent: the whole point of the throttle
+     * is that a SECOND Host process on this machine must not retry the
+     * password the user has not fixed.
+     * @param {HeldThrottle} state - the throttle to park.
+     * @returns {Promise<boolean>} true when the record reached the disk.
+     */
     async write(state: HeldThrottle) {
       await adoptLegacyFile();
       const body = {
@@ -172,21 +211,39 @@ export function createFileThrottleStore({ dir = throttleDir(), now = Date.now } 
         until: state.parked === true ? null : state.until,
         attempt: state.attempt
       };
-      await writeThrottle(body).catch(() => {});
+      try {
+        // `null` = written. A string = the ADR-006 guard refused the write and
+        // returned its reason; `onRefuse` has already degraded that reason.
+        const refusal = await writeThrottle(body);
+        return refusal === null;
+      } catch (error) {
+        degrade("throttle: write failed", error, logger, null);
+        return false;
+      }
     },
+    /**
+     * Drop the throttle from disk.
+     * @returns {Promise<boolean>} true when the file is gone (or never was).
+     */
     async clear() {
+      let cleared = true;
       try {
         await rm(file, { force: true });
-      } catch {
-        // Nothing to do: an absent file is already a cleared throttle.
+      } catch (error) {
+        // `force: true` means an absent file does NOT throw, so this is a real
+        // failure: a refusal that outlives its clear parks the user forever.
+        degrade("throttle: clear failed", error, logger, null);
+        cleared = false;
       }
       // A legacy file that never got adopted must not resurrect the refusal it
       // holds: a cleared throttle is cleared under both names.
       try {
         await rm(legacyThrottleFile(), { force: true });
-      } catch {
-        // Nothing to do.
+      } catch (error) {
+        degrade("throttle: clear failed (legacy)", error, logger, null);
+        cleared = false;
       }
+      return cleared;
     }
   };
 }
@@ -211,9 +268,13 @@ export function createMemoryThrottleStore(now = Date.now) {
     },
     async write(state: HeldThrottle) {
       held = { version: THROTTLE_FILE_VERSION, ...state };
+      // Nothing can fail here, so the write reports success — the same shape
+      // the file store reports for a write that landed.
+      return true;
     },
     async clear() {
       held = null;
+      return true;
     }
   };
 }

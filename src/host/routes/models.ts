@@ -69,14 +69,18 @@ export function registerModelsRoute(ctx: any, wiring: Pick<Wiring, "settings" | 
         }, { "cache-control": "no-store" });
       };
       try {
-        await catalogStore.setEnabledIds(ids);
+        const persisted = await catalogStore.setEnabledIds(ids);
         // Publish immediately with the CURRENT catalogue: the offer must not
         // wait for the next poll. A failed publish rolls back to the previous
         // pair inside publishProvider and surfaces its reason.
         await publishProvider(providerState.entries, ids, providerState.unavailableIds ?? []);
         // Adopt the signature of what was just offered so the next poll does not
-        // see a "change" and re-publish the same set.
-        syncSignaturesAfterPublish(providerState);
+        // see a "change" and re-publish the same set — but only when the write
+        // actually reached the disk. The signature also gates the NEXT write:
+        // a signature describing an offer the disk does not hold would skip the
+        // write that fixes it, and the disk would keep the old allow-list until
+        // a restart re-seeded it. A failed write is logged by the store.
+        if (persisted) syncSignaturesAfterPublish(providerState);
       } catch (error) {
         await answer({ ok: false, error: redactedError(error) });
         return;

@@ -287,8 +287,9 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // Explicit, because the store defaults to an in-memory throttle: a wait
     // that only this process knows about is no protection against a second
     // Host process walking into the lock this one is waiting out. This is the
-    // one place that default is wrong.
-    throttleStore: createFileThrottleStore(),
+    // one place that default is wrong. The logger is what turns a refused or
+    // failed write into something a person can see (ADR-006).
+    throttleStore: createFileThrottleStore({ logger: ctx.logger }),
     // Every sign-in attempt (success or failure) leaves one sanitized trace
     // file behind: a "browser works but the panel does not" report is only
     // debuggable by diffing a working attempt against a failing one. The

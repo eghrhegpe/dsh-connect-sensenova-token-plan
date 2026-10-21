@@ -142,8 +142,14 @@ export async function adoptLegacyThrottle(wiring: StoreContextWiring, _state: To
         : { code, parked: false, until, attempt };
       // A window that has closed is no longer a reason to refuse.
       if (adopted.parked !== true && (until === null || until <= now())) continue;
-      await throttleStore.write(adopted).catch(() => {});
-      await backend().deleteRecord(legacyKey).catch(() => {});
+      // The copy only moves once the new one is on disk: the legacy record is
+      // the ONLY copy of a parked refusal, and a write that never landed must
+      // not be allowed to delete it (the next start would then find nothing
+      // to adopt and retry the password the user has not fixed).
+      const persisted = await throttleStore.write(adopted).catch(() => false);
+      if (persisted !== false) {
+        await backend().deleteRecord(legacyKey).catch(() => {});
+      }
       return adopted;
     } catch {
       continue;
@@ -194,10 +200,11 @@ export async function writeThrottle(wiring: StoreContextWiring, state: TokenStor
   state.throttle = { code, parked, until, attempt };
   // This plugin's own file, not the credentials service: a throttle is not a
   // credential, and the only two record kinds that service admits are.
-  await throttleStore.write(state.throttle).catch(() => {
-    // A store that cannot be written must not break the panel: this process
-    // still honours the wait in memory.
-  });
+  // The store owns the signal: it degrades a refused or failed write through
+  // the logger it was built with (ADR-006 requires the reason to be recorded,
+  // not swallowed). What is left here is only to keep the panel alive if the
+  // store itself throws — this process still honours the wait in memory.
+  await throttleStore.write(state.throttle).catch(() => false);
   return state.throttle;
 }
 
@@ -208,9 +215,9 @@ export async function writeThrottle(wiring: StoreContextWiring, state: TokenStor
 export async function clearThrottle(wiring: StoreContextWiring, state: TokenStoreState): Promise<void> {
   const { throttleStore, backend, THROTTLE_KEY, credentialKey } = wiring;
   state.throttle = null;
-  await throttleStore.clear().catch(() => {
-    // Nothing to do: the in-memory clear above already took effect.
-  });
+  // As with the write: the store reports a failed removal through its own
+  // logger, so the swallow here is only about not breaking the panel.
+  await throttleStore.clear().catch(() => false);
   // Discarded records from a previous version, if any are still around. They
   // are never written again, so this is housekeeping rather than a state
   // change. Both the current address and the pre-rename one are swept.

@@ -121,10 +121,17 @@ check("raccoon-switch-store.ts rides createSwitchStore, not a stale dir call",
       new RegExp(`${factory}\\((\\s*|[\\s\\S]*?)\\{\\s*profile\\s*(?:,|\\})`).test(indexTs),
       `${factory} is not called with { profile }`);
   }
-  // The throttle factory's call is argument-free — never { profile }.
+  // The throttle factory's call carries NO profile — the throttle is SHARED on
+  // purpose, and a profile would partition it (see the module note in
+  // throttle-store.ts). A sibling argument is allowed and expected: ADR-006
+  // added `logger` to the other stores so a version-refusal is visible in the
+  // log, and the throttle now takes it too — a refused throttle write used to
+  // be computed and thrown away, which is the one failure the other five
+  // stores never had. The invariant under test is the PARTITION, not the
+  // argument count: this goes red the moment a profile is threaded in.
   check("createFileThrottleStore() takes no profile argument",
-    /createFileThrottleStore\(\s*\)/.test(indexTs),
-    "createFileThrottleStore is called with an argument — it must stay shared");
+    !/createFileThrottleStore\([^)]*profile/.test(indexTs),
+    "createFileThrottleStore is called with a profile — it must stay shared");
 }
 
 // --- 5. the credential-backed stores are NOT profile directories -----------

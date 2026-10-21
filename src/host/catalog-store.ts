@@ -152,9 +152,9 @@ function parse(raw: unknown): CatalogRecord | null {
  * @property {() => Promise<object[]>} list - stored entries, `[]` when none usable.
  * @property {() => Promise<string[]>} listEnabledIds - allow-list; `[]` means "no filter".
  * @property {() => Promise<string[]|null>} listUnavailable - last KNOWN quota-exhausted ids; `null` = never stated (v1 record or fresh install).
- * @property {(entries: object[], enabledModelIds?: string[], unavailableIds?: string[]) => Promise<void>} replace - swap the catalog, preserving the allow-list and the quota record unless new ones are given.
- * @property {(ids: string[]) => Promise<void>} setEnabledIds - swap ONLY the allow-list.
- * @property {(ids: string[]) => Promise<void>} setUnavailable - swap ONLY the quota record (stamps it fresh).
+ * @property {(entries: object[], enabledModelIds?: string[], unavailableIds?: string[]) => Promise<boolean>} replace - swap the catalog, preserving the allow-list and the quota record unless new ones are given; resolves `true` when the record reached the disk.
+ * @property {(ids: string[]) => Promise<boolean>} setEnabledIds - swap ONLY the allow-list; resolves `true` when the record reached the disk.
+ * @property {(ids: string[]) => Promise<boolean>} setUnavailable - swap ONLY the quota record (stamps it fresh); resolves `true` when the record reached the disk.
  * @property {() => Promise<void>} clear - remove the stored catalog.
  */
 
@@ -222,9 +222,34 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
     return held;
   };
 
-  const persist = async () => {
-    if (held == null) return;
-    await writeCatalog(held).catch(() => {});
+  /**
+   * Persist the held record; report whether the disk now holds it.
+   *
+   * The write failure is still swallowed — a read-only Home must not break the
+   * panel — but the CALLER has to know it happened: an in-memory record the
+   * disk does not hold must not be treated as settled. The signature is the
+   * poll's "did the offer change?" signal, and it also gates the next write,
+   * so a signature advanced past a failed write makes the next poll skip the
+   * write that would fix it (the disk keeps the old catalogue until a restart
+   * re-seeds it).
+   * @returns {Promise<boolean>} `true` when the disk now holds `held`.
+   */
+  const persist = async (): Promise<boolean> => {
+    if (held == null) return true;
+    try {
+      // A refusal (ADR-006: the file holds a version this build cannot read)
+      // returns the reason instead of writing, so `held` did NOT land.
+      // `onRefuse` already logged that reason.
+      const refusal = await writeCatalog(held);
+      return refusal === null;
+    } catch (error) {
+      // The in-memory record still serves this process, but the disk does not
+      // hold it — a swallowed failure that keeps its reason is the difference
+      // between "the panel shows a value the disk never took" and a silent
+      // drift (PITFALLS §37).
+      degrade("catalog: write failed", error, logger, null);
+      return false;
+    }
   };
 
   return {
@@ -273,7 +298,7 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
      *   (`undefined` keeps the stored statement; a `[]` states "answered,
      *   nothing exhausted" and must travel — the three-state lives in the
      *   ABSENCE of the argument, not the emptiness of the list).
-     * @returns {Promise<void>}
+     * @returns {Promise<boolean>} whether the record reached the disk.
      */
     async replace(entries: object[], enabledModelIds?: string[], unavailableIds?: string[]) {
       // Sync first, so the allow-list being preserved is the one ACTUALLY
@@ -302,10 +327,13 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
         ...quota
       };
       cache.remember(held);
-      await persist();
+      return persist();
     },
 
-    /** Replace ONLY the curated allow-list, keeping the cached catalog. */
+    /**
+     * Replace ONLY the curated allow-list, keeping the cached catalog.
+     * @returns {Promise<boolean>} whether the record reached the disk.
+     */
     async setEnabledIds(ids: string[]) {
       const current = await seen();
       const entries = current === null ? [] : current.entries;
@@ -315,7 +343,7 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
         : { unavailableIds: current.unavailableIds, unavailableAt: Math.max(0, num(current.unavailableAt, 0)) };
       held = { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds: normalizeEnabledIds(ids), ...quota };
       cache.remember(held);
-      await persist();
+      return persist();
     },
 
     /**
@@ -324,7 +352,7 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
      * cached an hour; quota flips every poll) still lands here, so a restart
      * inherits THIS last known answer rather than the hour-old one.
      * @param {string[]} ids - the exhausted ids (`[]` states "nothing exhausted").
-     * @returns {Promise<void>}
+     * @returns {Promise<boolean>} whether the record reached the disk.
      */
     async setUnavailable(ids: string[]) {
       const current = await seen();
@@ -333,7 +361,7 @@ export function createFileCatalogStore(options: StoreOptions = {}) {
         : current;
       held = { ...base, unavailableIds: normalizeEnabledIds(ids), unavailableAt: now() };
       cache.remember(held);
-      await persist();
+      return persist();
     },
 
     /** Remove the stored catalog (used when the API key is forgotten). */
@@ -386,15 +414,19 @@ export function createMemoryCatalogStore(now = Date.now) {
         enabledModelIds: enabledModelIds === undefined ? kept : normalizeEnabledIds(enabledModelIds),
         ...quotaOf(unavailableIds)
       };
+      // A memory store has no disk to miss: the record IS the store.
+      return true;
     },
     async setEnabledIds(ids: string[]) {
       const entries = held === null ? [] : held.entries;
       const fetchedAt = held === null ? now() : held.fetchedAt;
       held = { version: CATALOG_VERSION, fetchedAt, entries, enabledModelIds: normalizeEnabledIds(ids), ...quotaOf() };
+      return true;
     },
     async setUnavailable(ids: string[]) {
       const base = held === null ? { version: CATALOG_VERSION, fetchedAt: now(), entries: [], enabledModelIds: [] } : held;
       held = { ...base, unavailableIds: normalizeEnabledIds(ids), unavailableAt: now() };
+      return true;
     },
     async clear() {
       held = null;

@@ -714,8 +714,10 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     seedForeign();
     const warnings = [];
     const guarded = createFileCatalogStore({ dir, logger: { warn: (m) => warnings.push(m) } });
-    await guarded.replace([{ id: "fresh" }]);
+    const refused = await guarded.replace([{ id: "fresh" }]);
     check("catalog replace() does not overwrite a foreign version", intact(), readFileSync(file, "utf8"));
+    check("a refused write REPORTS that the record did not reach the disk",
+      refused === false, `replace()=${refused}`);
     check("a refused catalog write still serves in memory",
       JSON.stringify(await guarded.list()) === JSON.stringify([{ id: "fresh" }]),
       JSON.stringify(await guarded.list()));
@@ -979,8 +981,18 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     // The "directory" is actually a plain FILE: mkdir/rename cannot succeed.
     writeFileSync(scratch + "/blocker", "x", "utf8");
     const blocked = createFileCatalogStore({ dir: join(scratch, "blocker", "no"), now: () => 1 });
-    await blocked.replace([{ id: "a" }]);
+    const landed = await blocked.replace([{ id: "a" }]);
     check("a write failure keeps the catalog in memory", (await blocked.list()).length === 1);
+    // The write failure is still swallowed (a read-only Home must not break the
+    // panel), but the CALLER has to be able to tell: the signature gates the
+    // next write, so a record the disk does not hold must not be treated as
+    // settled. A store that reports "true" here would let the signature
+    // advance past a write that never landed.
+    check("a write failure REPORTS that the record did not reach the disk",
+      landed === false, `replace()=${landed}`);
+    const okStore = createFileCatalogStore({ dir: join(scratch, "ok"), now: () => 1 });
+    check("a write that reached the disk reports true",
+      (await okStore.replace([{ id: "a" }])) === true);
   } catch (error) {
     fail("read-only directory degradation", error);
   } finally {
