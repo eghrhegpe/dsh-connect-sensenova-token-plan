@@ -43,31 +43,33 @@ import type { CodeValue } from "./codes.ts";
 /** The mount-time lazy-load seams `apply()` accepts (test-only; defaults cover production). */
 export interface HostDeps {
   /** Lazy-load the LLM adapter module (peer `dsh-llm-pi-ai`). */
-  loadAdapterModule?: any;
+  loadAdapterModule?: () => Promise<{ createSensenovaAdapter: (...args: any[]) => any }>;
   /** Lazy-load the Raccoon LLM adapter module (ROADMAP §6.1 second provider). */
-  loadRaccoonAdapterModule?: any;
+  loadRaccoonAdapterModule?: () => Promise<{ createRaccoonAdapter: (...args: any[]) => any }>;
   /** Lazy-load the tools module. */
-  loadToolsModule?: any;
+  loadToolsModule?: () => Promise<object>;
   /** Host webserver fetch used by the draw route. */
   drawFetch?: (...args: any[]) => Promise<any>;
 }
 
 /** The bag `createProviderPublisher()` accepts; each field resolves lazily. */
 export interface ProviderPublisherDeps {
-  /** Resolved plugin settings object. */
-  settings?: any;
+  /** Resolved plugin settings object. `Partial` is the real consumption
+   * contract: the publisher reads every field degradation-safe (`?? {}`),
+   * and `resolveSwitchEnabled` treats an absent config as false. */
+  settings?: Partial<import("./host-config.ts").ResolvedSettings>;
   /** Toggle that flips the sidebar panel on/off from the Host. */
-  panelSwitch?: any;
+  panelSwitch?: () => Promise<boolean | null>;
   /** Lazy-load the LLM adapter module (peer `dsh-llm-pi-ai`). */
-  loadAdapterModule?: any;
+  loadAdapterModule?: () => Promise<{ createSensenovaAdapter: (...args: any[]) => any }>;
   /** Resolve the registered LLM instance. */
-  getLlm?: any;
+  getLlm?: (service: string) => any;
   /** Resolve the API key from the credentials service. */
-  resolveApiKey?: any;
+  resolveApiKey?: () => Promise<string>;
   /** Cordis event emitter. */
-  emit?: (...args: any[]) => void;
+  emit?: (event: string) => void;
   /** Cordis logger (loose: peer has no declarations here). */
-  logger?: any;
+  logger?: { warn?: (message: string, ...args: unknown[]) => void };
 }
 
 /** Options every file-backed store accepts. */

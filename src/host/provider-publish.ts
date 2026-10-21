@@ -129,7 +129,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     emit,
     logger
   } = deps;
-  const effectiveSettings = settings ?? {};
+  const effectiveSettings: Partial<import("./host-config.ts").ResolvedSettings> = settings ?? {};
   const effectivePanelSwitch = panelSwitch ?? (async () => null);
   const effectiveLoadAdapterModule = loadAdapterModule ?? (() => import("./llm-adapter.ts"));
   const effectiveGetLlm = getLlm ?? (() => null);
@@ -246,7 +246,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
     // panel-first (`provider-store.ts`), falling back to the patch value —
     // re-read here on every publish, so a flip applies without a restart.
     const panelValue = await effectivePanelSwitch().catch(() => null);
-    const registerWanted = resolveSwitchEnabled(panelValue, effectiveSettings.registerProvider);
+    const registerWanted = resolveSwitchEnabled(panelValue, effectiveSettings.registerProvider === true);
     if (!registerWanted) return unregister({ state, release });
     const llm = resolveRegistrationService({ state, getLlm: effectiveGetLlm, release });
     if (llm === null) return { ok: false, error: state.error };
@@ -262,7 +262,7 @@ export function createProviderPublisher(deps: ProviderPublisherDeps = {}) {
       built = await createSensenovaAdapter({
         entries: state.entries,
         enabledIds: state.enabledIds,
-        baseUrl: effectiveSettings.apiBase,
+        baseUrl: effectiveSettings.apiBase ?? "",
         resolveApiKey: effectiveResolveApiKey,
         get: effectiveGetLlm,
         unavailableModelIds: state.unavailableIds,

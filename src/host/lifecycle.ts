@@ -470,7 +470,7 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
  *   `settings` / `visionPublish` / `publisher` / `logger`.
  * @returns {Promise<void>}
  */
-async function publishVisionStepTwo(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Wiring) {
+async function publishVisionStepTwo(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Pick<Wiring, "publisher" | "settings" | "visionPublish" | "logger">) {
   const { publisher, settings, visionPublish } = wiring;
   try {
     const settingsService = await resolveServiceWithRetry<{

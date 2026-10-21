@@ -24,7 +24,7 @@
  * @module dsh-connect-sensenova-token-plan/raccoon-search
  */
 
-import { str } from "./util.ts";
+import { obj, str } from "./util.ts";
 
 /** The hosted MCP search server. */
 export const RACCOON_MCP_SEARCH_URL = "https://xiaohuanxiong.com/api/web/mcp/web_search/v1/mcp";
@@ -101,12 +101,12 @@ export function parseMcpSse(body: string): object[] {
 }
 
 /** Read the jsonrpc `result` / `error` off an MCP envelope. */
-function mcpEnvelope(envelopes: object[]): { result?: any; error?: any } {
+function mcpEnvelope(envelopes: object[]): { result?: unknown; error?: unknown } {
   const main = envelopes.find((entry) => {
     const e = entry as { method?: unknown };
     return e.method === undefined || e.method === null;
   });
-  return (main ?? envelopes[0] ?? {}) as { result?: any; error?: any };
+  return (main ?? envelopes[0] ?? {}) as { result?: unknown; error?: unknown };
 }
 
 /**
@@ -117,18 +117,18 @@ function mcpEnvelope(envelopes: object[]): { result?: any; error?: any } {
  */
 function extractError(raw: string, envelopes: object[]): { message?: unknown; code?: unknown } | undefined {
   const fromSse = mcpEnvelope(envelopes).error;
-  if (fromSse && typeof fromSse === "object") return fromSse;
+  if (fromSse && typeof fromSse === "object") return fromSse as { message?: unknown; code?: unknown };
   const trimmed = String(raw).trim();
   if (trimmed === "") return undefined;
   if (!trimmed.startsWith("{")) return undefined;
   try {
-    const json = JSON.parse(trimmed);
-    const error = json && typeof json === "object" ? (json as any).error : undefined;
-    if (error && typeof error === "object") return error;
+    const json = JSON.parse(trimmed) as { error?: unknown; message?: unknown; code?: unknown } | null;
+    const error = json && typeof json === "object" ? json.error : undefined;
+    if (error && typeof error === "object") return error as { message?: unknown; code?: unknown };
     // The Raccoon gateway's OWN error envelope: `{code, message, details}` sits
     // at the top level, not under a jsonrpc `error` key (probed 2026-10-04 — the
     // no-auth POST returns exactly this shape).
-    const top = json && typeof json === "object" ? (json as any) : undefined;
+    const top = json && typeof json === "object" ? json : undefined;
     if (top && (typeof top.message === "string" || top.code !== undefined)) return top;
     return undefined;
   } catch {
@@ -252,11 +252,15 @@ export async function searchWebOnce(options: {
   });
   if (!call.ok) return { ok: false, message: call.message ?? "tools/call failed" };
   const { result, error } = mcpEnvelope(call.envelopes ?? []);
-  if (error) return { ok: false, message: error?.message ?? String(error) };
-  const text = Array.isArray(result?.content)
-    ? result.content.find((part: any) => part?.type === "text")?.text
+  if (error) {
+    const message = obj(error).message;
+    return { ok: false, message: message === undefined || message === null ? String(error) : String(message) };
+  }
+  const content = obj(result).content;
+  const text = Array.isArray(content)
+    ? obj(content.find((part: unknown) => obj(part).type === "text")).text
     : undefined;
-  let parsed: any = {};
+  let parsed: unknown = {};
   if (typeof text === "string" && text !== "") {
     try {
       parsed = JSON.parse(text);
@@ -264,8 +268,9 @@ export async function searchWebOnce(options: {
       parsed = { Raw: text };
     }
   }
-  const results = Array.isArray(parsed?.Result?.WebResults) ? parsed.Result.WebResults : [];
-  const resultCount = typeof parsed?.Result?.ResultCount === "number" ? parsed.Result.ResultCount : results.length;
+  const parsedResult = obj(obj(parsed).Result);
+  const results = Array.isArray(parsedResult.WebResults) ? parsedResult.WebResults : [];
+  const resultCount = typeof parsedResult.ResultCount === "number" ? parsedResult.ResultCount : results.length;
   return { ok: true, results, resultCount, raw: parsed };
 }
 
