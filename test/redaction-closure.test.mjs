@@ -77,24 +77,25 @@ check("ordinary prose is not mangled by the rules",
   redactSecrets("the token is expired") === "the token is expired",
   redactSecrets("the token is expired"));
 
-// --- 2. every route module that catches goes through the collector ---------
+// --- 2. every route module that catches a value goes through the collector -
+// A `catch {` without a binding answers with a FIXED wording — there is no
+// error text to redact. A catch that BINDS the error is the one that can
+// carry a credential into the panel, so that is the one the fence is about.
 const withoutCollector = [];
 for (const name of routeFiles) {
-  if (name === "http.ts") continue; // the collector's own home
   const code = masked.get(name) ?? "";
-  if (!code.includes("catch")) continue;
+  if (!/catch\s*\(\s*[A-Za-z_$][\w$]*\s*\)/.test(code)) continue;
   if (!code.includes("redactedError(")) withoutCollector.push(name);
 }
-check("every route module that catches goes through the shared collector",
+check("every route module that catches a value goes through the shared collector",
   withoutCollector.length === 0,
   withoutCollector.length === 0
-    ? `${routeFiles.length - 1} route module(s) checked`
-    : `${withoutCollector.join(", ")} catch without redactedError(`);
+    ? `${routeFiles.length} route module(s) checked`
+    : `${withoutCollector.join(", ")} catches a value without redactedError(`);
 
 // --- 3. no route module hand-rolls its own redaction ------------------------
 const handRolled = [];
 for (const [name, code] of masked) {
-  if (name === "http.ts") continue; // the collector itself calls redactSecrets
   if (/redactSecrets\(\s*(error|err|why|e)\b/.test(code)) handRolled.push(name);
 }
 check("no route module hand-rolls its own redaction",
