@@ -24,7 +24,7 @@
 | 动第二个上游（小浣熊 / `sensenova-raccoon`） | 下方「去哪查」对应行（`docs/ROADMAP.md` §6.1.2 / §6.1.4） | `src/host/raccoon*.ts` | `node test/raccoon.test.mjs`（peer-free，clean checkout 可跑）；两边凭据/store/publisher 影响须恒为零 |
 | 改面板 UI / client | 本文件「三条事实」第 2 条 → `docs/PITFALLS.md` §41 | `src/client/cards.ts`、`src/client/panel-page.ts` | **改 `src/` 必先 `npm run build`**，否则 render 套件 eval 的是旧 `client.js`（绿了也是假的） |
 | 拍 / 改裁定，回溯边界与定位沿革 | 下方「去哪查」对应行（`docs/ADR.md` 账本 + `docs/ARCHITECTURE.md` §5 正文） | — | 现行正文**禁内联「修订（日期）」补丁**，`test/docs.test.mjs` 的 `ARCHAEOLOGY` 把关 |
-| 通览事故史 / 接手维护 | `docs/PITFALLS.md`（44 条） | `docs/ARCHITECTURE.md` §5 | 崩溃系（§30 / §38 / §42 这类）已写明病历与处方，别重演 |
+| 通览事故史 / 接手维护 | `docs/PITFALLS.md`（现象→根因→修法，条数见文件头，别写死） | `docs/ARCHITECTURE.md` §5 | 崩溃系（§30 / §38 / §42 这类）已写明病历与处方，别重演 |
 
 下面「去哪查」是**第二层字典**——路走了一半、要定位某个具体文件或细节时才去翻，不必一开始通读。
 
@@ -41,23 +41,7 @@ Host（Node/cordis）走完整 OIDC+PKCE 登录并自续期；Client（React bun
 
 **定位变更（2026-09-29）**：从「只做额度信息、n 个插件分散行动」转向**大统一——商汤全过程集成的单点入口**（额度 + provider + 出图路由对接 + 429 自愈（退避/分诊，不做多 Key 池），逐块 opt-in 吸收）。边界与三条不变量见 `docs/ARCHITECTURE.md` §5，同类插件核实事实见 §5.3；吸收路线图见 docs/ROADMAP.md，设计决策研究档案见 docs/IMPROVEMENTS.md。
 
-在web端、desktop搜索同类插件：`~/.dsh/profiles`
-
-```
-@mars-sea/dsh-commandcode-provider
-非官方 Command Code 提供方：实时模型目录、多账号轮换、用量面板与套餐配额面板。
-
-@eghrhegpe/dsh-connect-qoder
-将本机已登录的 Qoder（国内版 Qoder CN / 国际版 Qoder）模型接入 DeepSeek Harness —— bring locally signed-in Qoder models into DeepSeek Harness with zero configuration.
-
-
-dsh-connect-trae
-把本机登录的 Trae 模型接入 DeepSeek Harness：国内版与国际版双供应商并行，提供用量/积分概览与每日签到领取。
-
-
-dsh-connect-workbuddy
-把本机登录的 WorkBuddy 模型接入 DeepSeek Harness，并提供只读的积分概览与模型管理。
-```
+在 web 端、desktop 搜索同类插件：见 `~/.dsh/profiles`（同类插件清单随生态变化，不在此硬编码；当前含 commandcode / qoder / trae / workbuddy 等）。
 
 ## 验证（按域裁剪，禁止无脑全量）
 
@@ -192,7 +176,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 | 查某条事实「当初从哪来」 / 要落盘新参照件 | `docs/REFERENCES.md`（`upstream/` 容器清单：来源 / 版本 / 许可 / 承重在哪） |
 | 加配置字段 / 改路由 | `docs/API.md`、`docs/SETUP.md`；提供方开关见 `docs/PROVIDER-HOT-RELOAD.md` |
 | 改测试前 | `docs/TESTING.md` |
-| 改任何代码前扫一眼 | `docs/PITFALLS.md`（44 条现象→根因→修法） |
+| 改任何代码前扫一眼 | `docs/PITFALLS.md`（现象→根因→修法，条数见文件头，别写死） |
 | **测试全绿或变异全被杀死，但其实没测到你改的那行** | `docs/PITFALLS.md` §41（`render-dom.test.mjs` 等套件 eval 的是产物根 `client.js`，改 `src/` 后必须先 `npm run build`） |
 | **测试只在深夜红、白天自己绿**（红与运行时刻有关）| `docs/PITFALLS.md` §42（期望值挂 `Date.now()`+相对偏移、形状取决于日历日归属的断言必在 23:00–24:00 窗内翻车；改用运行时刻不变的日历锚或冻时钟） |
 | **改文件时工具「什么都没做」**（`replace` 不匹配、`Edit` 反复失败、多半是行尾）| `docs/PITFALLS.md` §38（工作树 CRLF/LF 分布用 `git ls-files --eol` 自明，**别写死数字**——`i/lf` 与 `w/crlf` 各计一遍再下锚点；`replace` 后必须断言变化） |
@@ -217,7 +201,7 @@ npm run build               # 改 src/（host 或 client）后必跑：重建 li
 > 判定标准只有一条：**能变成「哪条命令能回答它」的问题，就别升级成「读实现 + 跑全量」**。
 
 1. **先文档，后代码**：本文件 → `docs/README.md` 索引 → `docs/ARCHITECTURE.md` §5
-   （三条不变量 + §5.5 双上游裁定）→ `docs/PITFALLS.md` 44 条扫一遍。这些是判断
+   （三条不变量 + §5.5 双上游裁定）→ `docs/PITFALLS.md` 现象→根因→修法（条数见文件头）扫一遍。这些是判断
    「代码对不对」的坐标系；跳过它们 = 把 `index.ts` 里已写清的接线重新验证一遍。
 2. **git 先行**：`git log --oneline -15` + `git status --short`。并行会话常驻，
    「刚提交的文件」（尤其 `client/` 与 `sensenova-auth.ts`）最可能有新鲜改动或未
