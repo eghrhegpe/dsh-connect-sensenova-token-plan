@@ -113,6 +113,17 @@ export function redactSecrets(text: unknown) {
       .replace(/\b(Set-Cookie|Cookie)(\s*[:=]\s*)(["']?)[^"'\n]*\3/gi, "$1$2$3[REDACTED]$3")
       // 4) Bare SenseNova inference keys, e.g. sk-a1b2c3... (long alnum + - _ .)
       .replace(/\bsk-[A-Za-z0-9._-]{8,}/g, "sk-[REDACTED]")
+      // 4b) A bare JWT — three dot-separated base64url segments, which is
+      //     exactly the shape of the SenseNova access token (`readJwtExpiry`
+      //     parses it) and of the refresh token. It is listed separately from
+      //     rules 5/6/7 because those match on the KEY NAME, and a token that
+      //     arrives under a name this list never anticipated (`jwt`,
+      //     `id_token`, `session`, a renamed field) would sail through: a
+      //     blacklist that only knows names cannot redact a value whose name
+      //     it has not met yet, so the VALUE shape is matched here too. The
+      //     shape is what an upstream 4xx body quotes back when it rejects a
+      //     request — the token with no key name in front of it.
+      .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g, "[REDACTED]")
       // 5) Known secret JSON pairs, quoted: {"api_key":"..."}. The key
       //    alternation is separator-agnostic (`access[_-]?token` under `/i`),
       //    so a platform that spells the same field camelCase is still matched.

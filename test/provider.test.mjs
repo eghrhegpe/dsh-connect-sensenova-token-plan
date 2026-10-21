@@ -1498,6 +1498,16 @@ const BASE_URL = "https://token.sensenova.cn/v1";
     check("a camelCase token key is redacted",
       redactSecrets('{"accessToken":"AT.secret"}') === '{"accessToken":"[REDACTED]"}',
       redactSecrets('{"accessToken":"AT.secret"}'));
+    // A token with NO key name in front of it. Rules 5/6/7 match on the key
+    // name, so a token that arrives under a name this list never anticipated
+    // (`jwt`, `id_token`, `session`, a renamed field) would sail through —
+    // and that is the shape an upstream 4xx body quotes back when it rejects
+    // a request. The access token IS a JWT (`readJwtExpiry` parses it), so
+    // the value's shape is matched too.
+    check("a bare JWT is redacted even with no key name in front of it",
+      redactSecrets("request rejected, token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJlX2hlcmU")
+        === "request rejected, token [REDACTED]",
+      redactSecrets("request rejected, token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJlX2hlcmU"));
     // Non-secret text passes through unchanged — the gate must not eat
     // diagnostic detail that has nothing to do with credentials.
     check("a credential-free error message passes through",
