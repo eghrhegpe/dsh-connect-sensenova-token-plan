@@ -48,6 +48,31 @@ export function errMsg(value: unknown): string {
 
 
 /**
+ * The one credential-word list, in the spelling the redaction rules and
+ * `test/credential-guard.test.mjs` both read.
+ *
+ * `access[_-]?token` covers `access_token`, `access-token` and — because these
+ * rules run case-insensitively — `accessToken`. `secret` and `client_secret`
+ * are listed separately: OAuth-shaped bodies spell them both ways.
+ *
+ * EXPORTED for the same reason the redaction rules need it, and not only for
+ * them: the credential fence in `test/credential-guard.test.mjs` derives its
+ * field-name vocabulary from this string, so a name added here also widens the
+ * fence that keeps that name out of `str()`. One list, two readers — a third
+ * hand-copied list is the way these drifted apart the first time.
+ */
+export const SECRET_KEY = "password|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|apikey|client[_-]?secret|code[_-]?verifier|token|secret";
+
+/**
+ * Rules 5, 6 and 7 of `redactSecrets`, built from {@link SECRET_KEY} instead of
+ * repeating the alternation three times (which is exactly how rule 6 and rule 7
+ * came to be missing `secret`: three literals, three chances to forget one).
+ */
+const SECRET_JSON_PAIR = new RegExp(`(["']?(?:${SECRET_KEY})["']?\\s*:\\s*["'])[^"']+(?=["'])`, "gi");
+const SECRET_KEY_VALUE = new RegExp(`\\b(${SECRET_KEY})\\s*=\\s*[^&;\\s"']+`, "gi");
+const SECRET_UNQUOTED_PAIR = new RegExp(`\\b(${SECRET_KEY})(\\s*:\\s*)(?!null\\b|true\\b|false\\b|undefined\\b|-?\\d)([A-Za-z0-9._~+/=-]{4,})`, "gi");
+
+/**
  * Redact credential-shaped strings from any text that may reach a log, an
  * error message, or a panel-facing response.
  *
@@ -90,9 +115,9 @@ export function redactSecrets(text: unknown) {
       // 5) Known secret JSON pairs, quoted: {"api_key":"..."}. The key
       //    alternation is separator-agnostic (`access[_-]?token` under `/i`),
       //    so a platform that spells the same field camelCase is still matched.
-      .replace(/(["']?(?:password|access[_-]?token|refresh[_-]?token|api[_-]?key|token|client[_-]?secret|code[_-]?verifier|secret)["']?\s*:\s*["'])[^"']+(?=["'])/gi, "$1[REDACTED]")
+      .replace(SECRET_JSON_PAIR, "$1[REDACTED]")
       // 6) Known secret key=value pairs.
-      .replace(/\b(password|access[_-]?token|refresh[_-]?token|api[_-]?key|token|client[_-]?secret|code[_-]?verifier)\s*=\s*[^&;\s"']+/gi, "$1=[REDACTED]")
+      .replace(SECRET_KEY_VALUE, "$1=[REDACTED]")
       // 7) The SAME pairs with an UNQUOTED value: `{ accessToken: eyJ… }`.
       //    Rule 5 needs a quote to anchor the value, so this shape slipped
       //    through it entirely — and it is the shape a Node error message takes
@@ -106,7 +131,7 @@ export function redactSecrets(text: unknown) {
       //    digits are left alone on purpose: a field can be reported as absent
       //    (`refreshToken: null`) and saying so is the diagnosis; redacting it
       //    to `[REDACTED]` would destroy the only clue that it was never set.
-      .replace(/\b(password|access[_-]?token|refresh[_-]?token|api[_-]?key|client[_-]?secret|code[_-]?verifier|token)(\s*:\s*)(?!null\b|true\b|false\b|undefined\b|-?\d)([A-Za-z0-9._~+/=-]{4,})/gi, "$1$2[REDACTED]")
+      .replace(SECRET_UNQUOTED_PAIR, "$1$2[REDACTED]")
   );
 }
 

@@ -58,20 +58,21 @@
  * are the slowest and the most likely to be SKIPped by a missing devDependency.
  *
  * `e2e-gate` is last on purpose: it boots a real Host process, so it must not
- * hold up the 31 cheap verdicts that precede it (`render-dom.test.mjs` is
+ * hold up the 32 cheap verdicts that precede it (`render-dom.test.mjs` is
  * cheap only when its devDeps resolve; without them it prints SKIP and exits
  * 0 in milliseconds).
  *
  * @type {ReadonlyArray<{name: string, kind: "suite"|"gate", note: string}>}
  */
 export const SUITES = Object.freeze([
-  // ── the 31 *.test.mjs suites (this exact set is what package.test.mjs pins
+  // ── the 32 *.test.mjs suites (this exact set is what package.test.mjs pins
   //    against disk; the five gate files below are exempt there, as e2e-gate
   //    has been since it stopped being a *.test.mjs) ───────────────────────
   { name: "auth.test.mjs", kind: "suite", note: "login / PKCE / JWE / throttle classification" },
   { name: "store.test.mjs", kind: "suite", note: "token store behaviour (peer-dependent)" },
   { name: "store-baseline.test.mjs", kind: "suite", note: "frozen behaviour frames — zero drift allowed" },
   { name: "routes.test.mjs", kind: "suite", note: "the HTTP route family" },
+  { name: "credential-guard.test.mjs", kind: "suite", note: "AST fence: no str() read of a credential, whole Host tree" },
   { name: "panel.test.mjs", kind: "suite", note: "panel decisions + zh/en dictionary parity" },
   { name: "render.test.mjs", kind: "suite", note: "the client render surface" },
   { name: "render-dom.test.mjs", kind: "suite", note: "shipped client.js in jsdom + REAL react (SKIPs without the devDeps)" },

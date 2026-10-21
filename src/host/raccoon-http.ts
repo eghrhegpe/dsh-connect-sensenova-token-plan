@@ -15,7 +15,7 @@
  * @module dsh-connect-sensenova-token-plan/raccoon-http
  */
 
-import { obj, num, str } from "./util.ts";
+import { obj, num, str, verbatim } from "./util.ts";
 
 /**
  * The one answer a single QR-poll can return (`pollRaccoonQrLogin`).
@@ -120,7 +120,11 @@ export function raccoonHeaders(credential: any, options: { platform?: string; ve
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
-    Authorization: `Bearer ${str(source.access_token ?? source.accessToken, "")}`,
+    // Verbatim, not `str`: this IS the credential and the gateway compares it
+    // to the value the platform signed. Trimming here produced the exact
+    // failure the comment above this function documents — a header the user
+    // believes is filled in and a 401 nobody can trace (util.ts `verbatim`).
+    Authorization: `Bearer ${verbatim(source.access_token ?? source.accessToken, "")}`,
     // Personal accounts send an empty org code; the header itself is always present.
     "X-Org-Code": str(source.office_identity ?? source.officeIdentity, ""),
     "X-Raccoon-Language": "zh"

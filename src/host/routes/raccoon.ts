@@ -18,7 +18,7 @@
  */
 import { name } from "../host-config.ts";
 import { createCoalescedFetch } from "../coalesced-fetch.ts";
-import { optional, str } from "../util.ts";
+import { optional, verbatim } from "../util.ts";
 import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, wantsDiagnostics, MAX_ENABLED_MODEL_IDS, MAX_RACCOON_BODY_BYTES, redactedError } from "./http.ts";
 import type { Wiring } from "../types.ts";
 import {
@@ -86,7 +86,10 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
         // A freshly-scanned token: the read lands in the same cache under its
         // own fingerprint, so the first GET after login reuses it instead of
         // re-fetching what this very call just fetched.
-        const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(str(catalogToken, ""))}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS));
+        // Verbatim: the fingerprint must name the SAME value the request below
+        // carries. A trimmed key would cache-miss its own fetch on every call —
+        // and the token itself is a credential either way (util.ts `verbatim`).
+        const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(verbatim(catalogToken, ""))}`, () => fetchRaccoonCatalog({ access_token: catalogToken }), RACCOON_CATALOG_TTL_MS));
         if (live !== null && live.length > 0) rows = live;
       } else if (credential?.accessToken) {
         const live = await optional(raccoonRead.read(`catalog:${tokenFingerprint(credential.accessToken)}`, () => fetchRaccoonCatalog(credential), RACCOON_CATALOG_TTL_MS));

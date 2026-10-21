@@ -101,7 +101,9 @@ async function readTokenResponse(response: { status: number; jsonText?: string; 
   }
   return {
     accessToken,
-    refreshToken: str(body.refresh_token, ""),
+    // Verbatim, like the access token above: this value is replayed to the
+    // token endpoint as typed.
+    refreshToken: verbatim(body.refresh_token, ""),
     expiresIn: Number.isFinite(Number(body.expires_in))
       ? Number(body.expires_in)
       : cfg.assumedTokenLifetimeSeconds,

@@ -76,8 +76,12 @@ export function serializeRaccoonCredential(credential: { accessToken?: unknown; 
   const source = obj(credential);
   const out = {
     version: 1,
-    access_token: str(source.accessToken, ""),
-    refresh_token: str(source.refreshToken, ""),
+    // Verbatim: these two are replayed to the gateway and the token endpoint
+    // byte for byte. Trimming is a change the user cannot see, and a stored
+    // token that no longer matches the one the platform signed fails with a
+    // 401 that has no trace back to this line (util.ts `verbatim`).
+    access_token: verbatim(source.accessToken, ""),
+    refresh_token: verbatim(source.refreshToken, ""),
     ...(typeof source.expiresAtMs === "number" ? { expires_at_ms: source.expiresAtMs } : {}),
     ...(str(source.officeIdentity, "") !== "" ? { office_identity: source.officeIdentity } : {}),
     ...(str(source.nickname, "") !== "" ? { nickname: source.nickname } : {})

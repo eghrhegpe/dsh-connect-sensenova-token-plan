@@ -11,7 +11,7 @@
  */
 
 import { readJwtExpiry } from "../sensenova-auth.ts";
-import { str, verbatim, obj, num, numOrNull } from "../util.ts";
+import { verbatim, obj, num, numOrNull } from "../util.ts";
 import { LEGACY_SCOPE, RECORD_ID } from "./constants.ts";
 import type { StoredGrant, StoreContextWiring, TokenStoreState } from "./state.ts";
 
@@ -35,7 +35,9 @@ export function parseGrant(record: unknown): StoredGrant | undefined {
   if (accessToken === "") return undefined;
   return {
     accessToken,
-    refreshToken: str(payload.refreshToken, ""),
+    // Same rule as the access token above: the refresh token is replayed
+    // verbatim to the refresh endpoint.
+    refreshToken: verbatim(payload.refreshToken, ""),
     // Prefer the value the token ENDPOINT reported (`issuedAt + expiresIn` —
     // the authority for when this grant dies) and fall back to the `exp` claim
     // read off the token itself only when the stored value is unreadable.

@@ -524,25 +524,14 @@ const healthy = {
     `${own("RACCOON") ?? "not found"} vs ${RACCOON_PROVIDER_ID}`);
 }
 
-// === F5c. no token is read through str() — a secret goes through verbatim ==
-// `str()` trims and demands non-empty (util.ts); `verbatim()` is its companion
-// FOR secrets — it reads exactly as given, because trimming a token/password is
-// a change the user cannot see. Every one of the token reads below was `str()`
-// until 2026-10-20; scan the whole credential face so a new one cannot slip in.
-{
-  const bad = /=\s*str\(\s*(?:body\.access_token|body\.refresh_token|envelope\.data\.access_token|envelope\.data\.refresh_token|obj\(\s*credential\s*\)\.refresh_token|source\.access_token|source\.refresh_token|credential\?\.accessToken|payload\.accessToken|token)\b/;
-  const hostDir = new URL("../src/host/", import.meta.url);
-  const tops = (await readdir(hostDir)).filter((f) => f.endsWith(".ts"));
-  const subs = (await readdir(new URL("token-store/", hostDir))).filter((f) => f.endsWith(".ts")).map((f) => `token-store/${f}`);
-  const offenders = [];
-  for (const f of [...tops, ...subs]) {
-    if (bad.test(await readFile(new URL(f, hostDir), "utf8"))) offenders.push(f);
-  }
-  check("no token is read through str() — a secret must go through verbatim",
-    offenders.length === 0,
-    offenders.length ? `str() reads a token in: ${offenders.join(", ")}` : "");
-}
-
+// === F5c. (moved) no token is read through str() — see credential-guard =====
+// The original check here was a ten-shape regex over `readdir` of src/host and
+// src/host/token-store. It passed while eight reads in those very directories
+// still went through `str()`: the anchor demanded `= str(`, so object-literal
+// reads (`refreshToken: str(...)`) were invisible; `routes/` was never read;
+// and camelCase / `catalogToken` shapes were not in the enumeration. The rule
+// now lives in ./credential-guard.test.mjs, which walks the AST instead.
+//
 // === F6. every key the panel ASKS for exists, in both languages ============
 // F3 above proves the two dictionaries agree with each other. It cannot see
 // the other half of the pair: a key that is in neither dictionary — or is

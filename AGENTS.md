@@ -20,7 +20,7 @@
 | **改文档 / README / `cordis.patch.yml` 文案 / 加截图资产** | 无（看任务本身） | `test/docs.test.mjs` 检查 9–11（tab 全覆盖 + 槽位一致 + `screenshots.json` 图与孤儿资产） | `grep -rn "<文件名>"` 拿到引用者 → 再 `node test/docs.test.mjs`。**不进 `src/`、不 build、不跑全量** |
 | **它坏了 / 用户报了个现象** | 下方「去哪查」第 1 行（`docs/TROUBLESHOOTING.md`，按症状码） | `docs/PITFALLS.md` 对应条目 | 先跑 `npm run doctor --json` 取 `symptoms`，按现象定位，别按模块名猜 |
 | 改 host 逻辑 / 加路由 / 改配置字段 | 本文件「三条事实」「红线」→ `docs/API.md`、`docs/SETUP.md` | `src/host/index.ts`（`apply` 是唯一装配点）→ `src/host/routes.ts`（路由门面） | `npm run build` + 该域测试；**碰契约文件（`src/shared/*`、`client.js`、`lib/index.js`）走全量** |
-| **动凭据 / 登录 / 续期 / 节流 / 加解密** | 本文件红线 1/2/4/6 → `docs/AUTH.md` | `sensenova-auth.ts`、`token-store/*`、`throttle-store.ts`、`sensenova-crypto.ts` 照单全读（不按行数挑） | `node test/auth.test.mjs` + `node test/store-baseline.test.mjs`；要 `UPDATE_BASELINE=1` 就是更大的事，**先停下来说** |
+| **动凭据 / 登录 / 续期 / 节流 / 加解密** | 本文件红线 1/2/4/6 → `docs/AUTH.md` | `sensenova-auth.ts`、`token-store/*`、`throttle-store.ts`、`sensenova-crypto.ts` 照单全读（不按行数挑） | `node test/auth.test.mjs` + `node test/store-baseline.test.mjs` + `node test/credential-guard.test.mjs`（判据：凭据只走 `verbatim()`，`str()` 读一次就红）；要 `UPDATE_BASELINE=1` 就是更大的事，**先停下来说** |
 | 动第二个上游（小浣熊 / `sensenova-raccoon`） | 下方「去哪查」对应行（`docs/ROADMAP.md` §6.1.2 / §6.1.4） | `src/host/raccoon*.ts` | `node test/raccoon.test.mjs`（peer-free，clean checkout 可跑）；两边凭据/store/publisher 影响须恒为零 |
 | 改面板 UI / client | 本文件「三条事实」第 2 条 → `docs/PITFALLS.md` §41 | `src/client/cards.ts`、`src/client/panel-page.ts` | **改 `src/` 必先 `npm run build`**，否则 render 套件 eval 的是旧 `client.js`（绿了也是假的） |
 | 拍 / 改裁定，回溯边界与定位沿革 | 下方「去哪查」对应行（`docs/ADR.md` 账本 + `docs/ARCHITECTURE.md` §5 正文） | — | 现行正文**禁内联「修订（日期）」补丁**，`test/docs.test.mjs` 的 `ARCHAEOLOGY` 把关 |
