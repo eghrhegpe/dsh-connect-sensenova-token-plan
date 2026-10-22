@@ -223,6 +223,17 @@ export interface RaccoonModel {
   name?: string;
   vision?: boolean;
   /**
+   * How the `vision` flag above was established. The panel prints a plain
+   * capability chip only for `measured` / `declared`; `assumed` (the default
+   * for a row the gateway said nothing about) is labelled as unverified, so a
+   * model that cannot actually look at images is never advertised as if it
+   * could. A `denied` row carries `vision: false` and no chip at all.
+   *
+   * Absent means an older producer (the static fallback roster), whose
+   * hand-set bits are treated as declared.
+   */
+  visionSource?: "measured" | "declared" | "assumed" | "denied";
+  /**
    * The multiplier the gateway charges RIGHT NOW. For a promotion this is
    * `billing_effective_multiplier` (a `limited_free` model reads 0 here), not
    * the list price — the same figure the desktop client quotes as the live

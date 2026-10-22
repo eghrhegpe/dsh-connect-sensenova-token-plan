@@ -158,6 +158,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.rosterError": "保存失败：{error}",
 			"llm.rosterNoMatch": "没有匹配的模型。",
 			"llm.rosterVision": "可看图",
+			"llm.rosterVisionAssumed": "可看图·未实测",
+			"llm.rosterVisionAssumedTitle": "网关没声明这个模型能否看图，插件默认放开图片入口（未实测）。真发过去模型说看不到，就把它加进否决清单 src/host/raccoon-catalog.ts。",
 			"llm.rosterExhausted": "额度耗尽",
 			"llm.rosterRateTitle": "积分消耗伪倍率（自定义对比用，非官方）",
 			"llm.metaOutput": "最大输出 {out}",
@@ -366,6 +368,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.rosterError": "Save failed: {error}",
 			"llm.rosterNoMatch": "No model matches.",
 			"llm.rosterVision": "vision",
+			"llm.rosterVisionAssumed": "vision (unverified)",
+			"llm.rosterVisionAssumedTitle": "The gateway did not declare whether this model sees images, so pictures are allowed by default and this capability is unverified. If the model answers that it cannot see the image, add its id to the denylist in src/host/raccoon-catalog.ts.",
 			"llm.rosterExhausted": "quota exhausted",
 			"llm.rosterRateTitle": "Pseudo credit multiplier (custom comparison aid, not official)",
 			"llm.metaOutput": "max output {out}",
@@ -3380,8 +3384,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				rateTitle,
 				badges: [row?.vision === true ? h("span", {
 					key: "vision",
-					style: S.modelBadge
-				}, tt("llm.rosterVision")) : null, promo === null ? null : h("span", {
+					style: S.modelBadge,
+					title: row?.visionSource === "assumed" ? tt("llm.rosterVisionAssumedTitle") : void 0
+				}, row?.visionSource === "assumed" ? tt("llm.rosterVisionAssumed") : tt("llm.rosterVision")) : null, promo === null ? null : h("span", {
 					key: "promo",
 					style: S.modelBadge,
 					title: promoNote === "" ? void 0 : promoNote

@@ -144,7 +144,15 @@ export function RaccoonRoster({ models, tt, source, enabledIds, busy, registered
           rateText,
           rateTitle,
           badges: [
-            row?.vision === true ? h("span", { key: "vision", style: S.modelBadge }, tt("llm.rosterVision")) : null,
+            row?.vision === true ? h("span", {
+              key: "vision",
+              style: S.modelBadge,
+              // The verdict, never more than it: a probed/declared capability
+              // reads as a plain chip, the default-offer row says it is
+              // unverified, and the tooltip names the denylist a blind result
+              // belongs in. A `denied` row has `vision: false` and no chip.
+              title: row?.visionSource === "assumed" ? tt("llm.rosterVisionAssumedTitle") : undefined
+            }, row?.visionSource === "assumed" ? tt("llm.rosterVisionAssumed") : tt("llm.rosterVision")) : null,
             promo === null
               ? null
               : h("span", { key: "promo", style: S.modelBadge, title: promoNote === "" ? undefined : promoNote },

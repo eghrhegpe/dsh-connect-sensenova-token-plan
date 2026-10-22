@@ -17,6 +17,18 @@ import { RACCOON_API_BASE, RACCOON_LLM_PREFIX, RACCOON_POINTS_PREFIX, RACCOON_RE
 import { raccoonHeaders, parseRaccoonEnvelope } from "./raccoon-http.ts";
 
 /**
+ * Where a row's vision verdict came from — surfaced so the panel never states
+ * a capability more confidently than it was established.
+ *
+ * - `measured` — a probe saw this id read the probe image.
+ * - `declared` — the gateway's own tags (or the legacy booleans) say so.
+ * - `assumed`  — nothing was established: the row is offered as image-capable
+ *   by default (see `raccoonRowVision`), and the panel labels it as unverified.
+ * - `denied`   — a probe saw this id answer "cannot see the image".
+ */
+export type RaccoonVisionSource = "measured" | "declared" | "assumed" | "denied";
+
+/**
  * Raccoon models that ARE image-capable on the gateway even though the
  * catalogue does not say so.
  *
@@ -26,26 +38,48 @@ import { raccoonHeaders, parseRaccoonEnvelope } from "./raccoon-http.ts";
  * HTTP 200 on 2026-10-04 (it described the picture correctly), and
  * `sn-glm-5-3-flash` did the same on 2026-10-06 (it named all four stripes of
  * the probe image). This set holds the models whose image support was PROBED
- * rather than declared, so the picker keeps offering them pictures instead of
- * silently dropping the attachment. Adding a model here requires a real probe,
- * not a belief.
+ * rather than declared.
+ *
+ * Since 2026-10-22 an unprobed row defaults to image-capable, so membership is
+ * no longer what grants the flag — it is the provenance the panel prints
+ * (`visionSource: "measured"`): these rows were checked, the others are only
+ * assumed. The distinction still earns its keep, because a model that was
+ * probed and then started refusing images has to be moveable into the denylist
+ * without being confused with the rows nobody ever looked at.
+ *
+ * `sn-deepseek-v4-1-flash-1017` is the dated build the gateway lists BESIDE
+ * the untagged original (both rows are visible today; the 1017 row is the one
+ * on promotion). Its tags are the same vision-less set
+ * (`general` / `code` / `html` / `analysis` / `reasoning` / `auto`), and it
+ * named all four stripes on 2026-10-22 — a probe of its OWN, because the
+ * suffix is a build id: a future `-1103` (or a renamed sibling) is a different
+ * wire id and must be measured again rather than inferred from this entry. A
+ * name-prefix rule here would be exactly the "belief" this set exists to
+ * refuse.
  * @type {ReadonlySet<string>}
  */
 export const RACCOON_VISION_WHITELIST: ReadonlySet<string> = Object.freeze(new Set([
   "sn-deepseek-v4-1-flash",
+  "sn-deepseek-v4-1-flash-1017",
   "sn-glm-5-3-flash"
 ]));
 
 /**
  * Raccoon models the catalogue TAGS as image-capable that a probe found blind
- * — the mirror of the whitelist, and the reason a missing tag is not the only
- * way `tags` can lie.
+ * — the reason a tag is not a declaration of capability but a claim about it.
  *
- * The two directions cost differently: a missing tag merely hides a capability
- * from the picker, while a WRONG tag sends the user's image to a model that
- * cannot look at it. That case answers **HTTP 200** and then says it cannot see
- * the picture, so no layer reports an error and the user reads it as their own
- * mistake (2026-10-06 report: "glm-5.3 不能看图却显示可以看图").
+ * The two directions cost differently: a missing flag hides a capability from
+ * the picker (silently — 2026-10-22: a newly added `-1017` build lost its image
+ * entry with no signal at all), while a WRONG flag sends the user's image to a
+ * model that cannot look at it and the model answers **HTTP 200** and then says
+ * it cannot see the picture, so no layer reports an error and the user reads it
+ * as their own mistake (2026-10-06 report: "glm-5.3 不能看图却显示可以看图").
+ *
+ * That second failure is why the flag still has a denylist even though the
+ * default is now "assume capable": the default makes the silent loss
+ * impossible, and this set is the only thing standing between a blind model
+ * and the user's image. Which is also why the panel labels an unprobed row as
+ * unverified instead of printing a plain "vision" chip.
  *
  * `sn-glm-5-3` is the measured case: its row carries `vision` among its tags,
  * yet a `chat/completions` request with an `image_url` part answered
@@ -65,14 +99,27 @@ export const RACCOON_VISION_DENYLIST: ReadonlySet<string> = Object.freeze(new Se
 ]));
 
 /**
- * Whether a raw catalogue row reads as image-capable.
+ * The vision verdict AND its provenance for a raw catalogue row.
  *
- * Precedence is measured, not guessed, and it is a ladder of three rungs: the
- * probe DENYLIST, the probe WHITELIST, then the row's own declaration. Both
- * probe rungs outrank the declaration because a probe IS the measurement and
- * the declaration is only a claim — and the denylist outranks the whitelist
- * because a model in both is a data error whose safe reading is "do not send
- * it pictures" (the two sets are asserted disjoint in `test/raccoon.test.mjs`).
+ * Precedence is measured first, then declared, then a permissive default:
+ *
+ * 1. the probe DENYLIST — a measured "cannot see" (the only rung that says no);
+ * 2. the probe WHITELIST — a measured "can see";
+ * 3. the row's own declaration — `tags` (`vision` / `image` /
+ *    `image-understanding`), then the legacy `vision` boolean and
+ *    `input_modalities`;
+ * 4. nothing at all — **assume capable** (`assumed`).
+ *
+ * Rung 4 used to be "assume blind", and that is the change of 2026-10-22: the
+ * gateway's tag set is not reliable in either direction (it misses real vision
+ * models and it tags a blind one), so an untagged row says nothing about the
+ * model. Assuming blind made every gateway addition fake a missing feature —
+ * the user sees no image entry and no reason why, and only a report fixes it.
+ * Assuming capable moves the cost to where the signal exists: if the model
+ * really cannot see, it says so in its reply (HTTP 200, model-level refusal),
+ * the user reads it as a capability gap rather than a broken plugin, and the
+ * row is moved into the denylist. Provenance is reported alongside so the
+ * panel can say "unverified" instead of asserting the capability.
  *
  * The declaration rung's own field order is measured too: the gateway's
  * current `/api/web/llm/v2/model_catalog` carries NO `vision` boolean and NO
@@ -83,16 +130,30 @@ export const RACCOON_VISION_DENYLIST: ReadonlySet<string> = Object.freeze(new Se
  * case-sensitively — the gateway spells it lowercase, and a case-insensitive
  * read would paper over a shape drift instead of flagging it.
  * @param {object} model - a raw `categories[].models[]` entry.
+ * @returns {{vision: boolean, source: RaccoonVisionSource}} the verdict.
+ */
+export function raccoonVisionVerdict(model: any): { vision: boolean; source: RaccoonVisionSource } {
+  const id = str(model.model_name, "") || str(model.id, "") || str(model.name, "");
+  if (RACCOON_VISION_DENYLIST.has(id)) return { vision: false, source: "denied" };
+  if (RACCOON_VISION_WHITELIST.has(id)) return { vision: true, source: "measured" };
+  const tags = Array.isArray(model.tags) ? model.tags : [];
+  if (tags.some((tag: unknown) => tag === "vision" || tag === "image" || tag === "image-understanding")) {
+    return { vision: true, source: "declared" };
+  }
+  if (model.vision === true) return { vision: true, source: "declared" };
+  if (Array.isArray(model.input_modalities) && model.input_modalities.includes("image")) {
+    return { vision: true, source: "declared" };
+  }
+  return { vision: true, source: "assumed" };
+}
+
+/**
+ * Whether a raw catalogue row reads as image-capable.
+ * @param {object} model - a raw `categories[].models[]` entry.
  * @returns {boolean} true when the model may be offered image input.
  */
 export function raccoonRowVision(model: any): boolean {
-  const id = str(model.model_name, "") || str(model.id, "") || str(model.name, "");
-  if (RACCOON_VISION_DENYLIST.has(id)) return false;
-  if (RACCOON_VISION_WHITELIST.has(id)) return true;
-  const tags = Array.isArray(model.tags) ? model.tags : [];
-  if (tags.some((tag: unknown) => tag === "vision" || tag === "image" || tag === "image-understanding")) return true;
-  if (model.vision === true) return true;
-  return Array.isArray(model.input_modalities) ? model.input_modalities.includes("image") : false;
+  return raccoonVisionVerdict(model).vision;
 }
 
 /**
@@ -181,6 +242,7 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
         seen.add(id);
         const params = obj(model.params);
         const billing = raccoonEffectiveMultiplier(model);
+        const verdict = raccoonVisionVerdict(model);
         out.push({
           id,
           name: str(model.name, id),
@@ -188,7 +250,11 @@ export async function fetchRaccoonCatalog(credential: any, fetcher?: typeof fetc
           ...(billing.original !== undefined ? { originalMultiplier: billing.original } : {}),
           ...(billing.status !== undefined ? { billingStatus: billing.status } : {}),
           ...(billing.note !== undefined ? { billingStatusNote: billing.note } : {}),
-          vision: raccoonRowVision(model),
+          vision: verdict.vision,
+          // Always reported: an "assumed" row is the one the panel must not
+          // badge as a known capability, so the absence of this field can only
+          // mean "older producer", never "verified".
+          visionSource: verdict.source,
           contextWindow: num(params.context_window ?? model.context_window ?? model.context_length),
           maxOutputLength: num(params.max_tokens ?? params.max_output_tokens ?? model.max_output_tokens ?? model.max_output_length)
         });

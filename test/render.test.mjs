@@ -982,7 +982,30 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     }
   }
 
-  // The Raccoon roster's parameter line: the gateway ALREADY declares the
+  // The vision chip carries PROVENANCE, not just a boolean: a probed or
+  // gateway-declared capability reads as the plain chip, while the "nobody
+  // said anything, so offer pictures" default must SAY it is unverified — a
+  // model that really cannot see the image must never be advertised as if it
+  // could (the 2026-10-06 report). `tt` returns the key verbatim here, so the
+  // assertion pins WHICH template rendered rather than translated prose.
+  {
+    const declared = texts(treeOf(render.RaccoonRoster, {
+      models: [{ id: "sn-declared", name: "D", vision: true, visionSource: "declared" }], tt
+    }));
+    const assumed = texts(treeOf(render.RaccoonRoster, {
+      models: [{ id: "sn-assumed", name: "A", vision: true, visionSource: "assumed" }], tt
+    }));
+    check("a declared vision model draws the plain capability chip",
+      declared.some((line) => line === "llm.rosterVision") && !declared.some((line) => line === "llm.rosterVisionAssumed"),
+      declared.join(" | "));
+    check("an assumed vision model draws the unverified chip instead of a plain claim",
+      assumed.some((line) => line === "llm.rosterVisionAssumed") && !assumed.some((line) => line === "llm.rosterVision"),
+      assumed.join(" | "));
+    check("a denied row draws no vision chip at all",
+      !texts(treeOf(render.RaccoonRoster, {
+        models: [{ id: "sn-denied", name: "N", vision: false, visionSource: "denied" }], tt
+      })).some((line) => line === "llm.rosterVision" || line === "llm.rosterVisionAssumed"));
+  }
   // window and the output ceiling, the Host has normalized them since the
   // first release, and a name-only row was this component dropping data it
   // held. So the line is asserted in both directions — it must appear when

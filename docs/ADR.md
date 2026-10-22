@@ -138,3 +138,14 @@
 - **理由**：DSH 里「身份」有两个来源。assistant 消息的 `source.provider` 来自解析到的**路由 id**；`replayState.response.provider` 抄自 descriptor 的 `provider` 字段。宿主重放校验比对二者，不等即把该条 assistant 消息降级为外来消息（`api` 变 `dsh-foreign`），pi-ai 随之把其中的 thinking 块当正文重放。所以「多条路由共用一章」的代价不是某次请求报错，而是那条路由的**每一轮历史都静默降级**，日志里没有任何 error。本机对同类插件的一份扫描（179 会话 / 13,951 条 model 消息 / 11 个 provider）给出了量级：共用 identity 的那条 global 路由 1,332 条消息**全部**分叉（章 `workbuddy` ≠ 路由 `workbuddy-global`），而同机其余 10 个 provider 全部同名通过。该扫描只作判据证据，不在本插件的改动范围。ADR-007 的「共享凭据则合并，否则分裂」管的是插件级归属；本条是它的 provider 级同源推论：**同一插件内不共享凭据的两条上游，也不共享身份**。
 - **边界**：`toPiDescriptor` / `buildDescriptors` 的 `providerId` 默认值（`LLM_PROVIDER_ID`）**保留**。约十五处离线测试在验过滤、去重、视觉识别等与身份无关的行为，强制传参只会给它们添噪音，且默认值本身不会把错误章发到 Host——真正注册的 descriptor 必经 `assemblePiAiAdapter`，两个上游共用这一个入口。守卫因此落在装配期而非构造期：构造期的默认值是测试便利，装配期才是上线路径。
 - **复核条件**：若 DSH 改为按 descriptor 的 `provider` 统一记 `source.provider`（两侧同源、不再比对），本条可撤销。在此之前，新增上游一律先申请新 id 再走同一个装配函数。
+
+## ADR-016 小浣熊识图改为「默认放行 + 实测否决」：把未实测从静默变成可见
+
+- **日期**：2026-10-22
+- **状态**：现行（实现见 `src/host/raccoon-catalog.ts` 的 `raccoonVisionVerdict`——返回 `{ vision, source }`，`RaccoonVisionSource = "measured" | "declared" | "assumed" | "denied"`；`fetchRaccoonCatalog` 的行带 `visionSource`；`src/shared/wire.ts` 的 `RaccoonModel.visionSource`；面板鉴别见 `src/client/raccoon-roster.ts` 的 chip 与 `src/client/i18n.ts` 的 `llm.rosterVisionAssumed` / `llm.rosterVisionAssumedTitle`。门禁：`test/raccoon.test.mjs` 的 provenance 断言、`test/render.test.mjs` 的三条 chip 断言）
+- **裁定**：判定链四级，且**末级是「放行」**：`实测否决集 → 实测白名单 → 行内声明 → 默认假定可看图（assumed）`。否决集是唯一说「不」的一级；白名单不再是开关，而是 **provenance**（`measured`）。面板只说它知道的事：`measured` / `declared` 打「可看图」，`assumed` 打「可看图·未实测」并带解释性 tooltip，`denied` 不打 chip。
+- **理由**：2026-10-22 实测，网关目录把 `sn-deepseek-v4-1-flash-1017`（`description: DeepSeek-V4.1-Flash-1017`、限免至 10-31、`effective_multiplier` 0）与旧 `sn-deepseek-v4-1-flash` **并列**挂出，新行的 `tags` 与旧版同为一组无 vision 的标签；用户贴图时图片入口整条消失、面板不报任何错（默认拒绝的失效形态：能力缺失是静默的，只有当人主动报告才被发现）。同一张四条竖条图同一条问题，该 id 读对 4/4。同一天的 7 个可见 chat 模型里，能看图的**要么有标签、要么已实测**（`sn-glm-5-3` 仍是唯一实测瞎子，留在否决集），也就是说「默认拒绝」在今天的目录上没保护任何东西，却会在网关每次加新模型时制造一次静默缺失。
+- **代价与护栏**：默认放行把失效方向翻到「错报」——但本网关的错报是**可观测**的：HTTP 200 + 模型自述看不见（2026-10-06 已实证，ADR-009），且面板已把那行标成「未实测」，用户不会把插件行为误读成模型能力。否决集因此成为唯一维护面：模型自述看不见，就把 id 带日期实测后加进去；`test/live-raccoon.mjs` 的 L2e 继续对两集合成员复探。
+- **边界**：只动小浣熊判定。Token Plan 侧 `identifyVisionModel`（按 `/v1/models` 的 `input_modalities`）不动，两侧判定函数依旧不合并；`RACCOON_FALLBACK_MODELS` 的 vision 列仍是手写实测值、不经判定函数；`visionSource` 只供面板显示，`raccoonToDescriptor` 的 `input` 数组仍只由 `vision` 布尔决定。
+- **取代**：ADR-009 的「三级判定链」中第三级之后的**隐式 default-deny** 由本条翻转；ADR-009 其余部分（双向实测、否决集的存在、L2e 复探、两集合互斥、fallback 表一致性）继续现行。
+- **复核条件**：若网关出现「拒绝图片会**报错**而不是让模型自述」的形态（HTTP 4xx/5xx），默认放行的代价就换成整轮失败，届时要把默认翻回拒绝，并在面板显式给出「未实测」入口，而不是继续静默放行。

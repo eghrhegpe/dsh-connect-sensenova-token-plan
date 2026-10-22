@@ -31,6 +31,7 @@ import {
   extractRaccoonNickname,
   raccoonHeaders,
   raccoonRowVision,
+  raccoonVisionVerdict,
   raccoonEffectiveMultiplier,
   RACCOON_FALLBACK_MODELS,
   refreshRaccoonCredential,
@@ -359,27 +360,50 @@ function section(title) {
     // catalogue ships, so this is the production shape, not a convenient one.
     const probeRows = await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
       { model_name: "sn-glm-5-3", name: "GLM-5.3", visible: true, billing_multiplier: 0.75, tags: ["general", "office", "code", "vision", "debug", "analysis", "html", "reasoning"], params: { context_window: 1_000_000, max_tokens: 100_000 } },
-      { model_name: "sn-glm-5-3-flash", name: "GLM-5.3 Flash", visible: true, billing_multiplier: 0.2, tags: ["general", "chat", "rewrite", "summary", "fast"], params: { context_window: 1_000_000, max_tokens: 100_000 } }
+      { model_name: "sn-glm-5-3-flash", name: "GLM-5.3 Flash", visible: true, billing_multiplier: 0.2, tags: ["general", "chat", "rewrite", "summary", "fast"], params: { context_window: 1_000_000, max_tokens: 100_000 } },
+      // The live 2026-10-22 row for the dated build: same vision-less tag set
+      // as the original, so only the probe entry can make it image-capable.
+      { model_name: "sn-deepseek-v4-1-flash-1017", name: "sn-deepseek-v4-1-flash-1017", visible: true, billing_multiplier: 0.25, billing_effective_multiplier: 0, billing_status: "limited_free", billing_status_note: "限免至10月31日", tags: ["general", "code", "html", "analysis", "reasoning", "auto"], params: { context_window: 1_000_000, max_tokens: 100_000 } }
     ] }] } }));
     check("the probe denylist beats the row's own vision tag",
-      probeRows?.[0]?.id === "sn-glm-5-3" && probeRows?.[0]?.vision === false,
+      probeRows?.[0]?.id === "sn-glm-5-3" && probeRows?.[0]?.vision === false && probeRows?.[0]?.visionSource === "denied",
       JSON.stringify(probeRows?.[0]));
     check("a denied row keeps every other field the catalogue declared",
       probeRows?.[0]?.multiplier === 0.75 && probeRows?.[0]?.contextWindow === 1_000_000 && probeRows?.[0]?.maxOutputLength === 100_000,
       JSON.stringify(probeRows?.[0]));
     check("the probe whitelist grants vision to a row the gateway did not tag",
-      probeRows?.[1]?.id === "sn-glm-5-3-flash" && probeRows?.[1]?.vision === true,
+      probeRows?.[1]?.id === "sn-glm-5-3-flash" && probeRows?.[1]?.vision === true && probeRows?.[1]?.visionSource === "measured",
       JSON.stringify(probeRows?.[1]));
+    // The dated build ships its own row with the same vision-less tags. It is
+    // whitelisted BY WIRE ID, so a rename (`-1103`, a flavour suffix) must not
+    // inherit this verdict silently — the assertion below is id-exact on both
+    // sides: the whitelisted id reads capable, a same-prefix stranger does not.
+    check("the whitelisted dated build reads image-capable from its own row",
+      probeRows?.[2]?.id === "sn-deepseek-v4-1-flash-1017" && probeRows?.[2]?.vision === true &&
+      probeRows?.[2]?.multiplier === 0 && probeRows?.[2]?.originalMultiplier === 0.25 &&
+      probeRows?.[2]?.billingStatus === "limited_free" && probeRows?.[2]?.contextWindow === 1_000_000 &&
+      probeRows?.[2]?.visionSource === "measured",
+      JSON.stringify(probeRows?.[2]));
+    check("a same-prefix id that is NOT whitelisted is not silently DENIED (default offers it, unverified)",
+      (await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
+        { model_name: "sn-deepseek-v4-1-flash-1103", visible: true, billing_multiplier: 0.25, tags: ["general", "code"] }
+      ] }] } })))?.[0]?.vision === true &&
+      (await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
+        { model_name: "sn-deepseek-v4-1-flash-1103", visible: true, billing_multiplier: 0.25, tags: ["general", "code"] }
+      ] }] } })))?.[0]?.visionSource === "assumed");
     // A member in both sets would make the verdict depend on rung order — a
     // data error, so the sets are asserted disjoint rather than merely ordered.
     check("the two probe sets are disjoint",
       [...RACCOON_VISION_WHITELIST].every((id) => !RACCOON_VISION_DENYLIST.has(id)) &&
       [...RACCOON_VISION_DENYLIST].every((id) => !RACCOON_VISION_WHITELIST.has(id)),
       `white=${[...RACCOON_VISION_WHITELIST].join(",")} deny=${[...RACCOON_VISION_DENYLIST].join(",")}`);
-    check("a row with no probe entry and no vision tag stays text-only",
+    check("a row with no probe entry and no vision tag is offered pictures by default, labelled unverified",
       (await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
         { model_name: "sn-plain-row", visible: true, billing_multiplier: 0.3, tags: ["general", "fast"] }
-      ] }] } })))?.[0]?.vision === false);
+      ] }] } })))?.[0]?.vision === true &&
+      (await fetchRaccoonCatalog({ access_token: "t" }, fakeFetcher({ code: 0, data: { categories: [{ type: "chat", models: [
+        { model_name: "sn-plain-row", visible: true, billing_multiplier: 0.3, tags: ["general", "fast"] }
+      ] }] } })))?.[0]?.visionSource === "assumed");
     // The live harness (L2e) re-probes exactly the members the baseline records,
     // so a set edited without the baseline would make the next live run assert
     // the OLD expectation and report a phantom platform change. Pin the two
@@ -507,9 +531,27 @@ function section(title) {
     check("vision is read from the explicit flag or the declared modality list",
       raccoonRowVision({ vision: true }) === true &&
       raccoonRowVision({ input_modalities: ["text", "image"] }) === true &&
-      raccoonRowVision({ input_modalities: ["text"] }) === false &&
-      raccoonRowVision({}) === false,
-      `flag=${raccoonRowVision({ vision: true })} mod=${raccoonRowVision({ input_modalities: ["text", "image"] })}`);
+      // `input_modalities: ["text"]` is a DECLARATION of text-only, but the
+      // gateway's v2 rows never carry that array — so the branch it hits here
+      // is the assumed default, and the verdict stays permissive.
+      raccoonRowVision({ input_modalities: ["text"] }) === true &&
+      // A row that says nothing about images is offered pictures (2026-10-22
+      // default), and `raccoonVisionVerdict` says so out loud.
+      raccoonVisionVerdict({}).vision === true && raccoonVisionVerdict({}).source === "assumed",
+      `flag=${raccoonRowVision({ vision: true })} mod=${raccoonRowVision({ input_modalities: ["text", "image"] })} bare=${JSON.stringify(raccoonVisionVerdict({}))}`);
+
+    // The default direction is the whole point of the flip: an untagged row is
+    // OFFERED (silent loss impossible) and the panel is told it is unverified.
+    check("a bare row is image-capable but reports its verdict as assumed",
+      raccoonVisionVerdict({ model_name: "sn-brand-new" }).vision === true &&
+      raccoonVisionVerdict({ model_name: "sn-brand-new" }).source === "assumed");
+    check("a tag-declared row reports `declared`, not `assumed`",
+      raccoonVisionVerdict({ model_name: "sn-tagged", tags: ["general", "vision"] }).source === "declared");
+    check("a whitelisted row reports `measured`",
+      raccoonVisionVerdict({ model_name: [...RACCOON_VISION_WHITELIST][0] }).source === "measured");
+    check("a denylisted row stays closed and reports `denied`",
+      raccoonVisionVerdict({ model_name: [...RACCOON_VISION_DENYLIST][0], tags: ["vision"] }).vision === false &&
+      raccoonVisionVerdict({ model_name: [...RACCOON_VISION_DENYLIST][0], tags: ["vision"] }).source === "denied");
   } catch (error) {
     fail("the promotion-aware credit multiplier", error);
   }
