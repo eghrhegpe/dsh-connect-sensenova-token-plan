@@ -1,4 +1,13 @@
-# dsh-connect-sensenova-token-plan
+<h1 align="center">dsh-connect-sensenova-token-plan</h1>
+
+<p align="center"><b>把商汤（SenseNova）接进 DSH 的 Plugins 页插件卡，并在会话输入框实时显示积分额度与用量胶囊。</b></p>
+
+<p align="center"><a href="#安装">安装</a> · <a href="#它是怎么工作的">工作原理</a> · <a href="CHANGELOG.md">更新日志</a> · <a href="https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan/issues">问题反馈</a></p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-connect-sensenova-token-plan"><img src="https://img.shields.io/npm/v/dsh-connect-sensenova-token-plan?style=flat-square&label=npm&color=cb3837" alt="npm version"></a> <a href="https://www.npmjs.com/package/dsh-connect-sensenova-token-plan"><img src="https://img.shields.io/npm/d18m/dsh-connect-sensenova-token-plan?style=flat-square&label=downloads&color=cb3837" alt="npm downloads"></a> <a href="https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/eghrhegpe/dsh-connect-sensenova-token-plan/ci.yml?branch=main&style=flat-square&label=tests" alt="test status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/eghrhegpe/dsh-connect-sensenova-token-plan?style=flat-square" alt="MIT license"></a> <a href="https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan/stargazers"><img src="https://img.shields.io/github/stars/eghrhegpe/dsh-connect-sensenova-token-plan?style=flat-square" alt="GitHub stars"></a> <a href="https://dshfind.com/plugins/eghrhegpe/dsh-connect-sensenova-token-plan"><img src="https://dshfind.com/api/badge/eghrhegpe/dsh-connect-sensenova-token-plan" alt="dshfind plugin"></a>
+</p>
 
 把商汤接进 DSH 的 **Plugins 页**插件卡，另在会话输入框右侧常驻一颗用量胶囊。三个 tab 按使用顺序排列：
 
