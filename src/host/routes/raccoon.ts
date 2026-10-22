@@ -51,17 +51,17 @@ export const RACCOON_PATH = `/api/${name}/raccoon`;
 /**
  * Register the Raccoon route. Wiring subset: `settings`, `raccoonStore`,
  * `raccoonSwitch`, `raccoonPublisher`, `raccoonCache`, `webSearchStore`,
- * `reconcileWebSearch`.
+ * `raccoonRosterSeen`, `reconcileWebSearch`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "reconcileWebSearch">} wiring
+ * @param {Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "raccoonRosterSeen" | "reconcileWebSearch">} wiring
  *   - the Raccoon half's subset, as assembled by `apply()` in `index.ts`. The
  *   `Pick` is what makes "changing the Raccoon line must not affect the Token
  *   Plan one" (ARCHITECTURE §5.5) a compile-time fact rather than a review
  *   promise: this route physically cannot reach a Token Plan field.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "reconcileWebSearch">) {
-  const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache, webSearchStore, reconcileWebSearch } = wiring;
+export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "raccoonRosterSeen" | "reconcileWebSearch">) {
+  const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache, webSearchStore, raccoonRosterSeen, reconcileWebSearch } = wiring;
 
   // The Raccoon gateway reads (balance + catalogue) go through the SAME
   // coalescing cache primitive the console route uses, so a scan's fast poll
@@ -154,7 +154,11 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
             // overlay: `readRaccoonStatus` owns `resolveSwitchEnabled` so the
             // field cannot drift between declaration and production.
             webSearchStore,
-            webSearchConfig: settings.webSearchEnabled
+            webSearchConfig: settings.webSearchEnabled,
+            // The first-sighting history the pill's "new model" marker reads.
+            // Part of the read model, not a route overlay, so the seed / drop /
+            // window rules live in ONE place (`raccoon-roster-seen-store.ts`).
+            rosterSeenStore: raccoonRosterSeen
           },
           withDiagnostics
         );

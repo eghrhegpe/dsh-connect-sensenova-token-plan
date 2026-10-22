@@ -234,6 +234,14 @@ export interface Wiring {
   resolveRaccoonToken: () => Promise<string>;
   /** The Raccoon `web_search` provider switch; may be absent on some Hosts. */
   webSearchStore: ReturnType<typeof import("./raccoon-web-store.ts").createFileRaccoonWebStore> | null;
+  /**
+   * The Raccoon roster's first-sighting history (`createFileRaccoonRosterSeenStore`).
+   *
+   * Drives the "new model" marker: the gateway publishes no "listed since"
+   * field, so a diff against a roster this plugin wrote down is the only way
+   * the pill can say "this one is new to you".
+   */
+  raccoonRosterSeen: ReturnType<typeof import("./raccoon-roster-seen-store.ts").createFileRaccoonRosterSeenStore> | null;
   /** Hand the `ctx.web` search selection back (clearing the empty slot this
    plugin took over). A SLOT, always present
    *  in `apply()`'s literal — `current === null` means "we hold no takeover".

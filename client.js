@@ -60,6 +60,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.poolFallback": "本模型未列入任何池，此处按平台顺序取第一个池",
 			"composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
 			"composer.raccoonUnknown": "积分余额未知（见小浣熊 tab）",
+			"composer.raccoonNewModels": "新模型",
+			"composer.raccoonNewModelsRow": "本机新见",
+			"composer.raccoonNewModelsTitle": "本机首次见到的模型：",
+			"composer.raccoonNewModelsSep": "、",
 			"auth.title": "连接商汤控制台",
 			"auth.registerHint": "还没有账号？前往官网注册，免费开通 Token Plan 额度 →",
 			"auth.portalHint": "前往官网管理额度 / 获取 API Key →",
@@ -270,6 +274,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"composer.poolFallback": "no pool lists this model — showing the first pool the platform returned",
 			"composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
 			"composer.raccoonUnknown": "balance unknown (see the Raccoon tab)",
+			"composer.raccoonNewModels": "new",
+			"composer.raccoonNewModelsRow": "New here",
+			"composer.raccoonNewModelsTitle": "First seen on this device: ",
+			"composer.raccoonNewModelsSep": ", ",
 			"auth.title": "Connect the SenseNova console",
 			"auth.registerHint": "No account yet? Register on the official site for a free Token Plan quota →",
 			"auth.portalHint": "Manage quota / get API keys on the official site →",
@@ -1250,6 +1258,10 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				flexShrink: 0
 			},
 			pillStale: { color: "var(--dsw-alias-label-tertiary)" },
+			pillNewTag: {
+				color: "var(--dsw-alias-label-secondary)",
+				flexShrink: 0
+			},
 			pillTierOk: "var(--dsw-alias-state-success-primary, #22c55e)",
 			pillTierWarn: "var(--dsw-alias-state-warn-primary, #eab308)",
 			pillTierExhausted: "var(--dsw-alias-state-error-primary, #ef4444)",
@@ -4640,9 +4652,16 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const signedOut = state !== null && state.loggedIn !== true;
 		const tier = balance === null ? "unknown" : balance <= 0 ? "exhausted" : "ok";
 		const reading = balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`;
+		const newIds = state?.newModelIds ?? [];
+		const shownNames = newIds.map((id) => {
+			const row = state?.models?.find((model) => model.id === id);
+			return row?.name ?? row?.id ?? id;
+		}).slice(0, 3);
+		const newModelTitle = newIds.length === 0 ? null : `${tt("composer.raccoonNewModelsTitle")}${shownNames.join(tt("composer.raccoonNewModelsSep"))}${newIds.length > shownNames.length ? "…" : ""}`;
 		const title = [
 			tt("composer.raccoonTitle"),
 			signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
+			newModelTitle,
 			stale ? tt("composer.stale") : null
 		].filter(Boolean).join(" · ");
 		const pending = !loadedOnce && balance === null;
@@ -4679,13 +4698,20 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			stale: stale && loadedOnce,
 			poolLine: null,
 			note: signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
-			children: [h("div", {
-				key: "balance",
-				style: S.pillPopoverRow
-			}, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")), h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`))), partRows.length === 0 ? null : h("div", {
-				key: "parts",
-				style: S.pillPopoverParts
-			}, h("div", { style: S.pillPopoverPartsLabel }, tt("composer.balanceParts")), partRows)]
+			children: [
+				h("div", {
+					key: "balance",
+					style: S.pillPopoverRow
+				}, h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverLabel }, tt("composer.balanceLabel")), h("span", { style: S.pillPopoverFigure }, balance === null ? "—" : `${count(balance)} ${tt("composer.balanceUnit")}`))),
+				partRows.length === 0 ? null : h("div", {
+					key: "parts",
+					style: S.pillPopoverParts
+				}, h("div", { style: S.pillPopoverPartsLabel }, tt("composer.balanceParts")), partRows),
+				newIds.length === 0 ? null : h("div", {
+					key: "newModels",
+					style: S.pillPopoverParts
+				}, h("div", { style: S.pillPopoverPartsLabel }, tt("composer.raccoonNewModelsRow")), h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverFigure }, `${shownNames.join(tt("composer.raccoonNewModelsSep"))}${newIds.length > shownNames.length ? "…" : ""}`)))
+			]
 		});
 		return h(PillBody, {
 			tt,
@@ -4697,7 +4723,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			onToggle: toggle,
 			onClose: close,
 			panel,
-			children: h("span", { style: S.pillReading }, pending ? "…" : reading)
+			children: h("span", { style: S.pillReading }, pending ? "…" : reading, newIds.length === 0 ? null : h("span", { style: S.pillNewTag }, ` · ${newIds.length} ${tt("composer.raccoonNewModels")}`))
 		});
 	}
 	var TOKEN_PLAN, RACCOON, RACCOON_POLL_MS, POPOVER_ID, TIER_INK, STALE_AFTER_MS, RACCOON_ROUTE;

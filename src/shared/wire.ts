@@ -299,6 +299,20 @@ export interface RaccoonState {
    * would be a type that no runtime value satisfies.
    */
   models?: readonly RaccoonModel[];
+  /**
+   * Roster ids whose FIRST sighting is inside the "new" window (7 days),
+   * oldest first — the pill's "· N 新模型" marker and its popover row read
+   * this. Absent means nothing is new (or an older Host).
+   *
+   * Only ever computed from a LIVE catalogue read. The static fallback roster
+   * is this plugin's own table, not gateway news, so it must never produce a
+   * marker — see `raccoon-roster-seen-store.ts` for the seed / drop rules.
+   *
+   * The Raccoon TAB deliberately does NOT read this field: ADR-017 ruled the
+   * marker lives on one surface only, so the same fact never shows in two
+   * places with two different wordings.
+   */
+  newModelIds?: readonly string[];
   /** The saved pushed-model curation (`null`/absent = the whole roster). */
   enabledModelIds?: string[] | null;
   providerRegistered?: boolean;

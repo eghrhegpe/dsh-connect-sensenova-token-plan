@@ -67,6 +67,13 @@ import {
 import { createRaccoonPublisher, raccoonSignature } from "../src/host/raccoon-publish.ts";
 import { createRaccoonWalk, LOGIN_STATUS } from "../src/host/raccoon-walk.ts";
 import { createFileRaccoonStore, normalizeRaccoonEnabled, RACCOON_SWITCH_VERSION } from "../src/host/raccoon-switch-store.ts";
+import {
+  createFileRaccoonRosterSeenStore,
+  normalizeRosterSeen,
+  RACCOON_ROSTER_NEW_WINDOW_MS,
+  RACCOON_ROSTER_SEEN_MAX_IDS,
+  RACCOON_ROSTER_SEEN_VERSION
+} from "../src/host/raccoon-roster-seen-store.ts";
 import { installNetworkGuard } from "./peer-roots.mjs";
 import { surface as clientSurface } from "./client-surface.js";
 import { results, check, fail, finishVerbose } from "./harness.mjs";
@@ -1126,6 +1133,158 @@ function section(title) {
     fail("ADR-006 raccoon-switch write-side version guard", error);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// --- 8b. the first-sighting history (raccoon-roster-seen-store.ts) ----------
+// The pill's "＋N 新" marker is only as honest as this file: the gateway
+// publishes no "listed since" field, so "new to you" is a diff against a
+// roster this plugin wrote down. The four behaviours below are the whole
+// contract — SEED (an upgrade must not announce the whole roster), GROWTH (one
+// added id, nothing else re-announced), WINDOW (a marker expires, it does not
+// latch) and DROP (a re-listed id is news again).
+{
+  const { mkdtempSync, rmSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "raccoon-roster-seen-"));
+  const file = join(dir, "raccoon-roster-seen.json");
+  const T0 = 1_760_000_000_000;
+  try {
+    const store = createFileRaccoonRosterSeenStore({ dir, ttlMs: 0 });
+    const roster = ["sn-a", "sn-b", "sn-c"];
+
+    // SEED: the first write records the roster as already-seen and announces
+    // nothing. Without this an upgraded install would tell every existing user
+    // that all seven models are brand new.
+    const seeded = await store.note(roster, T0);
+    check("the first sighting seeds the history and announces nothing",
+      Array.isArray(seeded.newIds) && seeded.newIds.length === 0, JSON.stringify(seeded));
+    const onDisk = JSON.parse(readFileSync(file, "utf8"));
+    check("the seeded roster is recorded one window back, so it reads as known",
+      onDisk.version === RACCOON_ROSTER_SEEN_VERSION && Object.keys(onDisk.seen).length === 3
+        && onDisk.seen["sn-a"] === T0 - RACCOON_ROSTER_NEW_WINDOW_MS,
+      JSON.stringify(onDisk));
+
+    // GROWTH: exactly the added id is new, oldest style — not the whole roster.
+    const grown = await store.note([...roster, "sn-d"], T0 + 1000);
+    check("an added id reads new while the known ones stay quiet",
+      JSON.stringify(grown.newIds) === JSON.stringify(["sn-d"]), JSON.stringify(grown));
+
+    // WINDOW: the marker expires. A model added two months ago must not keep
+    // wearing "new" — the marker is a suggestion to look, not a tombstone.
+    const aged = await store.note(["sn-a", "sn-b", "sn-c", "sn-d"], T0 + 1000 + RACCOON_ROSTER_NEW_WINDOW_MS + 1);
+    check("a sighting older than the window stops reading as new",
+      aged.newIds.length === 0, JSON.stringify(aged));
+
+    // DROP: a model the gateway stops listing leaves the map, so a re-listing
+    // is news again (the row changed hands, the user needs to know).
+    const T1 = T0 + 1000 + RACCOON_ROSTER_NEW_WINDOW_MS + 2000;
+    await store.note(["sn-a", "sn-b"], T1);
+    const back = await store.note(["sn-a", "sn-b", "sn-c"], T1 + 1000);
+    check("a model that left the roster and came back reads new again",
+      JSON.stringify(back.newIds) === JSON.stringify(["sn-c"]), JSON.stringify(back));
+
+    // A future stamp (a clock that jumped back, or a hand-edited file) is
+    // clamped to `now`: `now - stamp` must never be negative, or the marker
+    // would outlive the window forever. Clamping makes the id read new once
+    // and then age out on the normal schedule.
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(file, JSON.stringify({ version: RACCOON_ROSTER_SEEN_VERSION, seen: { "sn-x": T0 + 10 * RACCOON_ROSTER_NEW_WINDOW_MS } }), "utf8");
+    const clamping = createFileRaccoonRosterSeenStore({ dir, ttlMs: 0 });
+    const clamped = await clamping.note(["sn-x"], T0);
+    check("a future stamp is clamped to now instead of outliving the window",
+      JSON.stringify(clamped.newIds) === JSON.stringify(["sn-x"])
+        && JSON.parse(readFileSync(file, "utf8")).seen["sn-x"] === T0,
+      JSON.stringify({ newIds: clamped.newIds, stamp: JSON.parse(readFileSync(file, "utf8")).seen["sn-x"] }));
+
+    // The normalizer's own three rejection branches — each one is a way a
+    // half-written or hand-edited file could otherwise poison the answer. They
+    // are NOT reachable through note() (which only ever feeds well-formed data),
+    // so they need direct coverage or they are dead defenses pretending to work.
+    check("normalizeRosterSeen drops an empty id, a non-finite stamp and a <=0 stamp",
+      JSON.stringify(normalizeRosterSeen({
+        "": 5,
+        "bad-future": Number.NaN,
+        "epoch-zero": 0,
+        "negative": -3,
+        "string-stamp": "1700000000000",
+        "good-id": T0
+      })) === JSON.stringify({ "good-id": T0 }),
+      JSON.stringify(normalizeRosterSeen({
+        "": 5, "bad-future": Number.NaN, "epoch-zero": 0, "negative": -3, "string-stamp": "1700000000000", "good-id": T0
+      })));
+    check("normalizeRosterSeen reads a non-object (null / a bare string) as an empty map",
+      JSON.stringify(normalizeRosterSeen(null)) === "{}" && JSON.stringify(normalizeRosterSeen("1700000000000")) === "{}",
+      `${JSON.stringify(normalizeRosterSeen(null))} / ${JSON.stringify(normalizeRosterSeen("x"))}`);
+    // An ARRAY is not a legitimate map shape (its numeric keys would silently
+    // become model ids), so the object guard must reject the array branch too.
+    check("normalizeRosterSeen rejects an array, not just null",
+      Array.isArray(normalizeRosterSeen([1, 2])) === false && Object.keys(normalizeRosterSeen([1, 2])).length === 0,
+      JSON.stringify(normalizeRosterSeen([1, 2])));
+
+    // ADR-006 discipline, same as `raccoon-provider.json`: a payload this build
+    // does not own reads as NO history (tolerated), but it is never overwritten
+    // (refused) — the future build's file survives an older install.
+    const foreignPayload = { version: 999, seen: { "sn-old": T0 } };
+    writeFileSync(file, JSON.stringify(foreignPayload), "utf8");
+    const foreign = createFileRaccoonRosterSeenStore({ dir, ttlMs: 0 });
+    check("a foreign version reads as no history (the caller reseeds nothing, it just has no ids)",
+      JSON.stringify(await foreign.seen()) === "{}", JSON.stringify(await foreign.seen()));
+    let refusal = null;
+    try {
+      await foreign.note(["sn-a", "sn-b"], T0 + 5000);
+    } catch (error) {
+      refusal = String(error?.message ?? error);
+    }
+    check("writing over a foreign version is refused, not stomped",
+      refusal !== null && /refusing to overwrite raccoon-roster-seen\.json/.test(refusal) && /version 999/.test(refusal),
+      String(refusal));
+    check("the foreign version's file is left byte-for-byte intact",
+      JSON.stringify(JSON.parse(readFileSync(file, "utf8"))) === JSON.stringify(foreignPayload),
+      readFileSync(file, "utf8"));
+  } catch (error) {
+    fail("raccoon roster-seen store", error);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // The cap is a SHAPE-DRIFT guard, not a queue. A roster larger than the cap
+  // writes nothing and announces nothing (trimming it would make the evicted
+  // ids look unseen and re-announce them, oscillating). Steady polling on an
+  // unchanged roster must likewise touch the disk ZERO times — the property
+  // the pill's whole existence rests on: no new model, no write, no marker.
+  const { mkdtempSync: mk2, rmSync: rm2, readFileSync: rf2 } = await import("node:fs");
+  const { tmpdir: td2 } = await import("node:os");
+  const { join: j2 } = await import("node:path");
+  const dir2 = mk2(j2(td2(), "raccoon-roster-seen-cap-"));
+  try {
+    const store = createFileRaccoonRosterSeenStore({ dir: dir2, ttlMs: 0 });
+    const roster = ["sn-a", "sn-b", "sn-c"];
+    await store.note(roster, T0); // seed
+    const seededBytes = rf2(join(dir2, "raccoon-roster-seen.json"), "utf8");
+
+    const steady = await store.note(roster, T0 + 1000);
+    check("a steady poll on an unchanged roster announces nothing and writes nothing",
+      steady.newIds.length === 0 && rf2(join(dir2, "raccoon-roster-seen.json"), "utf8") === seededBytes,
+      `newIds=${JSON.stringify(steady.newIds)}`);
+
+    const tooBig = Array.from({ length: RACCOON_ROSTER_SEEN_MAX_IDS + 50 }, (_, i) => `sn-${i}`);
+    const drifted = await store.note(tooBig, T0 + 2000);
+    check("an oversized roster is a shape drift: announce nothing, keep the old map",
+      drifted.newIds.length === 0 && rf2(join(dir2, "raccoon-roster-seen.json"), "utf8") === seededBytes,
+      `newIds=${drifted.newIds.length}`);
+
+    // The drift must be self-healing: a normal roster after it writes/announces
+    // nothing new (the ids were already seeded) and leaves the map intact.
+    const recovered = await store.note(roster, T0 + 3000);
+    check("the marker self-heals once the roster returns to a plausible size",
+      recovered.newIds.length === 0 && rf2(join(dir2, "raccoon-roster-seen.json"), "utf8") === seededBytes,
+      JSON.stringify(recovered.newIds));
+  } catch (error) {
+    fail("raccoon roster-seen cap / steady-write discipline", error);
+  } finally {
+    rm2(dir2, { recursive: true, force: true });
   }
 }
 

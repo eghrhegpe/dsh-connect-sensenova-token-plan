@@ -635,6 +635,51 @@ function typeInto(input, value) {
       && css(drainedDot, "background").startsWith("var(--dsw-alias-state-error-primary"),
     `text=${text().slice(0, 160)} dot=${css(drainedDot, "background")}`);
 
+  // The pill's third segment: the gateway gained models since the last poll.
+  // It is a quiet suffix on the reading, not a second chip — a toolbar has one
+  // line, and a badge beside the quota chip would read as "your quota changed".
+  // The names live in the tooltip; the segment itself carries the count.
+  raccoonState = {
+    ok: true,
+    loggedIn: true,
+    balance: 42150,
+    models: [
+      { id: "sn-deepseek-v4-1-flash-1017", name: "DeepSeek-V4.1-Flash-1017" },
+      { id: "sn-kimi-k3", name: "Kimi-K3" }
+    ],
+    newModelIds: ["sn-deepseek-v4-1-flash-1017"]
+  };
+  routes.length = 0;
+  selection.next = { provider: "sensenova-raccoon", model: "sn-deepseek-v4-1-flash-1017" };
+  // Reaching the new answer takes a REMOUNT for the same reason the signed-out
+  // frame below does: polling reloads on a cadence, not on every render.
+  pill.unmount();
+  routes.length = 0;
+  pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  check("a gateway addition rides the reading as a count, named in the tooltip",
+    text().includes("composer.raccoonPrefix · 42,150 composer.balanceUnit · 1 composer.raccoonNewModels")
+      && button()?.getAttribute("title")?.includes(
+        "composer.raccoonNewModelsTitleDeepSeek-V4.1-Flash-1017"
+      ) === true
+      && button()?.getAttribute("title")?.includes("composer.raccoonNewModelsTitleKimi-K3") === false,
+    `text=${text().slice(0, 200)} title=${button()?.getAttribute("title")}`);
+  check("the marker adds no chip: the pill still draws exactly one dot",
+    pill.host.querySelectorAll(".dsh-sensenova-composer-pill-dot").length === 1,
+    String(pill.host.querySelectorAll(".dsh-sensenova-composer-pill-dot").length));
+
+  // A roster read that knows of nothing fresh must not leave an empty marker,
+  // and neither must a Raccoon balance that predates this field (old producer).
+  raccoonState = { ok: true, loggedIn: true, balance: 42150, models: [{ id: "sn-kimi-k3", name: "Kimi-K3" }] };
+  pill.unmount();
+  routes.length = 0;
+  pill = mount(React.createElement(panel.components.ComposerUsagePill, { tt, useProjection }));
+  await act(async () => { await sleep(0); });
+  check("no fresh ids and an absent field both paint no marker",
+    !text().includes("composer.raccoonNewModels")
+      && !String(button()?.getAttribute("title")).includes("composer.raccoonNewModelsTitle"),
+    `text=${text().slice(0, 160)}`);
+
   // Signed out is a DIFFERENT fact from unreadable, and the pill has to say
   // which one it is — a grey dash beside a pool percentage was the old answer,
   // and it left the reader guessing. Reaching the new answer takes a REMOUNT:

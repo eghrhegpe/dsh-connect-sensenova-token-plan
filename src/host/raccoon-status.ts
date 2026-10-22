@@ -129,6 +129,13 @@ export interface RaccoonStatusDeps {
   login: RaccoonLoginView;
   /** The web_search opt-in store (`raccoon-web-store.ts`), or absent. */
   webSearchStore?: any;
+  /**
+   * The first-sighting history (`raccoon-roster-seen-store.ts`), or absent.
+   *
+   * Only asked on a LIVE catalogue read: the fallback table is this plugin's
+   * own text, so a diff against it would announce our rows as gateway news.
+   */
+  rosterSeenStore?: any;
   /** The config-level `webSearchEnabled` (host-config.ts), default off. */
   webSearchConfig?: boolean;
 }
@@ -333,6 +340,22 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
   // The pushed-model curation, so the tab's checkboxes render the saved list
   // (`null` = the panel never curated — the whole roster pushes).
   const savedIds = await optional(switchStore ? switchStore.enabledIds() : null);
+  // Which roster ids the user has not seen yet. The gateway publishes no
+  // "listed since" field (the 1017 row carries description / tags / params /
+  // billing and nothing else), so the only honest answer is a diff against a
+  // roster THIS plugin wrote down — the same one the pill renders, which is
+  // why the marker can only be as trustworthy as the persisted history
+  // (`raccoon-roster-seen-store.ts` states the seed / drop / window rules).
+  //
+  // A failing history read is not a failed status: `optional()` swallows it
+  // and the field stays absent, which reads as "nothing new" — the safe
+  // direction, because a marker is a suggestion, not a fact the tab needs.
+  let newModelIds: string[] | null = null;
+  if (rosterLive && deps.rosterSeenStore) {
+    const ids = (models ?? []).map((row: RaccoonModel) => (typeof row?.id === "string" ? row.id : "")).filter((id: string) => id !== "");
+    const noted = await optional(deps.rosterSeenStore.note(ids));
+    if (Array.isArray(noted?.newIds) && noted.newIds.length > 0) newModelIds = noted.newIds;
+  }
   // The pending scan is read LAST, after the reads above, because it is the
   // one fact here that a settling walk can legitimately clear mid-request: a
   // walk that finished during those awaits has taken its scan away, and
@@ -393,6 +416,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
     ...diagnostics,
     models: roster,
     modelsSource,
+    ...pickDefined({ newModelIds }),
     enabledModelIds: savedIds,
     providerRegistered: publisherState?.registered === true,
     ...pickDefined({ providerError: publisherState?.error }),

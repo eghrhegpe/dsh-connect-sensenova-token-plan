@@ -81,6 +81,23 @@ export const zh = {
   "composer.poolFallback": "本模型未列入任何池，此处按平台顺序取第一个池",
   "composer.raccoonSignedOut": "未登录小浣熊（余额见小浣熊 tab）",
   "composer.raccoonUnknown": "积分余额未知（见小浣熊 tab）",
+  // The roster's "something appeared" marker. It rides BESIDE the balance
+  // because a new model is a fact about what the gateway offers, not about
+  // what is left — and it is the only surface that can say it without the user
+  // having to open the Raccoon tab on the day it happens (the 1017 addition
+  // went unseen for weeks). Wording is a count noun, so the number in front
+  // composes in both languages: "1 新模型" / "2 新模型", "1 new" / "2 new".
+  //
+  // The tooltip says 本机首次见到, NOT 网关新增: the plugin has no gateway
+  // "listed since" field (ADR-017 复核条件), so what it actually knows is the
+  // moment THIS profile first saw the id. Claiming "网关新增" would state a
+  // gateway fact on the plugin's behalf — the same overclaim ADR-016 exists to
+  // stop. A second profile legitimately shows its own first-sightings, which
+  // "本机" makes true and "网关" would make a lie.
+  "composer.raccoonNewModels": "新模型",
+  "composer.raccoonNewModelsRow": "本机新见",
+  "composer.raccoonNewModelsTitle": "本机首次见到的模型：",
+  "composer.raccoonNewModelsSep": "、",
   "auth.title": "连接商汤控制台",
   "auth.registerHint": "还没有账号？前往官网注册，免费开通 Token Plan 额度 →",
   "auth.portalHint": "前往官网管理额度 / 获取 API Key →",
@@ -310,6 +327,15 @@ export const en: typeof zh = {
   "composer.poolFallback": "no pool lists this model — showing the first pool the platform returned",
   "composer.raccoonSignedOut": "not signed in to Raccoon (balance in the Raccoon tab)",
   "composer.raccoonUnknown": "balance unknown (see the Raccoon tab)",
+  // "1 new" / "2 new" reads as a toolbar chip; the tooltip and the popover row
+  // carry the names, so the pill itself stays a count. The tooltip says "first
+  // seen on this device", not "new in the gateway" — there is no gateway
+  // "listed since" field, and stating a gateway fact the plugin cannot know is
+  // the overclaim ADR-016 exists to stop (see the zh note for the same rule).
+  "composer.raccoonNewModels": "new",
+  "composer.raccoonNewModelsRow": "New here",
+  "composer.raccoonNewModelsTitle": "First seen on this device: ",
+  "composer.raccoonNewModelsSep": ", ",
   "auth.title": "Connect the SenseNova console",
   "auth.registerHint": "No account yet? Register on the official site for a free Token Plan quota →",
   "auth.portalHint": "Manage quota / get API keys on the official site →",

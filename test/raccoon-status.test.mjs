@@ -114,8 +114,8 @@ function stubRead(table = {}) {
   };
 }
 
-function deps({ store = fakeStore(), login = fakeLogin(), read = stubRead(), publisher = null, switchStore = fakeSwitch() } = {}) {
-  return { store, switchStore, publisher, read, login: login.view };
+function deps({ store = fakeStore(), login = fakeLogin(), read = stubRead(), publisher = null, switchStore = fakeSwitch(), rosterSeenStore = undefined } = {}) {
+  return { store, switchStore, publisher, read, login: login.view, ...(rosterSeenStore ? { rosterSeenStore } : {}) };
 }
 
 const BALANCE_HIT = { total: 1234, daily: 0, reward: 5, monthly: undefined, topup: undefined };
@@ -426,6 +426,73 @@ try {
   }
 } catch (error) {
   fail("E: the roster's three sources", error);
+}
+
+// === E2. the roster's first sighting: what the pill's "＋N 新" reads ========
+// The diff itself is `raccoon-roster-seen-store.ts` (its own suite pins seed /
+// growth / window / drop). What this section pins is the READ MODEL's half:
+// it must ask ONLY on a live catalogue — the fallback table is this plugin's
+// own text, so a diff against it would announce our rows as gateway news —
+// and it must survive a history store that throws.
+try {
+  const recordingSeen = (result) => {
+    const calls = [];
+    return {
+      calls,
+      store: {
+        async note(ids) {
+          calls.push(ids);
+          return typeof result === "function" ? result() : result;
+        }
+      }
+    };
+  };
+  {
+    const seen = recordingSeen({ newIds: ["sn-live-1"] });
+    const answer = await readRaccoonStatus(deps({ read: stubRead({ catalog: CATALOG_HIT }), rosterSeenStore: seen.store }));
+    check("E6 a live catalogue is diffed against the history and reports the fresh ids",
+      JSON.stringify(answer.newModelIds) === JSON.stringify(["sn-live-1"])
+        && JSON.stringify(seen.calls) === JSON.stringify([["sn-live-1"]]),
+      `${JSON.stringify(answer.newModelIds)} calls=${JSON.stringify(seen.calls)}`);
+    check("E6 the diff is asked for the FULL live roster, not a curated subset",
+      seen.calls.length === 1 && seen.calls[0].length === CATALOG_HIT.length, JSON.stringify(seen.calls));
+  }
+  {
+    const seen = recordingSeen({ newIds: [] });
+    const answer = await readRaccoonStatus(deps({ read: stubRead({ catalog: CATALOG_HIT }), rosterSeenStore: seen.store }));
+    check("E7 nothing fresh means the field is absent, not an empty array",
+      answer.newModelIds === undefined && "newModelIds" in answer === false, JSON.stringify(answer.newModelIds));
+  }
+  {
+    // The fallback path must never touch the history: if it did, the FIRST
+    // read on a signed-out/offline host would seed our own six rows and the
+    // first live catalogue afterwards would then read all seven as new.
+    const seen = recordingSeen({ newIds: ["sn-fallback-noise"] });
+    const answer = await readRaccoonStatus(deps({
+      read: stubRead({ catalog: () => Promise.reject(new Error("gateway down")) }),
+      rosterSeenStore: seen.store
+    }));
+    check("E8 an unreadable catalogue neither diffs nor invents a marker",
+      answer.newModelIds === undefined && seen.calls.length === 0, JSON.stringify(seen.calls));
+    const noCatalog = recordingSeen({ newIds: ["sn-fallback-noise"] });
+    const empty = await readRaccoonStatus(deps({ read: stubRead({ catalog: null }), rosterSeenStore: noCatalog.store }));
+    check("E8 an empty catalogue does not diff the fallback table either",
+      empty.newModelIds === undefined && noCatalog.calls.length === 0, JSON.stringify(noCatalog.calls));
+  }
+  {
+    // A failing history file is a missing marker, never a broken tab: the
+    // status answer must still carry the roster and the balance.
+    const answer = await readRaccoonStatus(deps({
+      read: stubRead({ catalog: CATALOG_HIT, balance: BALANCE_HIT }),
+      rosterSeenStore: { note: async () => { throw new Error("unreadable state file"); } }
+    }));
+    check("E9 a throwing history store degrades to no marker, not a failed status",
+      answer.ok === true && answer.newModelIds === undefined && answer.models.length === CATALOG_HIT.length
+        && answer.balance === 1234,
+      JSON.stringify({ ok: answer.ok, newModelIds: answer.newModelIds, balance: answer.balance }));
+  }
+} catch (error) {
+  fail("E2: the roster's first sighting", error);
 }
 
 // === F. switch, publisher and the expiry facts =============================

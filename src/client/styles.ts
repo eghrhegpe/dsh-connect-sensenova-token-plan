@@ -284,6 +284,12 @@ export const S = {
   // The stale mark is a footnote, not a reading — the dot and the numbers
   // already say the data is old; this only says WHY the numbers may lag.
   pillStale: { color: "var(--dsw-alias-label-tertiary)" },
+  // The "new model" marker rides BESIDE the reading as a third segment, so it
+  // gets the plan label's weight: this is a fact about the roster, not about
+  // the balance, and tinting it like the balance would make a toolbar count
+  // read as a quota figure. No chip background either — the pill's own row is
+  // 28px tall and a filled chip here would compete with the tier dot.
+  pillNewTag: { color: "var(--dsw-alias-label-secondary)", flexShrink: 0 },
   // Tier ink from the shell's own state tokens (`--dsw-alias-state-*`), not
   // plugin hexes: a retheme or a light/dark switch recolours the pill with the
   // rest of the window. The hexes are fallbacks for a shell that defines

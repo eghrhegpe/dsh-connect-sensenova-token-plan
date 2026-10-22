@@ -840,9 +840,32 @@ function RaccoonPill({ tt }: { tt: Tt }) {
   const reading = balance === null
     ? "—"
     : `${count(balance)} ${tt("composer.balanceUnit")}`;
+  // The models the gateway added since this plugin first wrote them down.
+  //
+  // This is the pill's ONLY non-quota fact, and it earns the space: the
+  // balance answers "can I afford it", while "a new model exists" is the one
+  // thing a user cannot infer from any number here. The 1017 build sat in the
+  // gateway unseen for weeks precisely because the only surface that knew was
+  // a tab nobody had opened that day.
+  //
+  // Names, not ids: `state.models` is the same roster the tab renders, so the
+  // display name the user will see in the picker is a lookup, not a second
+  // source. Capped at three — past that the marker is about a BULK change and
+  // the count is the useful part, the list belongs in the popover.
+  const newIds = state?.newModelIds ?? [];
+  const newNames = newIds.map((id) => {
+    const row = state?.models?.find((model) => model.id === id);
+    return row?.name ?? row?.id ?? id;
+  });
+  const shownNames = newNames.slice(0, 3);
+  const newModelTitle = newIds.length === 0
+    ? null
+    : `${tt("composer.raccoonNewModelsTitle")}${shownNames.join(tt("composer.raccoonNewModelsSep"))}${newIds.length > shownNames.length ? "…" : ""}`;
+
   const title = [
     tt("composer.raccoonTitle"),
     signedOut ? tt("composer.raccoonSignedOut") : balance === null ? tt("composer.raccoonUnknown") : null,
+    newModelTitle,
     stale ? tt("composer.stale") : null
   ]
     .filter(Boolean)
@@ -903,6 +926,19 @@ function RaccoonPill({ tt }: { tt: Tt }) {
             { key: "parts", style: S.pillPopoverParts },
             h("div", { style: S.pillPopoverPartsLabel }, tt("composer.balanceParts")),
             partRows
+          ),
+      // The roster's news, as a row of the same popover the balance lives in:
+      // the pill says "1 新模型", this says WHICH. It reuses the SAME capped
+      // list (shownNames) the tooltip renders — one fact, one wording across
+      // both surfaces (ADR-017), and no risk of the popover turning into a
+      // two-hundred-row wall when the gateway bulk-adds or the store misbehaves.
+      newIds.length === 0
+        ? null
+        : h(
+            "div",
+            { key: "newModels", style: S.pillPopoverParts },
+            h("div", { style: S.pillPopoverPartsLabel }, tt("composer.raccoonNewModelsRow")),
+            h("div", { style: S.pillPopoverRowLine }, h("span", { style: S.pillPopoverFigure }, `${shownNames.join(tt("composer.raccoonNewModelsSep"))}${newIds.length > shownNames.length ? "…" : ""}`))
           )
     ]
   });
@@ -917,6 +953,17 @@ function RaccoonPill({ tt }: { tt: Tt }) {
     onToggle: toggle,
     onClose: close,
     panel,
-    children: h("span", { style: S.pillReading }, pending ? "…" : reading)
+    children: h(
+      "span",
+      { style: S.pillReading },
+      pending ? "…" : reading,
+      // A third segment rather than a chip or a dot: the pill already uses its
+      // dot for the tier, and a second coloured mark would read as a second
+      // quota state. Muted label ink (S.pillNewTag) keeps it subordinate to
+      // the number it sits beside.
+      newIds.length === 0
+        ? null
+        : h("span", { style: S.pillNewTag }, ` · ${newIds.length} ${tt("composer.raccoonNewModels")}`)
+    )
   });
 }

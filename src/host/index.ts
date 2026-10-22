@@ -40,6 +40,7 @@ import { createApiKeyStore } from "./api-key-store.ts";
 import { createRaccoonStore } from "./raccoon-store.ts";
 import { createFileRaccoonStore } from "./raccoon-switch-store.ts";
 import { createFileRaccoonWebStore } from "./raccoon-web-store.ts";
+import { createFileRaccoonRosterSeenStore } from "./raccoon-roster-seen-store.ts";
 import { createRaccoonPublisher } from "./raccoon-publish.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
@@ -245,6 +246,11 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     return live?.accessToken ?? "";
   };
   const raccoonWebStore = createFileRaccoonWebStore({ profile, logger: ctx.logger });
+  // "Which roster ids has the user not seen yet" — the only persistent fact
+  // the pill's "＋N 新" marker needs. Its own file (not the switch store's)
+  // because the switch payload is a versioned contract with three writers, and
+  // a switch flip must not be able to reset the history as a side effect.
+  const raccoonRosterSeen = createFileRaccoonRosterSeenStore({ profile, logger: ctx.logger });
   const raccoonPublisher = createRaccoonPublisher({
     panelSwitch: () => raccoonSwitch.enabled().catch(() => null),
     resolveToken: resolveRaccoonToken,
@@ -338,6 +344,10 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     resolveRaccoonToken,
     webSearchStore: raccoonWebStore,
     webSearchRestore: { current: null },
+    // The roster's first-sighting history: read by the Raccoon route's status
+    // model so the pill can mark a model the gateway added after the user's
+    // last look, and so nothing else has to remember it.
+    raccoonRosterSeen,
     // What the panel's `webSearch` route calls so a flip applies in-session
     // (drop the taken-over selection, then re-register against the new value).
     reconcileWebSearch: () => reconcileWebSearch(ctx, wiring),
