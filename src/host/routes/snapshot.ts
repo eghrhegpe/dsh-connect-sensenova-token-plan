@@ -13,7 +13,7 @@ import { buildSnapshotBody, failureCode } from "../snapshot-aggregate.ts";
 import { CODE } from "../codes.ts";
 import { optional } from "../util.ts";
 import { degrade } from "../util.ts";
-import { drawToolNote } from "../draw-tool-state.ts";
+import { drawToolMounted, drawToolNote } from "../draw-tool-state.ts";
 import { writeJson, refuseMethod, withOrigin, redactedError } from "./http.ts";
 import type { Wiring } from "../types.ts";
 
@@ -82,6 +82,9 @@ export function registerSnapshotRoute(ctx: any, wiring: Pick<Wiring, "settings" 
           // edge), keeping the aggregation below free of any module-global
           // state — the same injection pattern as the two switch readers.
           drawToolNote: () => drawToolNote(),
+          // The present-tense bit beside the note: "switch on, no note, not
+          // mounted" is what the panel renders as "still mounting".
+          drawToolMounted: () => drawToolMounted(),
           // A drained pool that names no models blocks nothing and banners
           // nothing; the drift is only visible in the log. The HTTP edge owns
           // the logger, the aggregator stays pure.

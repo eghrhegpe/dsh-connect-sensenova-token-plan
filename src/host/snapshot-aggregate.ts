@@ -156,6 +156,7 @@ export async function buildSnapshotBody({
   drawSwitch,
   drawModelId,
   drawToolNote,
+  drawToolMounted,
   onShapeDrift
 }: {
   settings: import("./host-config.ts").ResolvedSettings;
@@ -179,6 +180,15 @@ export async function buildSnapshotBody({
   drawSwitch?: () => Promise<boolean | null>;
   drawModelId?: () => Promise<string | null>;
   drawToolNote?: () => DrawToolAbsentReason | null;
+  /**
+   * Whether the tool is in the registry RIGHT NOW (`drawToolMounted()`).
+   *
+   * Same closure-injection rule as `drawToolNote` — the aggregator never
+   * imports the state module. Both are needed: the note says why an attempt
+   * failed, this says whether one has settled, and "switch on, no note, not
+   * mounted" is the only reading that means "still mounting".
+   */
+  drawToolMounted?: () => boolean;
   /**
    * Called when the quota payload is READABLE but a drained pool names no
    * usable models — the one drift that silently disables quota protection
@@ -337,6 +347,10 @@ export async function buildSnapshotBody({
   // from config" for the other, a self-contradictory pair the panel would then
   // render. Mirrors the provider switch above.
   const effectiveDrawPanelSwitch = await drawSwitch?.().catch(() => null) ?? null;
+  // Resolved once: the llm block reports this value AND derives `mountPending`
+  // from it, and two call sites of the same pure precedence rule is exactly how
+  // a self-contradictory pair gets in ("switch on" next to "not pending").
+  const drawEnabled = resolveSwitchEnabled(effectiveDrawPanelSwitch, settings.drawEnabled);
   // The curated allow-list is read on every poll, not only when a fresh
   // catalogue arrived: a /models save must reach the picker even on a poll
   // that serves a cached catalogue.
@@ -475,7 +489,7 @@ export async function buildSnapshotBody({
     // "unknown" is a Host-side fact, and the client already renders an absent
     // list correctly, so there is no third value to add to the contract.
     quotaBlockedModelIds: effectiveUnavailable,
-    drawEnabled: resolveSwitchEnabled(effectiveDrawPanelSwitch, settings.drawEnabled),
+    drawEnabled,
     drawSource: switchSource(effectiveDrawPanelSwitch),
     // Emitted ONLY when the switch is on and the tool never registered — the
     // one normal absence the copy (`draw.noTools`) names, plus the two Host
@@ -489,6 +503,10 @@ export async function buildSnapshotBody({
       const note = drawToolNote?.();
       return note ? { drawToolNote: note } : {};
     })(),
+    // The switch is on but no pass has settled yet. Not an absence — nothing
+    // failed — so it is its own bit, and the client shows "still mounting"
+    // only when the note is silent (a note already explains the delay).
+    mountPending: drawEnabled === true && drawToolMounted?.() !== true,
     // A draw call's actual target model, picked by the same precedence the
     // tool itself uses (`pickDrawModel`) over the same normalized catalog —
     // so the panel's line and the tool's behavior cannot disagree. Emitted

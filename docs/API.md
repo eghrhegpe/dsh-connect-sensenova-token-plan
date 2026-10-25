@@ -58,6 +58,10 @@
     "enabledModelIds": [],
     // 出图工具开关生效值与来源（0.4.2）；工具随开关在同一会话内即时挂载/卸载
     "drawEnabled": false, "drawSource": "config",
+    // 开关开着、但这轮注册还没落定（刚启动，或刚翻开关、排队的那次还在跑）。
+    // 与 drawToolNote 互补：有 note = 这就是没挂上的原因；note 缺席且此位为
+    // true = 正在挂载；两者都没有 = 就是没开。开关关着时恒为 false
+    "mountPending": false,
     // 一次出图调用实际会寻址的模型 id：用与工具本身相同的 pickDrawModel
     // 优先级（调用参数 > 配置的 drawModelId > 目录首个出图模型）从同一份
     // 目录算出，面板展示与工具行为不会分叉。目录缺席（无 Key）时整个字段缺席

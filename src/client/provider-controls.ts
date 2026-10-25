@@ -198,6 +198,12 @@ export function DrawSwitch({ llm, onDone, tt }: {
   // exactly the confusion the line exists to prevent.
   const note = llm?.drawToolNote;
   const absentKey = drawAbsentKey(note);
+  // "Switch on, nothing failed, not mounted" is the one state neither the
+  // switch nor a reason can describe: the pass has not settled yet (boot, or a
+  // flip whose queued pass is still running). A note, when there is one,
+  // already says why the delay happened — printing "still mounting" beside it
+  // would contradict the line above it.
+  const mountPending = llm?.mountPending === true && absentKey === null && enabled;
   const statusText = absentKey !== null && (enabled || note === "not-removable")
     ? tt(absentKey)
     : enabled
@@ -286,6 +292,11 @@ export function DrawSwitch({ llm, onDone, tt }: {
   const noListHint = hasKey && candidates.length === 0
     ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 4 } }, tt("draw.noCandidates"))
     : null;
+  // Warn-toned, not muted: this one says "the thing you asked for is not there
+  // YET", which is a transient the user should wait out, not a footnote.
+  const pendingHint = mountPending
+    ? h("div", { style: { ...S.muted, fontSize: 12, marginTop: 4, color: "var(--dsw-alias-state-warn-primary)" } }, tt("draw.mountPending"))
+    : null;
   // The switch row is just the control; the status lead-in gets its own
   // line — it introduces the model rows below, and squeezed next to the
   // label it read as a comment on the switch instead.
@@ -301,6 +312,7 @@ export function DrawSwitch({ llm, onDone, tt }: {
       title: tt("draw.switchTitle")
     }),
     h("div", { style: { ...S.muted, fontSize: 12, marginTop: 4 } }, statusText),
+    pendingHint,
     pickerRows,
     noListHint,
     switchError ? h("div", { style: S.formError, role: "alert" }, switchError) : null

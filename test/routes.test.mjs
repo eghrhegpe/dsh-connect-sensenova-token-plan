@@ -1423,6 +1423,31 @@ async function withNetwork(stub, body) {
     check("R9c switching off releases the tool without a restart",
       switchedOff.payload.ok === true && live.length === 0 && disposed === 2,
       `live=${JSON.stringify(live)} disposed=${disposed}`);
+
+    // R9d/R9e: the poll's "switch on, not in the registry" bit. The switch
+    // being on is not the same fact as the tool being registered, and the
+    // panel needs both to tell "mounting" from "absent": a Host with no
+    // tools service reports pending with a reason, one that mounted reports
+    // neither.
+    const noToolsCall = await mount(credentials, { drawEnabled: true });
+    // R7 left a panel-saved "off" in this state directory; forget it so the
+    // config default (on) is the value under test.
+    await noToolsCall(DRAW_PATH, makePost({ forget: true }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const noToolsPoll = await noToolsCall(SNAPSHOT_PATH, makeRequest());
+    check("R9d a switch-on Host with no registry reports the tool as pending, with the reason",
+      noToolsPoll.payload.ok === true && noToolsPoll.payload.llm?.mountPending === true &&
+        noToolsPoll.payload.llm?.drawToolNote === "no-tools-service",
+      JSON.stringify({ pending: noToolsPoll.payload.llm?.mountPending, note: noToolsPoll.payload.llm?.drawToolNote }));
+    const mountedCall = await mount(credentials, { drawEnabled: true }, {
+      tools: { register: () => () => {} },
+      loadToolsModule: async () => ({ defineTool: (definition) => definition })
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const mountedPoll = await mountedCall(SNAPSHOT_PATH, makeRequest());
+    check("R9e a Host that mounted the tool reports it as settled, not pending",
+      mountedPoll.payload.llm?.mountPending === false && mountedPoll.payload.llm?.drawToolNote === undefined,
+      JSON.stringify({ pending: mountedPoll.payload.llm?.mountPending, note: mountedPoll.payload.llm?.drawToolNote }));
   } catch (error) { fail("R: the draw switch route", error); }
 }
 

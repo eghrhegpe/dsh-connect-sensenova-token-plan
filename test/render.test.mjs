@@ -882,7 +882,8 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     hasApiKey: true,
     drawModel: "sensenova-u1.5-lite",
     drawCandidateIds: ["sensenova-u1-fast", "sensenova-u1.5-lite"],
-    drawPreferredModel: "sensenova-u1.5-lite"
+    drawPreferredModel: "sensenova-u1.5-lite",
+    mountPending: false
   };
   const drawTree = treeOf(render.DrawSwitch, { llm: drawLlm, tt });
   const drawText = texts(drawTree);
@@ -931,6 +932,32 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       typeof surface.dictionaries.zh[key] === "string"
         && typeof surface.dictionaries.en[key] === "string"),
     absentReasons.map(({ key }) => `${surface.dictionaries.zh[key]} / ${surface.dictionaries.en[key]}`).join(" || "));
+  // The mounting transient: switch on, nothing failed, not in the registry
+  // YET. It is the one state neither the switch nor a reason can state, and
+  // it must yield to a reason — two lines about the same state, one of them
+  // "still mounting" beside "the Host refused it", is worse than one.
+  {
+    const pending = texts(treeOf(render.DrawSwitch, { llm: { ...drawLlm, mountPending: true }, tt })).join("\n");
+    check("a mount that has not settled says it is still mounting",
+      pending.includes("draw.mountPending"), pending);
+    const settled = texts(treeOf(render.DrawSwitch, { llm: drawLlm, tt })).join("\n");
+    check("a settled mount does not claim to be still mounting",
+      !settled.includes("draw.mountPending"), settled);
+    const failed = texts(treeOf(render.DrawSwitch, {
+      llm: { ...drawLlm, mountPending: true, drawToolNote: "registry-refused" }, tt
+    })).join("\n");
+    check("a named absence wins over the mounting transient",
+      failed.includes("draw.noToolsRefused") && !failed.includes("draw.mountPending"), failed);
+    const off = texts(treeOf(render.DrawSwitch, {
+      llm: { ...drawLlm, drawEnabled: false, mountPending: true }, tt
+    })).join("\n");
+    check("the mounting transient never shows with the switch off",
+      !off.includes("draw.mountPending"), off);
+    check("the mounting line exists in zh and en",
+      typeof surface.dictionaries.zh["draw.mountPending"] === "string"
+        && typeof surface.dictionaries.en["draw.mountPending"] === "string",
+      `${surface.dictionaries.zh["draw.mountPending"]} / ${surface.dictionaries.en["draw.mountPending"]}`);
+  }
   // The sticky line is the one that must render with the switch OFF: the tool
   // is mounted and cannot be withdrawn, so "off" would be a lie.
   {

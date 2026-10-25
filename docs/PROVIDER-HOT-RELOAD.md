@@ -94,8 +94,8 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 | `dsh-connect-workbuddy` | Cordis 配置字段（schemastery 声明、volatile） | 宿主自己发 `loader/volatile-update` 事件 | 事件里直接读当前配置，注册/撤销二选一 |
 | `dsh-connect-modelscope-token-plan` | 插件私有状态文件 | 路由保存后 `await mount.sync()` | `sync()` 串成一条 Promise 链，四种缺席原因（含 `not-removable`），另有 `mounted()` 位供面板表达「开着但还没挂上」 |
 | `dsh-connect-agnes-token-plan` | 插件私有状态文件 | 路由保存后 fire-and-forget 调 `mount.sync()` | 同样一条链；出图与出视频共用一份降级阶梯；无 `not-removable` |
-| 本插件 | 插件私有状态文件 | 路由保存后 `await reconcileDrawTool()` | 一条按 wiring 分身的 Promise 队列；`not-removable` 走独立原因码 |
+| 本插件 | 插件私有状态文件 | 路由保存后 `await reconcileDrawTool()` | 一条按 wiring 分身的 Promise 队列；`not-removable` 走独立原因码；`mounted()` 位供面板表达「开着但还没挂上」 |
 
 workbuddy 那条路最省事，代价是开关必须是**宿主看得见的配置**。本插件的开关是 HTTP 路由写进私有状态文件的，宿主全程不知情，所以「保存之后自己重新应用一遍」这一步躲不掉——这是本文 §3 选自有状态 + 自有路由的必然结果，不是实现上的疏漏。
 
-本插件与 modelscope 的差别只在表达力：modelscope 额外维护一个 `mounted()` 位，能在「开关已开、注册尚未落定」的窗口里给面板一句 `mountPending`。本插件的收敛在同一个请求内完成，那个窗口只有读一次状态文件的耗时，所以没引入这个位——真要出现长时间未落定，那是 bug，不该由 UI 常态表达。
+表达力上四家也在收敛：modelscope 与本插件都维护一个 `mounted()` 位，在「开关已开、注册尚未落定」的窗口里给面板一句 `mountPending`。本插件一度没引入它，理由是收敛在同一个请求内完成、窗口只有读一次状态文件的耗时——但那个理由只覆盖了**翻转**，没覆盖**启动**：Host 刚起来、第一次注册 pass 还在排队时，开关是开的、没有任何缺席原因、工具也确实不在，面板只能读成「开着但什么都没有」。所以现在补上了这个位，判定与 modelscope 同一表达式（`drawEnabled === true && drawToolMounted() !== true`），差别只在于它与缺席原因**互斥**：有原因就不再叠「正在挂载」，原因已经说明了为什么没挂上。

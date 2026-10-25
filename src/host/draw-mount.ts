@@ -20,7 +20,7 @@
  */
 import { defineDrawTool } from "./draw.ts";
 import { resolveServiceWithRetry, degrade } from "./util.ts";
-import { resetDrawToolNote, setDrawToolNote } from "./draw-tool-state.ts";
+import { resetDrawToolNote, setDrawToolNote, setDrawToolMounted } from "./draw-tool-state.ts";
 import { resolveSwitchEnabled } from "./switch-precedence.ts";
 import type { Wiring } from "./types.ts";
 
@@ -133,8 +133,10 @@ export type DrawToolWiring = Pick<Wiring,
 export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: DrawToolWiring, side: DrawToolSide) {
   const { settings, configError, providerState, catalogStore, resolveApiKey, publisher, drawStore } = wiring;
   const { loadToolsModule, drawFetch } = side;
-  // Recompute the absence note on every attempt: a late tools service that
-  // finally registers must CLEAR it, not leave a stale "absent" on the panel.
+  // Recompute both panel bits on every attempt: a late tools service that
+  // finally registers must CLEAR the stale "absent", and the mounted bit must
+  // go false the moment this attempt starts deciding again — otherwise a
+  // failed re-registration would leave "mounted" true over a tool that is gone.
   resetDrawToolNote();
   if (configError !== null) return;
   // The panel's saved switch beats the patch default — resolved by the one
@@ -221,6 +223,7 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
       // Hold the disposer so a later switch flip can drop this tool.
       wiring.drawRestore.current = dispose as () => void;
       state.sticky = false;
+      setDrawToolMounted(true);
     } else {
       // An older registry accepts the definition but hands back no disposer:
       // the tool WORKS and cannot be withdrawn. Two things follow, and both
@@ -231,6 +234,9 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
       // honest state is "mounted, not swappable", not a retry loop.
       wiring.drawRestore.current = null;
       state.sticky = true;
+      // Mounted, just not withdrawable: the mounted bit is true and the reason
+      // rides alongside it, which is exactly the pair the panel needs.
+      setDrawToolMounted(true);
       setDrawToolNote("not-removable");
       degrade("draw: tools registry accepted the tool but returned no disposer — this Host cannot unmount it", null, wiring.logger, null);
     }
@@ -324,4 +330,8 @@ export function closeDrawTool(wiring: Pick<Wiring, "drawRestore">): void {
       // The registry may already be gone during shutdown.
     }
   }
+  // The tool is gone as of now, and nothing else will recompute this bag: the
+  // pass gate above stops every later pass. Leaving the bit true would have
+  // the panel report a mounted tool on a Host that is shutting down.
+  setDrawToolMounted(false);
 }

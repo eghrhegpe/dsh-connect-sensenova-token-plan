@@ -17,7 +17,7 @@
  * Nothing here imports a Host peer or opens a socket.
  */
 import { readFileSync } from "node:fs";
-import { drawToolNote } from "../src/host/draw-tool-state.ts";
+import { drawToolMounted, drawToolNote, resetDrawToolNote } from "../src/host/draw-tool-state.ts";
 import {
   DRAW_TOOL_NAME,
   DRAW_COOLDOWN_MS,
@@ -453,6 +453,8 @@ async function rejects(fn) {
         registered.length === 1 && reads === 2, `registered=${registered.length} reads=${reads}`);
       check("a successful registration does NOT mark the tool absent",
         drawToolNote() === null, `drawToolNote=${drawToolNote()}`);
+      check("a successful registration reports the tool as mounted",
+        drawToolMounted() === true, `drawToolMounted=${drawToolMounted()}`);
     }
     // The one normal absence the panel states: the switch is on but the tools
     // service carries no `register` function, so the tool never registered.
@@ -474,6 +476,10 @@ async function rejects(fn) {
       await registerDrawTool(ctx, wiring, side);
       check("no tools service names that reason for the panel copy",
         drawToolNote() === "no-tools-service", `drawToolNote=${drawToolNote()}`);
+      // A named reason and "mounted" are separate facts: this one explains
+      // why the attempt failed, and the tool is emphatically not there.
+      check("a failed attempt reports the tool as not mounted",
+        drawToolMounted() === false, `drawToolMounted=${drawToolMounted()}`);
     }
     // The two Host-bug reasons: a peer that fails to load, and a registry that
     // refuses the registration. Both must name THEIR reason, so the panel tells
@@ -495,12 +501,16 @@ async function rejects(fn) {
       await registerDrawTool({ get: () => ({ register: () => {} }) }, wiring, side);
       check("a peer that fails to load names that reason",
         drawToolNote() === "peer-load-failed", `drawToolNote=${drawToolNote()}`);
+      check("a peer that fails to load is not reported as mounted",
+        drawToolMounted() === false, `drawToolMounted=${drawToolMounted()}`);
 
       const sideRefuse = { loadToolsModule: async () => ({ defineTool: () => ({ name: "x" }) }), drawFetch: async () => ({}) };
       const refusing = { register: () => { throw new Error("registry says no"); } };
       await registerDrawTool({ get: () => refusing }, wiring, sideRefuse);
       check("a registry that refuses names that reason",
         drawToolNote() === "registry-refused", `drawToolNote=${drawToolNote()}`);
+      check("a registry that refuses is not reported as mounted",
+        drawToolMounted() === false, `drawToolMounted=${drawToolMounted()}`);
     }
     // reconcileDrawTool: the in-session flip. A tool cannot be registered
     // twice under one name, so the flip MUST release the held registration
@@ -540,6 +550,10 @@ async function rejects(fn) {
       check("a reconcile with the switch off registers nothing and holds nothing",
         live.length === 0 && wiring.drawRestore.current === null,
         `live=${JSON.stringify(live)} slot=${typeof wiring.drawRestore.current}`);
+      // "Switch off" must also read as "not mounted" — the two bits are
+      // what the panel turns into its three states (off / mounting / absent).
+      check("a reconcile with the switch off reports the tool as not mounted",
+        drawToolMounted() === false, `drawToolMounted=${drawToolMounted()}`);
 
       panelOn = true;
       await reconcileDrawTool(ctx, wiring, side);
@@ -549,6 +563,8 @@ async function rejects(fn) {
       check("a successful registration arms the restore slot with the disposer",
         typeof wiring.drawRestore.current === "function",
         `slot=${typeof wiring.drawRestore.current}`);
+      check("a reconcile after an off->on flip reports the tool as mounted",
+        drawToolMounted() === true, `drawToolMounted=${drawToolMounted()}`);
 
       // The re-registration must read the CURRENT panel preference, not the
       // snapshot taken at mount — that snapshot was the other half of the
@@ -564,6 +580,8 @@ async function rejects(fn) {
       check("a reconcile after an on->off flip releases the tool and empties the slot",
         live.length === 0 && disposals.length === 2 && wiring.drawRestore.current === null,
         `live=${JSON.stringify(live)} disposals=${disposals.length} slot=${typeof wiring.drawRestore.current}`);
+      check("a reconcile after an on->off flip reports the tool as not mounted",
+        drawToolMounted() === false, `drawToolMounted=${drawToolMounted()}`);
 
       // Idempotence: reconciling twice at the same value must not stack
       // registrations — the second pass releases what the first one armed.
@@ -586,9 +604,21 @@ async function rejects(fn) {
         `slot=${typeof bareWiring.drawRestore.current} live=${JSON.stringify(live)}`);
       check("a peer that returns no disposer states that the tool cannot be withdrawn",
         drawToolNote() === "not-removable", `drawToolNote=${drawToolNote()}`);
+      // Mounted AND not withdrawable: the pair is the point. Reporting it as
+      // "not mounted" would hide a tool the agent still has.
+      check("a peer that returns no disposer still reports the tool as mounted",
+        drawToolMounted() === true, `drawToolMounted=${drawToolMounted()}`);
       await reconcileDrawTool({ get: () => bareTools }, bareWiring, side);
       check("a tool that cannot be withdrawn is not registered a second time",
         live.length === 2, `live=${JSON.stringify(live)}`);
+      // Every attempt starts by clearing BOTH bits, so a settled "mounted"
+      // can never survive into a pass that is still deciding. Without this
+      // the panel would keep saying "mounted" over a tool that is on its way
+      // out, and the reset is the only thing that makes the pair trustworthy.
+      resetDrawToolNote();
+      check("starting an attempt clears the mounted bit along with the reason",
+        drawToolMounted() === false && drawToolNote() === null,
+        `drawToolMounted=${drawToolMounted()} drawToolNote=${drawToolNote()}`);
     }
     // Concurrency: two flips that overlap must settle on the LAST value. The
     // switch read is deliberately slow so the second pass is queued while the
@@ -641,6 +671,8 @@ async function rejects(fn) {
       check("two overlapping flips settle on the last value (off means unmounted)",
         switchOn === false && live.length === 0 && wiring.drawRestore.current === null,
         `live=${JSON.stringify(live)} slot=${typeof wiring.drawRestore.current}`);
+      check("the settled value is what the mounted bit reports",
+        drawToolMounted() === false, `drawToolMounted=${drawToolMounted()}`);
     }
     // Shutdown: a pass queued behind the drain must not register into a Host
     // that is letting the plugin go.
@@ -674,6 +706,10 @@ async function rejects(fn) {
       closeDrawTool(wiring);
       check("closing the mount hands the tool back",
         live.length === 0 && wiring.drawRestore.current === null, `live=${JSON.stringify(live)}`);
+      // No pass will recompute this bag afterwards (the close gate stops
+      // them), so the close itself has to leave the bit false.
+      check("closing the mount reports the tool as not mounted",
+        drawToolMounted() === false, `drawToolMounted=${drawToolMounted()}`);
       await reconcileDrawTool(ctx, wiring, side);
       check("a reconcile after close does not resurrect the tool",
         live.length === 0, `live=${JSON.stringify(live)}`);
@@ -769,8 +805,18 @@ async function rejects(fn) {
     !aggregateSrc.includes('from "./draw-tool-state.ts"')
       && aggregateSrc.includes("drawToolNote?: () =>"),
     "snapshot-aggregate.ts drawToolNote wiring");
+  // Same rule for the second bit: it is a CLOSURE param too, so the "switch on
+  // but nothing settled yet" state cannot smuggle module state into the
+  // aggregator either.
+  check("the aggregator reads the mounted bit via a param, never an import",
+    !aggregateSrc.includes('from "./draw-tool-state.ts"')
+      && aggregateSrc.includes("drawToolMounted?: () =>"),
+    "snapshot-aggregate.ts drawToolMounted wiring");
   check("the snapshot route injects the absence reader",
     routeSrc.includes("drawToolNote: () => drawToolNote()"),
+    "routes/snapshot.ts injection");
+  check("the snapshot route injects the mounted reader",
+    routeSrc.includes("drawToolMounted: () => drawToolMounted()"),
     "routes/snapshot.ts injection");
 }
 

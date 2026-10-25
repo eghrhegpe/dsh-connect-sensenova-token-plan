@@ -171,6 +171,15 @@ export interface LlmData {
    * @see DrawToolAbsentReason
    */
   drawToolNote?: DrawToolAbsentReason;
+  /**
+   * The switch is on but the registration pass has not settled yet — the one
+   * state `drawToolNote` cannot describe, because nothing failed.
+   *
+   * Read together: note present = this is why it is missing; note absent and
+   * this true = still mounting (a boot, or a flip whose queued pass is
+   * running). Note absent and this false = simply off.
+   */
+  mountPending?: boolean;
   drawModel?: string;
   drawCandidateCount?: number;
   drawCandidateIds?: string[];

@@ -191,6 +191,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.noToolsPeer": "drawEnabled 已开启，但 agent tools 插件包加载失败，出图工具缺席（Host 问题，非配置）。",
 			"draw.noToolsRefused": "drawEnabled 已开启，但工具注册被 Host 拒绝，出图工具缺席（Host 问题，非配置）。",
 			"draw.noToolsSticky": "工具已注册，但本机 Host 不返回注销句柄——关掉开关也摘不掉它（旧 Host 限制）。",
+			"draw.mountPending": "开关已开，工具正在挂载；若几秒后仍未挂上，这里会给出原因。",
 			"draw.needsKey": "尚未配置 API Key；保存后即可出图。",
 			"draw.noCandidates": "当前 API Key 目录里暂无出图模型；出图不可用。",
 			"tab.quota": "积分额度",
@@ -406,6 +407,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.noToolsPeer": "drawEnabled is on, but the agent tools peer module failed to load; the draw tool is absent (a Host fault, not config).",
 			"draw.noToolsRefused": "drawEnabled is on, but the Host refused the tool registration; the draw tool is absent (a Host fault, not config).",
 			"draw.noToolsSticky": "The tool is registered, but this Host returns no disposer — turning the switch off cannot unmount it (an older Host limitation).",
+			"draw.mountPending": "The switch is on and the tool is still mounting; if it stays unmounted, the reason appears here.",
 			"draw.needsKey": "No API key yet; save one to start generating images.",
 			"draw.noCandidates": "This API key's catalogue has no image model; drawing is unavailable.",
 			"tab.quota": "Quota & Usage",
@@ -1793,6 +1795,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const effective = String(llm?.drawModel ?? "");
 		const note = llm?.drawToolNote;
 		const absentKey = drawAbsentKey(note);
+		const mountPending = llm?.mountPending === true && absentKey === null && enabled;
 		const statusText = absentKey !== null && (enabled || note === "not-removable") ? tt(absentKey) : enabled ? hasKey ? tt("draw.onList") : tt("draw.needsKey") : tt("draw.off");
 		const saveModel = useCallback(async (id) => {
 			setBusy(true);
@@ -1857,6 +1860,12 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			fontSize: 12,
 			marginTop: 4
 		} }, tt("draw.noCandidates")) : null;
+		const pendingHint = mountPending ? h("div", { style: {
+			...S.muted,
+			fontSize: 12,
+			marginTop: 4,
+			color: "var(--dsw-alias-state-warn-primary)"
+		} }, tt("draw.mountPending")) : null;
 		return h("div", { style: { marginBottom: 12 } }, h(ToggleSwitch, {
 			checked: enabled,
 			onChange: toggle,
@@ -1868,7 +1877,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			...S.muted,
 			fontSize: 12,
 			marginTop: 4
-		} }, statusText), pickerRows, noListHint, switchError ? h("div", {
+		} }, statusText), pendingHint, pickerRows, noListHint, switchError ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, switchError) : null);
