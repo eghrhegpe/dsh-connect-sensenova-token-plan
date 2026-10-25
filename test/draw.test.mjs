@@ -376,12 +376,14 @@ async function rejects(fn) {
 
 // --- N. the mount-time service seam: a service that registers late --------
 // lifecycle.ts read two optional Host services exactly ONCE per mount, and
-// neither capability can be re-established later: the tools registry has no
-// unregister call, and the settings row is only written by a poll that finds
-// `visionPublish.current` already filled. A service that arrives a moment
-// after this plugin mounts was therefore missed for the whole session, with
-// the draw switch visibly on and nothing on any panel naming the reason.
-// The read retries; the registration must stay exactly once.
+// neither capability can be re-established later: the settings row is only
+// written by a poll that finds `visionPublish.current` already filled, and the
+// draw tool used to be a one-shot registration. A service that arrives a
+// moment after this plugin mounts was therefore missed for the whole session,
+// with the draw switch visibly on and nothing on any panel naming the reason.
+// The read retries; the registration must stay exactly once. The one thing
+// that DOES re-establish the draw tool is a panel flip (reconcileDrawTool),
+// checked below.
 {
   const { resolveServiceWithRetry } = await import("../src/host/util.ts");
   const { registerDrawTool, startSideEffects } = await import(
@@ -413,8 +415,9 @@ async function rejects(fn) {
         `reads=${reads}`);
     }
     // registerDrawTool: the switch is on, the tools service only appears on
-    // the second read. The tool must land exactly once — retrying the
-    // registration would register a tool the registry cannot unregister twice.
+    // the second read. The tool must land exactly once — the registry rejects
+    // a duplicate name, so a retry that re-registers would be the failure, not
+    // the fix. (Swapping is reconcileDrawTool's job, which releases first.)
     {
       let reads = 0;
       const registered = [];
@@ -432,7 +435,8 @@ async function rejects(fn) {
         catalogStore: { list: async () => [] },
         resolveApiKey: async () => "sk-live",
         publisher: { isDisposed: () => false },
-        drawStore: { enabled: async () => null, modelId: async () => null }
+        drawStore: { enabled: async () => null, modelId: async () => null },
+        drawRestore: { current: null }
       };
       const side = {
         loadToolsModule: async () => ({ defineTool: (tool) => ({ name: tool.name }) }),
@@ -460,7 +464,8 @@ async function rejects(fn) {
         catalogStore: { list: async () => [] },
         resolveApiKey: async () => "sk-live",
         publisher: { isDisposed: () => false },
-        drawStore: { enabled: async () => null, modelId: async () => null }
+        drawStore: { enabled: async () => null, modelId: async () => null },
+        drawRestore: { current: null }
       };
       const side = { loadToolsModule: async () => ({}), drawFetch: async () => ({}) };
       await registerDrawTool(ctx, wiring, side);
@@ -480,6 +485,7 @@ async function rejects(fn) {
         resolveApiKey: async () => "sk-live",
         publisher: { isDisposed: () => false },
         drawStore: { enabled: async () => null, modelId: async () => null },
+        drawRestore: { current: null },
         logger: { warn: () => {} }
       };
       const side = { loadToolsModule: async () => { throw new Error("ERR_MODULE_NOT_FOUND boom"); }, drawFetch: async () => ({}) };
@@ -492,6 +498,88 @@ async function rejects(fn) {
       await registerDrawTool({ get: () => refusing }, wiring, sideRefuse);
       check("a registry that refuses names that reason",
         drawToolNote() === "registry-refused", `drawToolNote=${drawToolNote()}`);
+    }
+    // reconcileDrawTool: the in-session flip. A tool cannot be registered
+    // twice under one name, so the flip MUST release the held registration
+    // first — that disposer is the whole mechanism. A peer that returns none
+    // (an older registry) degrades to "registered but not swappable", never
+    // to a throw.
+    {
+      const { reconcileDrawTool } = await import("../src/host/lifecycle.ts");
+      const live = [];
+      const disposals = [];
+      const tools = {
+        register(definition) {
+          live.push(definition.name);
+          return () => { disposals.push(definition.name); live.pop(); };
+        }
+      };
+      let panelOn = false;
+      let panelModel = null;
+      const wiring = {
+        settings: { drawEnabled: false, drawModelId: "" },
+        configError: null,
+        providerState: { entries: [{ id: "sensenova-u1-fast", output_modalities: ["image"] }] },
+        catalogStore: { list: async () => [] },
+        resolveApiKey: async () => "sk-live",
+        publisher: { isDisposed: () => false },
+        drawStore: { enabled: async () => (panelOn ? true : null), modelId: async () => panelModel },
+        drawRestore: { current: null },
+        logger: { warn: () => {} }
+      };
+      const side = {
+        loadToolsModule: async () => ({ defineTool: (tool) => ({ name: tool.name }) }),
+        drawFetch: async () => ({})
+      };
+      const ctx = { get: (service) => (service === "tools" ? tools : undefined) };
+
+      await reconcileDrawTool(ctx, wiring, side);
+      check("a reconcile with the switch off registers nothing and holds nothing",
+        live.length === 0 && wiring.drawRestore.current === null,
+        `live=${JSON.stringify(live)} slot=${typeof wiring.drawRestore.current}`);
+
+      panelOn = true;
+      await reconcileDrawTool(ctx, wiring, side);
+      check("a reconcile after an off->on flip registers the tool in-session",
+        live.length === 1 && live[0] === "sensenova_draw_image",
+        `live=${JSON.stringify(live)}`);
+      check("a successful registration arms the restore slot with the disposer",
+        typeof wiring.drawRestore.current === "function",
+        `slot=${typeof wiring.drawRestore.current}`);
+
+      // The re-registration must read the CURRENT panel preference, not the
+      // snapshot taken at mount — that snapshot was the other half of the
+      // "needs a restart" behaviour.
+      panelModel = "sensenova-u1-fast";
+      await reconcileDrawTool(ctx, wiring, side);
+      check("a reconcile releases the held tool before registering again",
+        disposals.length === 1 && live.length === 1,
+        `disposals=${JSON.stringify(disposals)} live=${JSON.stringify(live)}`);
+
+      panelOn = false;
+      await reconcileDrawTool(ctx, wiring, side);
+      check("a reconcile after an on->off flip releases the tool and empties the slot",
+        live.length === 0 && disposals.length === 2 && wiring.drawRestore.current === null,
+        `live=${JSON.stringify(live)} disposals=${disposals.length} slot=${typeof wiring.drawRestore.current}`);
+
+      // Idempotence: reconciling twice at the same value must not stack
+      // registrations — the second pass releases what the first one armed.
+      panelOn = true;
+      await reconcileDrawTool(ctx, wiring, side);
+      await reconcileDrawTool(ctx, wiring, side);
+      check("a repeated reconcile never stacks registrations",
+        live.length === 1 && disposals.length === 3,
+        `live=${JSON.stringify(live)} disposals=${disposals.length}`);
+
+      // A peer whose `register` returns nothing: the tool works, the slot
+      // stays null, and the next reconcile must not throw on a missing
+      // disposer.
+      const bareTools = { register: (definition) => { live.push(definition.name); } };
+      const bareWiring = { ...wiring, drawRestore: { current: null } };
+      await reconcileDrawTool({ get: () => bareTools }, bareWiring, side);
+      check("a peer that returns no disposer leaves the slot null instead of arming a spent one",
+        bareWiring.drawRestore.current === null && live.length === 2,
+        `slot=${typeof bareWiring.drawRestore.current} live=${JSON.stringify(live)}`);
     }
     // startSideEffects: vision step two's writer is only filled once the
     // settings service can actually be reached. A poll after the late fill
@@ -516,10 +604,11 @@ async function rejects(fn) {
       const wiring = {
         settings: { writeImageModelIds: true, imageModelIds: [] },
         visionPublish,
-        // Required slot since 2026-10-05 (was `webSearchRestore?`):
-        // startSideEffects reaches reconcileWebSearch, so a wiring that omits
-        // it now throws instead of quietly reading "undefined = not armed".
+        // Required slots (was `webSearchRestore?`): startSideEffects reaches
+        // reconcileWebSearch and reconcileDrawTool, so a wiring that omits
+        // either now throws instead of quietly reading "undefined = not armed".
         webSearchRestore: { current: null },
+        drawRestore: { current: null },
         publisher: {
           publish: async () => ({ ok: true }),
           dispose: () => {},

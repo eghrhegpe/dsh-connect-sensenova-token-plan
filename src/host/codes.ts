@@ -277,7 +277,7 @@ export const SYMPTOM_HINT: Readonly<Record<SymptomValue, string>> = Object.freez
   [SYMPTOM.PROVIDER_MISSING]:
     "docs/TROUBLESHOOTING.md#b2-模型列表里没有商汤模型 — 确认 provider 开关已开且 llm 服务存在；用 npm run doctor 查磁盘上的生效值。",
   [SYMPTOM.TOOL_OR_MODEL_MISSING]:
-    "docs/TROUBLESHOOTING.md#b3-某个模型没出现或出图工具没挂上 — 出图工具的下一次 Host 启动才挂载（agent tools 无 unregister 语义）；模型清单看 catalog 是否拉到。",
+    "docs/TROUBLESHOOTING.md#b3-某个模型没出现或出图工具没挂上 — 先确认面板上出图开关是开的（开关与模型偏好在同一会话内即时生效）；模型清单看 catalog 是否拉到。",
   [SYMPTOM.STATE_UNREADABLE]:
     "docs/TROUBLESHOOTING.md#c2-状态文件读不出来或开关对不上 — 状态文件版本护栏（ADR-006）会拒写未知版本；别手改 JSON，用面板开关改。",
   [SYMPTOM.CONFIG_ERROR]:

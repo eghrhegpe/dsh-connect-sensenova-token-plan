@@ -85,9 +85,10 @@ provider 注册与撤回的热生效设计见 [PROVIDER-HOT-RELOAD.md](./PROVIDE
 
 `tool-or-model-missing`
 
-- **出图工具**：开关生效 ≠ 工具已挂载。agent tools 没有 unregister 语义，**工具的实际挂载/缺席
-  发生在下一次 Host 启动**——改了开关要完全重启 DSH 才见效（[README](../README.md)「出图工具」节）。
-  无 tools 服务或 peer 加载失败时工具**静默缺席**（面板会给出对应一行说明，不是 bug）。
+- **出图工具**：开关与模型偏好保存后当场重新应用注册，工具在同一会话内随即挂载/卸载，无需重启
+  （[README](../README.md)「出图工具」节）。仍看不到工具时看面板那一行说明：
+  无 tools 服务或 peer 加载失败时工具**静默缺席**（不是 bug）；peer 的注册不返回 disposer 时
+  工具在但不可热切换，重启 Host 后才换成新值。
 - **单个模型没出现**：在「语言模型」卡的勾选清单里被取消推送了。清单是**允许清单**，空=不过滤；
   想"一个都不推"要用哨兵值，语义见 [PROVIDER-HOT-RELOAD.md](./PROVIDER-HOT-RELOAD.md) §6。
 

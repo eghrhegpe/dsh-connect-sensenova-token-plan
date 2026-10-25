@@ -178,7 +178,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.level.max": "最高",
 			"draw.title": "出图工具",
 			"draw.switch": "注册出图工具",
-			"draw.switchTitle": "开启后 Host 给 agent 注册 sensenova_draw_image 工具。开关值立即生效，但工具的实际挂载/缺席发生在下一次 Host 启动。",
+			"draw.switchTitle": "开启后 Host 给 agent 注册 sensenova_draw_image 工具。开关与模型偏好立即生效：工具在同一会话内随即挂载或卸载，无需重启。",
 			"draw.switchBusy": "切换中…",
 			"draw.switchError": "切换失败：{error}",
 			"draw.onList": "agent 出图将使用以下模型：",
@@ -392,7 +392,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"llm.level.max": "max",
 			"draw.title": "Draw tool",
 			"draw.switch": "Register the draw tool",
-			"draw.switchTitle": "On registers sensenova_draw_image for the agent. The switch value takes effect at once, but the tool mounts/absents at the next Host start.",
+			"draw.switchTitle": "On registers sensenova_draw_image for the agent. The switch and the model preference take effect at once: the tool mounts or unmounts within the same session, no restart needed.",
 			"draw.switchBusy": "Switching…",
 			"draw.switchError": "Switch failed: {error}",
 			"draw.onList": "Draw calls will use the model below:",
@@ -1755,11 +1755,11 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	/**
 	* The live draw-tool switch (docs/PROVIDER-HOT-RELOAD.md, same discipline
 	* as `ProviderSwitch`). Posts `{ enabled }` to the plugin's own `/draw`
-	* route; the Host persists the value in its state file. The draw tool
-	* itself is mounted at `apply` time (lifecycle.ts), so a panel flip only
-	* becomes visible after the NEXT Host (re)mount — but the switch state,
-	* the source, and the snapshot's `llm.drawEnabled` are all live, so the
-	* panel shows the effective value immediately. Hook-based like
+	* route; the Host persists the value in its state file AND re-applies the
+	* registration (lifecycle.ts -> reconcileDrawTool), so a panel flip mounts or
+	* unmounts the agent tool within the same session — no Host restart. The
+	* switch state, the source, and the snapshot's `llm.drawEnabled` are live
+	* too, so the panel shows the effective value immediately. Hook-based like
 	* `ProviderSwitch`; the route is covered by `routes.test.mjs`. The component
 	* IS mountable (the stand-in React returns `useState`'s initial value and
 	* passes `useCallback` straight through), so `render.test.mjs` also pins the

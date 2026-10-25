@@ -247,9 +247,10 @@ async function listProfiles(stateRoot: string): Promise<string[]> {
  *     it turns the most common false alarm into a one-line answer.
  *
  *   `tool-or-model-missing` — draw is on yet no model was ever chosen AND no
- *     catalog was stored, i.e. the tool has nothing to call. (Draw tools mount
- *     only on the NEXT Host start, so "on" here says nothing about whether the
- *     agent has it — that half is in TROUBLESHOOTING B3.)
+ *     catalog was stored, i.e. the tool has nothing to call. (This reads the
+ *     switch on disk, not the live registration: a flip is re-applied
+ *     in-session, but a tools service that was never reachable leaves the tool
+ *     absent regardless — that half is in TROUBLESHOOTING B3.)
  *
  *   `quota-empty` — the catalog is absent or empty while a switch is on: the
  *     key was stored but the model list never arrived, which is what "额度那栏

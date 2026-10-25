@@ -4,7 +4,9 @@
  * Home of the draw half of the mount: {@link registerDrawTool} is the single
  * place that decides whether the agent gets the tool (ARCHITECTURE.md §5.4,
  * route B). The mount orchestrator (`lifecycle.ts`) calls it from
- * `startSideEffects` and re-exports it as the facade (ADR-013); the rest of
+ * `startSideEffects` and re-exports it as the facade (ADR-013); a later switch
+ * flip re-enters through {@link reconcileDrawTool}, which releases the held
+ * registration before re-registering. The rest of
  * the draw family — tool definition (`draw.ts`), absence-note holder
  * (`draw-tool-state.ts`), panel switch store (`draw-store.ts`) — is the
  * neighbouring code this registration reads, so it lives here, not in the
@@ -31,6 +33,19 @@ export type DrawFetchResponse = {
 };
 
 /**
+ * The test seams `apply()` hands the draw family, named once.
+ *
+ * `startSideEffects` forwards this bag untouched to both
+ * {@link registerDrawTool} and {@link reconcileDrawTool}, so spelling it here
+ * is what keeps the two from drifting: a seam added for one of them is a type
+ * error at the other until it is threaded through.
+ */
+export type DrawToolSide = {
+  loadToolsModule: () => Promise<object>;
+  drawFetch: (url: string, options: object) => Promise<DrawFetchResponse>;
+};
+
+/**
  * The wiring subset {@link registerDrawTool} reads — its own `Pick`, not the
  * whole bag.
  *
@@ -40,13 +55,11 @@ export type DrawFetchResponse = {
  * catch a field that stopped being read, or a new one that starts being read
  * without a declaration.
  *
- * No count is written here on purpose: this comment used to say "eight of the
- * twenty-two" while the `@param` below said "the seven fields read below", and
- * both were stale — `Wiring` had twenty fields, and there are eight here of
- * which only seven are destructured (`logger` is read straight off the bag by
- * the `degrade` call, so a count of the destructuring line is not a count of
- * what the function reads). The list in the type is the contract; a number next
- * to it is a second source with no compiler behind it.
+ * No count is written here on purpose: this comment used to name a number of
+ * fields, and it went stale the moment the set changed — the destructuring line
+ * is not even a count of what the function reads, because `logger` is read
+ * straight off the bag by the `degrade` call. The list in the type is the
+ * contract; a number next to it is a second source with no compiler behind it.
  */
 export type DrawToolWiring = Pick<Wiring,
   | "settings"
@@ -56,6 +69,7 @@ export type DrawToolWiring = Pick<Wiring,
   | "resolveApiKey"
   | "publisher"
   | "drawStore"
+  | "drawRestore"
   | "logger"
 >;
 
@@ -65,6 +79,12 @@ export type DrawToolWiring = Pick<Wiring,
  * with no tools service never sees it, and a peer that fails to load leaves
  * the panel and the provider untouched. Named as a separate export so a test
  * can inject its own `ctx`/`wiring`; `startSideEffects` calls it when enabled.
+ *
+ * A successful registration stores the disposer `tools.register` returns in
+ * the `drawRestore` slot, which is what makes the tool swappable: without it
+ * an off→on flip would have to wait for the next Host start. Callers that want
+ * to re-apply the switch use {@link reconcileDrawTool} rather than calling this
+ * twice — a second registration of the same name is an error in the registry.
  * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context (reads `ctx.get("tools")` / `ctx.tools`).
  * @param {DrawToolWiring} wiring - the fields listed in that type.
  * @param {object} side - test seams from `apply`'s `deps`.
@@ -72,7 +92,7 @@ export type DrawToolWiring = Pick<Wiring,
  * @param {Function} side.drawFetch - draw request fetch (stubbed in tests).
  * @returns {Promise<void>}
  */
-export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: DrawToolWiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }) {
+export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: DrawToolWiring, side: DrawToolSide) {
   const { settings, configError, providerState, catalogStore, resolveApiKey, publisher, drawStore } = wiring;
   const { loadToolsModule, drawFetch } = side;
   // Recompute the absence note on every attempt: a late tools service that
@@ -94,10 +114,11 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
   const panelModelId = drawStore ? await drawStore.modelId().catch(() => null) : null;
   const effectiveSettings = panelModelId !== null ? { ...settings, drawModelId: panelModelId } : settings;
   // The tools service is optional and may register a moment AFTER this
-  // plugin mounts; retry the read, never the registration — a tool cannot be
-  // unregistered, so registering it twice would be a worse failure than
-  // missing it.
-  const tools = await resolveServiceWithRetry<{ register: (definition: unknown) => void }>(ctx, "tools", {
+  // plugin mounts; retry the READ, never the registration. Registering the
+  // same name twice is what the registry refuses, so an in-session flip goes
+  // through `reconcileDrawTool`: it releases the held disposer first, then
+  // calls back in here.
+  const tools = await resolveServiceWithRetry<{ register: (definition: unknown) => unknown }>(ctx, "tools", {
     isDisposed: () => publisher.isDisposed()
   });
   // The ONE normal absence the panel should state: the switch is on but this
@@ -130,7 +151,7 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
     return;
   }
   try {
-    tools.register(
+    const dispose = tools.register(
       defineDrawTool({
         defineTool,
         resolveApiKey,
@@ -152,6 +173,12 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
         isDisposed: () => publisher.isDisposed()
       })
     );
+    // Hold the disposer so a later switch flip can drop this tool. A peer
+    // whose `register` predates the return value hands back nothing: the tool
+    // still works, it just cannot be swapped in-session, and keeping the slot
+    // `null` states that honestly instead of arming a reconcile that would
+    // throw.
+    wiring.drawRestore.current = typeof dispose === "function" ? (dispose as () => void) : null;
   } catch (error) {
     // A registry that refuses the tool degrades identically — tool absent,
     // panel fine — and is a Host problem, not a config one: say it, and state
@@ -159,4 +186,39 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
     setDrawToolNote("registry-refused");
     degrade("draw: tools registry refused the registration", error, wiring.logger, null);
   }
+}
+
+/**
+ * Re-apply the draw switch to the live registry: release the tool this plugin
+ * holds (if any), then register it again against the current value.
+ *
+ * The draw counterpart of `reconcileWebSearch` (`web-search.ts`), and the
+ * reason a panel flip no longer needs a Host restart. Two details are
+ * load-bearing:
+ *
+ *   - the slot is emptied BEFORE the disposer runs, so a re-entrant call (a
+ *     second flip arriving while this one is in flight) reads "nothing held"
+ *     rather than calling a disposer that is already spent;
+ *   - a disposer that throws must not sink the re-registration — during
+ *     shutdown the registry may already be gone, and the new registration is
+ *     the caller's actual request.
+ *
+ * Nothing held is the ordinary case: an off→on flip has no tool to release, so
+ * the slot is `null` and this degrades to a plain registration.
+ * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
+ * @param {DrawToolWiring} wiring - the same subset {@link registerDrawTool} reads.
+ * @param {DrawToolSide} side - test seams from `apply`'s `deps`.
+ * @returns {Promise<void>}
+ */
+export async function reconcileDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: DrawToolWiring, side: DrawToolSide) {
+  const held = wiring.drawRestore.current;
+  wiring.drawRestore.current = null;
+  if (held !== null) {
+    try {
+      held();
+    } catch {
+      // A frozen registry must not sink the reconcile.
+    }
+  }
+  await registerDrawTool(ctx, wiring, side);
 }

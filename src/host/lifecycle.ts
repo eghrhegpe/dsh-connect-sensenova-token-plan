@@ -34,7 +34,7 @@
 import { seedPublisherFromCatalog } from "./provider-publish.ts";
 import { retryBounded, errMsg, resolveServiceWithRetry } from "./util.ts";
 import { armProviderRefresher } from "./provider-refresh.ts";
-import { registerDrawTool, type DrawFetchResponse } from "./draw-mount.ts";
+import { reconcileDrawTool, type DrawToolSide } from "./draw-mount.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
@@ -167,7 +167,7 @@ export function seedRaccoonOnMount({ raccoonStore, raccoonSwitch, raccoonPublish
  *   before teardown (the registry never blocks the mount itself).
  * @returns {void} — every effect starts on call and is tracked in the registry.
  */
-export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Wiring, side: { loadToolsModule: () => Promise<object>; drawFetch: (url: string, options: object) => Promise<DrawFetchResponse> }, effects: EffectRegistry) {
+export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: Wiring, side: DrawToolSide, effects: EffectRegistry) {
   const { publisher, catalogStore, settings } = wiring;
 
   // Seed the registration from the persisted catalog so a restarted Host
@@ -189,13 +189,14 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
 
   // Draw absorption: opt-in, doubly degraded (no tools service / no peer).
   // The effective value is panel-saved > config default (`draw-store.ts`),
-  // read at mount time — and when it is already on, the tool is registered
-  // RIGHT HERE during this mount (see `registerDrawTool`, which awaits the
-  // panel value and calls `tools.register`). The tools registry has no
-  // unregister call, so an off→on flip needs the next Host start; an on→off
-  // flip just means this mount did not register it (the already-registered
-  // tool lives until the Host restarts).
-  effects.add("draw-tool", () => registerDrawTool(ctx, wiring, side));
+  // read here — and when it is already on, the tool is registered during this
+  // mount (see `registerDrawTool`, which awaits the panel value and calls
+  // `tools.register`). The reconcile form, not the bare register: it releases
+  // whatever this plugin already holds before registering, which is exactly
+  // what the panel's route does after a flip — so a mount and a flip share one
+  // path, and an off→on flip lands in-session instead of at the next Host
+  // start.
+  effects.add("draw-tool", () => reconcileDrawTool(ctx, wiring, side));
 
   // Web-search absorption (ROADMAP §6.1.7): opt-in, doubly degraded, and the
   // selection is taken over only when the switch is on. Fire-and-forget, like
@@ -318,8 +319,8 @@ async function publishVisionStepTwo(ctx: { get?: (n: string) => unknown; [key: s
 // ------------------------------------------------------------------
 export type { WebSearchRuntime, WebSearchSelection, WebSearchToolWiring } from "./web-search.ts";
 export { webSearchSelection, applyWebSearchSelection, registerWebSearchProvider } from "./web-search.ts";
-export { registerDrawTool } from "./draw-mount.ts";
-export type { DrawToolWiring, DrawFetchResponse } from "./draw-mount.ts";
+export { registerDrawTool, reconcileDrawTool } from "./draw-mount.ts";
+export type { DrawToolWiring, DrawFetchResponse, DrawToolSide } from "./draw-mount.ts";
 import { reconcileWebSearch } from "./web-search.ts";
 export { reconcileWebSearch };
 
@@ -339,18 +340,28 @@ export { reconcileWebSearch };
  * either settled or been reported as a straggler by its label.
  * @param {Wiring} wiring - assembled by `apply()`; the fields read here are
  *   `publisher` / `releaseProvider` / `raccoonPublisher` / `webSearchRestore`
- *   / `providerRefresh`, so the type says exactly that shape.
+ *   / `providerRefresh` / `drawRestore`, so the type says exactly that shape.
  * @param {Array<() => void>} offs - the unregister callbacks from
  *   {@link registerRoutes}. `Function[]` was the old spelling and it is
  *   `any[]` in disguise — a `Function` may be called with any arguments and
  *   return anything, so it pinned neither the shape nor the arity.
  * @returns {void}
  */
-export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher" | "webSearchRestore" | "providerRefresh">, offs: Array<() => void>) {
+export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | "raccoonPublisher" | "webSearchRestore" | "providerRefresh" | "drawRestore">, offs: Array<() => void>) {
   try {
     wiring.webSearchRestore.current?.();
   } catch {
     // The web runtime may already be gone during shutdown.
+  }
+  // Hand the agent tool back too: the registry belongs to the Host fiber, so a
+  // tool registered here would otherwise outlive this plugin's unmount until
+  // the whole Host stops. Emptying the slot first is what makes a second
+  // teardown a no-op rather than a spent-disposer call.
+  try {
+    wiring.drawRestore.current?.();
+    wiring.drawRestore.current = null;
+  } catch {
+    // The registry may already be gone during shutdown.
   }
   // Stop the background refresher's clock FIRST among the timers: a tick that
   // fires between this line and `publisher.dispose()` would be stopped by the

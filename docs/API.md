@@ -56,7 +56,7 @@
     // trend 同一匹配器）。
     "models": [{ "id": "sensenova-6.8-flash-lite", "name": "sensenova-6.8-flash-lite", "vision": false, "contextWindow": 262144, "maxOutputLength": 65536, "multiplier": 1, "thinkingLevels": ["off", "low", "medium", "high"] }],
     "enabledModelIds": [],
-    // 出图工具开关生效值与来源（0.4.2）；工具实际挂载在下一个 Host 启动时发生
+    // 出图工具开关生效值与来源（0.4.2）；工具随开关在同一会话内即时挂载/卸载
     "drawEnabled": false, "drawSource": "config",
     // 一次出图调用实际会寻址的模型 id：用与工具本身相同的 pickDrawModel
     // 优先级（调用参数 > 配置的 drawModelId > 目录首个出图模型）从同一份
@@ -118,9 +118,9 @@
 出图工具开关的去密状态：`drawEnabled`（**生效值**）、`drawSource`（`panel` 面板保存过 / `config` 沿用配置默认）。设计见 [PROVIDER-HOT-RELOAD.md](./PROVIDER-HOT-RELOAD.md) §7。
 
 ### `POST /api/dsh-connect-sensenova-token-plan/draw`
-`{ "enabled": true|false }` —— 把出图开关写入插件私有状态文件（`$DSH_HOME/state/<profile>/<plugin>/draw.json`，按 profile 分段、见 [PITFALLS.md](./PITFALLS.md) §23），与 `/provider` 走的是同一套「存私有状态」机制，但**不触发任何即时发布**——agent 工具的实际注册/缺席发生在下一个 Host 启动（或重新安装）时，由 `lifecycle.ts` 的 `startSideEffects` 重读生效值。优先级：面板保存的值 > `cordis.patch.yml` 的 `drawEnabled`。非布尔 `enabled` 返回 400；跨域返回 403。
+`{ "enabled": true|false }` —— 把出图开关写入插件私有状态文件（`$DSH_HOME/state/<profile>/<plugin>/draw.json`，按 profile 分段、见 [PITFALLS.md](./PITFALLS.md) §23），与 `/provider` 走的是同一套「存私有状态」机制。保存成功后路由**当场重新应用注册**（`draw-mount.ts` 的 `reconcileDrawTool`：先释放已持有的注册，再按最新生效值重新注册），所以 agent 工具的挂载/卸载在同一会话内随即发生，无需重启 Host。优先级：面板保存的值 > `cordis.patch.yml` 的 `drawEnabled`。非布尔 `enabled` 返回 400；跨域返回 403。
 
-`{ "drawModelId": "sensenova-u1.5-lite" }`（或 `null` = 自动选择）—— 把出图模型偏好写入同一个 `draw.json`。生效时机与开关相同：`startSideEffects` 在下一次挂载时用它覆盖 `cordis.patch.yml` 的 `drawModelId`（优先级：面板 > 配置；面板清除后回落配置，配置也为空则自动取目录第一个出图模型）。非空字符串之外的非 null 值返回 400；跨域返回 403。`{ "forget": true }` **仅清除出图开关**的面板保存值，并**刻意保留**模型偏好——`src/host/draw-store.ts` 的 `forget()` 用现有 `modelId` 重写该行，重置模型偏好的入口是显式传 `drawModelId`（`src/host/routes/draw.ts` 未暴露 `forgetModel`）；别把 `forget` 读成「重置全部」。
+`{ "drawModelId": "sensenova-u1.5-lite" }`（或 `null` = 自动选择）—— 把出图模型偏好写入同一个 `draw.json`。生效时机与开关相同：保存后走同一段 `reconcileDrawTool` 重新注册，重注册时重读偏好，用它覆盖 `cordis.patch.yml` 的 `drawModelId`（优先级：面板 > 配置；面板清除后回落配置，配置也为空则自动取目录第一个出图模型），因此模型偏好在同一会话内即刻对工具生效。非空字符串之外的非 null 值返回 400；跨域返回 403。`{ "forget": true }` **仅清除出图开关**的面板保存值，并**刻意保留**模型偏好——`src/host/draw-store.ts` 的 `forget()` 用现有 `modelId` 重写该行，重置模型偏好的入口是显式传 `drawModelId`（`src/host/routes/draw.ts` 未暴露 `forgetModel`）；别把 `forget` 读成「重置全部」。
 
 ### `GET /api/dsh-connect-sensenova-token-plan/raccoon`
 小浣熊（第二上游，`sensenova-raccoon`，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §5.5）面板轮询的去密状态：登录态（`loggedIn` / `loginStatus` / `scanUrl` / `scanCode`）、余额与凭证时钟、生效的开关与推送模型数、以及 `webSearchEnabled` 的生效值与来源。`?debug=1`（**仅 GET 可用**）额外附 401 分诊脚手架六字段（`accessTokenPrefix` / `credentialSource` / `raccoonEnvShadow` / `envCredentialFingerprint` / `accessTokenFingerprint` / `hostProxyEnv`，其中 `hostProxyEnv` 做掩码），POST 分支从不携带——脚手架只经显式 GET 出盘；`balanceDetail` 是常规失败详情字段，GET/POST 都会随状态带出，不在脚手架内。

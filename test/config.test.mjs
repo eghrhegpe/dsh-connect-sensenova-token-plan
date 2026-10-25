@@ -372,8 +372,8 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
 // notes carried counts ("eight of the twenty-two", "Twelve of twenty-two",
 // "Two of twenty-two", "the seven fields read below"). Every one of them was a
 // second source of truth with no compiler behind it, and they disagreed with
-// the code: `Wiring` carries TWENTY fields, not twenty-two, and
-// `registerDrawTool` destructures seven of the eight its `Pick` names because
+// the code (the prose said twenty-two; the interface did not), and
+// `registerDrawTool` destructures fewer fields than its `Pick` names because
 // `logger` is read straight off the bag. Nothing noticed, because a wrong
 // number in a comment cannot fail anything.
 //
@@ -388,7 +388,7 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
   const wiringFields = wiringBody.split("\n")
     .filter((line) => /^\s{2}[A-Za-z_]\w*\??\s*:/.test(line));
   check("Wiring's field count is the one this suite reasons about",
-    wiringFields.length === 26, `${wiringFields.length} fields`);
+    wiringFields.length === 28, `${wiringFields.length} fields`);
 
   // Every route declares its own subset, and `registerRoutes` calls each exactly
   // once. A route module added without joining the facade would mount nothing

@@ -19,9 +19,10 @@
  * `buildSnapshotBody`, so the aggregator itself never imports this module and
  * stays pure — the same closure-injection pattern as `drawSwitch`.
  *
- * In memory and NOT profile-scoped on purpose: it is a per-mount diagnostic,
- * recomputed on every Host (re)mount by `registerDrawTool`, never persisted.
- * Same in-memory discipline as `providerState.error`.
+ * In memory and NOT profile-scoped on purpose: it is a per-registration
+ * diagnostic, recomputed by `registerDrawTool` on every mount AND on every
+ * in-session switch flip (`reconcileDrawTool`), never persisted. Same
+ * in-memory discipline as `providerState.error`.
  * @module dsh-connect-sensenova-token-plan/draw-tool-state
  */
 

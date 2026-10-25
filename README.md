@@ -49,7 +49,7 @@
 - 在「API Key」卡粘贴 `sk-` Key 保存后，Host 即以 `sensenova-token-plan` 之名注册 OpenAI 兼容 provider
 - **语言模型**：模型列表随 `/v1/models` 自动刷新、可看图模型自动带图片输入；
 - **出图工具**：Host 给 agent 注册工具 `sensenova_draw_image`；模型由 catalog 的 `output_modalities` 结构化判定。
-- 开关与勾选都在面板热生效，无需重启**，**但工具的实际挂载 / 缺席发生在**下一次 Host 启动**。细节见 [docs/SETUP.md](docs/SETUP.md) §4 与 [docs/PROVIDER-HOT-RELOAD.md](docs/PROVIDER-HOT-RELOAD.md)。
+- 开关、勾选与出图模型偏好都在面板热生效，无需重启**——**出图工具本身也在同一会话内随即挂载/卸载。细节见 [docs/SETUP.md](docs/SETUP.md) §4 与 [docs/PROVIDER-HOT-RELOAD.md](docs/PROVIDER-HOT-RELOAD.md)。
 
 ![「接入 API」tab](https://raw.githubusercontent.com/eghrhegpe/dsh-connect-sensenova-token-plan/master/assets/panel-API-provider.png)
 

@@ -70,13 +70,14 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 | 文件 | 改动 |
 |---|---|
 | `draw-store.ts`（新增） | 出图开关状态文件 `$DSH_HOME/state/<profile>/<plugin>/draw.json`；完整性纪律与 `provider-store.ts` 完全一致。同文件还存**首选出图模型偏好 `drawModelId`**——`POST /api/<name>/draw` 三个载荷分支（`enabled` / `drawModelId` / `forget`），其中 `forget` 只清开关、刻意保留模型偏好 |
-| `index.ts` | wiring 里增补 `drawStore`；传给 `registerRoutes` 与 `startSideEffects` |
-| `draw-mount.ts` | `registerDrawTool` 改为读「面板保存值 > 配置默认值」的生效值，而不是直接读 `settings.drawEnabled`（现居 `draw-mount.ts`，经 `lifecycle.ts` 门面再导出） |
-| `routes/draw.ts` | 新增 `POST /api/<name>/draw`（2026-10 路由拆分后按资源归入 `routes/` 家族），与 `/provider` 同一信任形状 |
+| `index.ts` | wiring 里增补 `drawStore`、`drawRestore` 槽位与 `reconcileDrawTool` 回调；传给 `registerRoutes` 与 `startSideEffects` |
+| `draw-mount.ts` | `registerDrawTool` 改为读「面板保存值 > 配置默认值」的生效值，而不是直接读 `settings.drawEnabled`（现居 `draw-mount.ts`，经 `lifecycle.ts` 门面再导出）；注册成功后把 `tools.register` 返回的 disposer 存进 `drawRestore` 槽位，`reconcileDrawTool` 先释放它再重新注册 |
+| `lifecycle.ts` | mount 效果与面板切换走同一条 `reconcileDrawTool` 路径；`teardown` 释放 `drawRestore` 槽位里的注册 |
+| `routes/draw.ts` | 新增 `POST /api/<name>/draw`（2026-10 路由拆分后按资源归入 `routes/` 家族），与 `/provider` 同一信任形状；三个成功分支保存后各调用一次 `reconcileDrawTool` |
 | `snapshot-aggregate.ts` | 快照 `llm.drawEnabled` / `llm.drawSource` 回显生效值与来源 |
 | `src/client/provider-controls.ts`（原 `client.js` 内联） | `ApiKeyForm` 区新增「出图工具」卡片，含 `DrawSwitch` 控件 |
 
-与 provider 开关的一个**语义差异**需要说明：provider 开关改的是「当前请求立刻重新发布注册对」，改完立即生效；draw 开关改的是「挂载时是否注册 agent 工具」，**当前 Host 进程里已经注册的工具不会因为改开关而消失或出现**——要真正生效需要在**下一个 Host (re)mount**（即重启 `dsh web` 或重新安装插件）时，`lifecycle.ts` 的 `startSideEffects` 重新读生效值。面板开关本身是「立即生效、无需重启」的**状态读写**；工具的实际挂载/卸载要等到下次 Host 启动。面板文案里「立即生效」指的是**开关值**本身，不是 agent 工具的实时性。
+与 provider 开关的一个**机制差异**需要说明：provider 开关改的是「当前请求立刻重新发布注册对」；draw 开关改的是「是否给 agent 注册工具」，两者**都无需重启**，但路径不同——draw 走 `reconcileDrawTool`：先释放上一次持有的注册（`tools.register` 返回的 disposer），再按最新生效值重新注册。所以面板上切开关、改模型偏好，工具会在**同一会话内**随即挂载或卸载。面板文案里的「立即生效」因此覆盖工具本身，不再只是开关值。
 
-**已知边界**：两个 Host 进程共享同一状态目录时，后写者胜（与 provider / throttle / catalog 文件语义一致）。`POST /draw` 只改开关值，不直接操作 tools registry——这是有意的：tools registry 没有 `unregister` 语义（见 `draw-mount.ts` 注释），强行卸载要等 Host 生命周期自然结束。
+**已知边界**：两个 Host 进程共享同一状态目录时，后写者胜（与 provider / throttle / catalog 文件语义一致）。`POST /draw` 保存后只重新应用**本进程**的注册：另一个 Host 进程不会收到通知，它的工具要等自己下一次挂载或面板改动才对齐。peer 的 `tools.register` 若返回不出 disposer（老版本 registry），本次注册仍然成功，但槽位留空、无法就地换新——那种 peer 上热重载退化为「已挂载但不可切换」，面板会照常显示开关值。
 

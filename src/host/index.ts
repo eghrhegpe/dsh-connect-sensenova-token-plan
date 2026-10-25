@@ -45,7 +45,7 @@ import { createRaccoonPublisher } from "./raccoon-publish.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
 import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import { registerRoutes } from "./routes.ts";
-import { startSideEffects, seedRaccoonOnMount, teardown, reconcileWebSearch } from "./lifecycle.ts";
+import { startSideEffects, seedRaccoonOnMount, teardown, reconcileWebSearch, reconcileDrawTool } from "./lifecycle.ts";
 import { createEffectRegistry, MOUNT_EFFECT_DRAIN_TIMEOUT_MS } from "./effects.ts";
 import { CODE } from "./codes.ts";
 import { writeLoginTrace } from "./trace.ts";
@@ -309,6 +309,15 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // by `startSideEffects`; until then it is a no-op, so a Host without a
   // settings service still answers polls.
   const visionPublish = { current: null };
+  // The draw tool's disposer slot, and the seams both the mount effect and a
+  // later flip need. Named here (before `wiring`) because the reconcile hook
+  // below closes over it: a flip must re-register with the SAME peer loader and
+  // fetch the mount used, or a test seam would apply to one path only.
+  const drawRestore = { current: null };
+  const drawSide = {
+    loadToolsModule: deps.loadToolsModule ?? (() => import("@deepseek-ai/dsh-tools")),
+    drawFetch: deps.drawFetch ?? ((url: string, options: object) => fetch(url, options))
+  };
 
   const wiring = {
     settings,
@@ -355,7 +364,13 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // `visionPublish` — null = no refresher scheduled; `startSideEffects`
     // arms it when `providerRefreshMinutes > 0` AND the effective provider
     // switch is on, and `teardown` closes the interval.
-    providerRefresh: { current: null }
+    providerRefresh: { current: null },
+    // The agent tool's disposer slot and the re-application hook: the draw
+    // counterpart of `webSearchRestore` / `reconcileWebSearch` just above.
+    // `registerDrawTool` fills the slot; the `draw` route calls the hook after
+    // a save, so a flip lands in-session instead of at the next Host start.
+    drawRestore,
+    reconcileDrawTool: () => reconcileDrawTool(ctx, wiring, drawSide)
   };
 
   // The seven route handlers (trust fence, method allowances, body ceilings,
@@ -364,15 +379,7 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
   // Mount-time side effects (persisted-catalog seed, draw tool, vision
   // step two) — see lifecycle.ts. Each one is tracked by the effect
   // registry; the unmount cleanup below lets them settle before teardown.
-  startSideEffects(
-    ctx,
-    wiring,
-    {
-      loadToolsModule: deps.loadToolsModule ?? (() => import("@deepseek-ai/dsh-tools")),
-      drawFetch: deps.drawFetch ?? ((url: string, options: object) => fetch(url, options))
-    },
-    effects
-  );
+  startSideEffects(ctx, wiring, drawSide, effects);
 
   ctx.effect(() => {
     // The effect callback returns the unmount cleanup: Cordis runs it when

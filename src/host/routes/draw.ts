@@ -20,15 +20,23 @@ import type { Wiring } from "../types.ts";
 export const DRAW_PATH = `/api/${name}/draw`;
 
 /**
- * Register the draw route. Wiring subset: `settings`, `drawStore`.
+ * Register the draw route. Wiring subset: `settings`, `drawStore`, and the
+ * optional `reconcileDrawTool` re-application hook.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Pick<Wiring, "settings" | "drawStore">} wiring - the subset this
- *   route reads, as assembled by `apply()` in `index.ts`. The smallest
- *   dependency surface in the family, and now the compiler enforces it.
+ * @param {Pick<Wiring, "settings" | "drawStore" | "reconcileDrawTool">} wiring -
+ *   the subset this route reads, as assembled by `apply()` in `index.ts`. The
+ *   smallest dependency surface in the family, and now the compiler enforces it.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "drawStore">) {
-  const { settings, drawStore } = wiring;
+export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "drawStore" | "reconcileDrawTool">) {
+  const { settings, drawStore, reconcileDrawTool } = wiring;
+  // Every successful write below re-applies the switch to the live registry:
+  // the saved value alone would leave the agent holding the tool it had at
+  // mount. A failure there must not fail the save — the value IS persisted, and
+  // the next flip or the next Host start retries the registration.
+  const reapply = async () => {
+    await reconcileDrawTool?.().catch(() => {});
+  };
 
   return ctx.webServer.register({
     kind: "exact",
@@ -86,6 +94,7 @@ export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "d
           await answer({ ok: false, error: redactedError(error) });
           return;
         }
+        await reapply();
         await answer();
         return;
       }
@@ -105,6 +114,7 @@ export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "d
           await answer({ ok: false, error: redactedError(error) });
           return;
         }
+        await reapply();
         await answer();
         return;
       }
@@ -122,6 +132,7 @@ export function registerDrawRoute(ctx: any, wiring: Pick<Wiring, "settings" | "d
         await answer({ ok: false, error: redactedError(error) });
         return;
       }
+      await reapply();
       await answer();
     }, settings.allowedHosts)
   });

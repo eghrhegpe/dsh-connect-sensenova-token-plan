@@ -102,19 +102,22 @@ function makeResponse() {
  * @param {object|null} credentials - the fake credentials service.
  * @param {object} [config] - raw row config.
  * @param {object} [deps] - extra seam wiring:
- *   `llm` a fake llm service, `loadAdapterModule` the peer adapter seam.
+ *   `llm` a fake llm service, `tools` a fake agent-tools registry,
+ *   `loadAdapterModule` the peer adapter seam, `loadToolsModule` the peer tools
+ *   seam (both lazily imported in the real Host).
  */
 async function mount(credentials, config = {}, deps = {}) {
   const host = await import(`../src/host/index.ts?route=${Math.random()}`);
   const handlers = new Map();
-  const services = { credentials, llm: deps.llm };
+  const services = { credentials, llm: deps.llm, tools: deps.tools };
   host.apply({
     get: (s) => services[s],
     emit: deps.emit ?? (() => {}),
     effect: () => () => {},
     webServer: { register(spec) { handlers.set(spec.path, spec.handler); return () => {}; } }
   }, { consoleBase: "https://console.test", cacheSeconds: 5, ...config }, {
-    loadAdapterModule: deps.loadAdapterModule
+    loadAdapterModule: deps.loadAdapterModule,
+    loadToolsModule: deps.loadToolsModule
   });
   return async (path, request) => {
     const response = makeResponse();
@@ -1385,6 +1388,41 @@ async function withNetwork(stub, body) {
     const foreign = await call(DRAW_PATH, makePost({ enabled: true }, { origin: "https://evil.test" }));
     check("R8 a cross-origin draw POST is refused",
       foreign.statusCode === 403 && foreign.payload.ok === false, JSON.stringify(foreign.payload));
+
+    // R9: a save reaches the LIVE registry. This is the whole point of the
+    // reconcile hook — the switch value alone would leave the agent holding
+    // whatever was mounted at boot. The fake registry counts what it is asked
+    // to hold and hands back a disposer, so the route's re-application is
+    // visible as "registered, then released, then registered again".
+    const live = [];
+    let disposed = 0;
+    const tools = {
+      register(definition) {
+        live.push(definition.name);
+        return () => { disposed += 1; live.pop(); };
+      }
+    };
+    const call4 = await mount(credentials, {}, {
+      tools,
+      loadToolsModule: async () => ({ defineTool: (definition) => definition })
+    });
+    // The mount's own draw effect is tracked, not awaited (ADR-008), so let it
+    // settle before counting: the switch is off in this room, so it should
+    // register nothing, and this wait keeps that "nothing" from racing the
+    // POST below into a second registration.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const switchedOn = await call4(DRAW_PATH, makePost({ enabled: true }));
+    check("R9 a draw POST registers the tool on the live registry",
+      switchedOn.payload.ok === true && live.length === 1 && live[0] === "sensenova_draw_image",
+      `live=${JSON.stringify(live)} payload=${JSON.stringify(switchedOn.payload)}`);
+    const modelPick = await call4(DRAW_PATH, makePost({ drawModelId: "sensenova-u1-fast" }));
+    check("R9b a model-preference save swaps the tool (the preference is read at call time)",
+      modelPick.payload.ok === true && live.length === 1 && disposed === 1,
+      `live=${JSON.stringify(live)} disposed=${disposed} payload=${JSON.stringify(modelPick.payload)}`);
+    const switchedOff = await call4(DRAW_PATH, makePost({ enabled: false }));
+    check("R9c switching off releases the tool without a restart",
+      switchedOff.payload.ok === true && live.length === 0 && disposed === 2,
+      `live=${JSON.stringify(live)} disposed=${disposed}`);
   } catch (error) { fail("R: the draw switch route", error); }
 }
 

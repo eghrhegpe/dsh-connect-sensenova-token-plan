@@ -268,4 +268,16 @@ export interface Wiring {
    *  an optional property) because "is a timer live?" is state the teardown
    *  must read off the contract, not off property presence. */
   providerRefresh: { current: { close(): void } | null };
+  /** The registered draw tool's disposer — `tools.register` returns one, so the
+   *  tool can be dropped and re-registered in-session instead of waiting for the
+   *  next Host start. A SLOT in the `visionPublish` / `webSearchRestore` shape:
+   *  `apply()` spells it `current: null` = "this plugin holds no draw tool",
+   *  `registerDrawTool` fills it after a successful registration,
+   *  `reconcileDrawTool` empties it before re-registering, and `teardown`
+   *  releases it on unmount. `null` also covers a peer whose `register`
+   *  returns nothing: the tool then works but is not hot-swappable. */
+  drawRestore: { current: (() => void) | null };
+  /** Re-register (or drop) the draw tool against the current switch value; what
+   *  the panel's `draw` route calls after a save so a flip lands in-session. */
+  reconcileDrawTool?: () => Promise<void>;
 }

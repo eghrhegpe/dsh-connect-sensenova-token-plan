@@ -148,11 +148,11 @@ function drawAbsentKey(reason: DrawToolAbsentReason | undefined): DictionaryKey 
 /**
  * The live draw-tool switch (docs/PROVIDER-HOT-RELOAD.md, same discipline
  * as `ProviderSwitch`). Posts `{ enabled }` to the plugin's own `/draw`
- * route; the Host persists the value in its state file. The draw tool
- * itself is mounted at `apply` time (lifecycle.ts), so a panel flip only
- * becomes visible after the NEXT Host (re)mount — but the switch state,
- * the source, and the snapshot's `llm.drawEnabled` are all live, so the
- * panel shows the effective value immediately. Hook-based like
+ * route; the Host persists the value in its state file AND re-applies the
+ * registration (lifecycle.ts -> reconcileDrawTool), so a panel flip mounts or
+ * unmounts the agent tool within the same session — no Host restart. The
+ * switch state, the source, and the snapshot's `llm.drawEnabled` are live
+ * too, so the panel shows the effective value immediately. Hook-based like
  * `ProviderSwitch`; the route is covered by `routes.test.mjs`. The component
  * IS mountable (the stand-in React returns `useState`'s initial value and
  * passes `useCallback` straight through), so `render.test.mjs` also pins the
@@ -178,8 +178,10 @@ export function DrawSwitch({ llm, onDone, tt }: {
       setBusy(false);
     }
   }, [enabled, onDone, tt]);
-  // The draw tool mounts at Host (re)mount time (`lifecycle`), so unlike
-  // the provider switch a flip is NOT immediate — the copy says so.
+  // The draw tool is re-applied by the route itself (`reconcileDrawTool`), so
+  // like the provider switch a flip lands in-session. A model-preference save
+  // goes through the same re-apply, which is why the picker needs no restart
+  // either.
   const hasKey = llm?.hasApiKey === true;
   const candidates = Array.isArray(llm?.drawCandidateIds) ? llm.drawCandidateIds.map((id: unknown) => String(id)) : [];
   const preferred = llm?.drawPreferredModel != null ? String(llm.drawPreferredModel) : null;

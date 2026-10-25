@@ -194,12 +194,13 @@ export async function registerWebSearchProvider(ctx: { get?: (n: string) => unkn
 /**
  * Reconcile the web-search registration to the CURRENT effective value.
  *
- * The registration is read-once at mount (`registerWebSearchProvider` above);
- * the draw tool has the same shape and lives with it, because the tools
- * registry has no unregister. Here the selection DOES have a restore, so an
- * in-session flip is safe: drop whatever this plugin had taken over, then
- * re-register against the new value. Called both at mount (in place of the
- * bare `registerWebSearchProvider`) and from the panel's `webSearch` route.
+ * The registration is read-once at mount (`registerWebSearchProvider` above).
+ * An in-session flip is safe because the takeover has a restore: drop whatever
+ * this plugin had taken over, then re-register against the new value. Called
+ * both at mount (in place of the bare `registerWebSearchProvider`) and from
+ * the panel's `webSearch` route. `reconcileDrawTool` (`draw-mount.ts`) is the
+ * same shape for the agent tool, whose restore is the disposer
+ * `tools.register` returns.
  * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
  * @param {WebSearchToolWiring} wiring - see {@link registerWebSearchProvider}.
  * @returns {Promise<void>}

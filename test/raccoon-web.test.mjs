@@ -51,8 +51,10 @@ function makeWiring(overrides = {}) {
     // The provider-refresher slot (2026-10 review #1b): teardown reads it, so
     // the stub must spell it — a missing field would make teardown's
     // `?.current` path pass by THROWING into its catch instead of by holding
-    // the slot's null. Same slot discipline as the line above.
+    // the slot's null. Same slot discipline as the line above. `drawRestore`
+    // is in the same boat: teardown hands the agent tool back through it.
     providerRefresh: { current: null },
+    drawRestore: { current: null },
     ...overrides
   };
 }

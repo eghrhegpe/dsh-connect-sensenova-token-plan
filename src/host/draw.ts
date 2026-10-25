@@ -435,10 +435,10 @@ export function defineDrawTool({
         throw error;
       }
       // The success hint reports the CURRENTLY available image models: the
-      // tool description is static (the registry has no re-register), so this
-      // is the one channel that carries the dynamic catalog to the model —
-      // after the first successful call it can deliberately pick a specific
-      // model instead of always taking the default.
+      // tool DESCRIPTION is fixed at registration (a catalog refresh does not
+      // re-register), so this is the channel that carries the dynamic catalog
+      // to the model — after the first successful call it can deliberately
+      // pick a specific model instead of always taking the default.
       const drawModelIds = imageGenModelIds(entries).join(", ");
       const available = drawModelIds !== "" ? `\n可用出图模型: ${drawModelIds}` : "";
       const hint = result.url !== ""
