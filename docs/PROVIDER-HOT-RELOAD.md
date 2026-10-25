@@ -79,5 +79,23 @@ trae/workbuddy 的 volatile 路线（把 `registerProvider` 标成 Config schema
 
 与 provider 开关的一个**机制差异**需要说明：provider 开关改的是「当前请求立刻重新发布注册对」；draw 开关改的是「是否给 agent 注册工具」，两者**都无需重启**，但路径不同——draw 走 `reconcileDrawTool`：先释放上一次持有的注册（`tools.register` 返回的 disposer），再按最新生效值重新注册。所以面板上切开关、改模型偏好，工具会在**同一会话内**随即挂载或卸载。面板文案里的「立即生效」因此覆盖工具本身，不再只是开关值。
 
-**已知边界**：两个 Host 进程共享同一状态目录时，后写者胜（与 provider / throttle / catalog 文件语义一致）。`POST /draw` 保存后只重新应用**本进程**的注册：另一个 Host 进程不会收到通知，它的工具要等自己下一次挂载或面板改动才对齐。peer 的 `tools.register` 若返回不出 disposer（老版本 registry），本次注册仍然成功，但槽位留空、无法就地换新——那种 peer 上热重载退化为「已挂载但不可切换」，面板会照常显示开关值。
+两次翻转挨得很近（保存 → 应用还没落定又来一次）时，它们**排队**执行而不是并发：队列挂在 wiring 上，每一趟都重新读一遍状态文件，所以最后一趟读到的就是最后落盘的值——不会出现「开关已经关掉、工具却还挂在 registry 上」。
 
+**已知边界**：两个 Host 进程共享同一状态目录时，后写者胜（与 provider / throttle / catalog 文件语义一致）。`POST /draw` 保存后只重新应用**本进程**的注册：另一个 Host 进程不会收到通知，它的工具要等自己下一次挂载或面板改动才对齐。peer 的 `tools.register` 若返回不出 disposer（老版本 registry），本次注册仍然成功，但摘不掉：面板会显示 `draw.noToolsSticky`（「工具已注册，但本机 Host 不返回注销句柄」），开关照常可切，只是关掉不会卸载。
+
+另外，本插件不表达「开关已开、注册还没落定」这个瞬时态——收敛在同一个请求内完成，那个窗口只有读状态文件的那几毫秒。
+
+## 8. 同一能力的三种实现形态（2026-10 快照）
+
+同厂几个插件都在 2026-10-26 这一晚把「工具热挂载」做掉了，形态各不相同，差别来自**开关存在哪里**，而不是来自工具本身：
+
+| 插件 | 开关存放 | 触发方式 | 收敛 |
+|---|---|---|---|
+| `dsh-connect-workbuddy` | Cordis 配置字段（schemastery 声明、volatile） | 宿主自己发 `loader/volatile-update` 事件 | 事件里直接读当前配置，注册/撤销二选一 |
+| `dsh-connect-modelscope-token-plan` | 插件私有状态文件 | 路由保存后 `await mount.sync()` | `sync()` 串成一条 Promise 链，四种缺席原因（含 `not-removable`），另有 `mounted()` 位供面板表达「开着但还没挂上」 |
+| `dsh-connect-agnes-token-plan` | 插件私有状态文件 | 路由保存后 fire-and-forget 调 `mount.sync()` | 同样一条链；出图与出视频共用一份降级阶梯；无 `not-removable` |
+| 本插件 | 插件私有状态文件 | 路由保存后 `await reconcileDrawTool()` | 一条按 wiring 分身的 Promise 队列；`not-removable` 走独立原因码 |
+
+workbuddy 那条路最省事，代价是开关必须是**宿主看得见的配置**。本插件的开关是 HTTP 路由写进私有状态文件的，宿主全程不知情，所以「保存之后自己重新应用一遍」这一步躲不掉——这是本文 §3 选自有状态 + 自有路由的必然结果，不是实现上的疏漏。
+
+本插件与 modelscope 的差别只在表达力：modelscope 额外维护一个 `mounted()` 位，能在「开关已开、注册尚未落定」的窗口里给面板一句 `mountPending`。本插件的收敛在同一个请求内完成，那个窗口只有读一次状态文件的耗时，所以没引入这个位——真要出现长时间未落定，那是 bug，不该由 UI 常态表达。

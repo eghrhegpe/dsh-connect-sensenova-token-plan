@@ -46,6 +46,44 @@ export type DrawToolSide = {
 };
 
 /**
+ * Per-wiring state for the in-session flip: one serial chain, one unload gate,
+ * one "this registry cannot give the tool back" flag.
+ *
+ * Keyed by the `wiring` bag rather than held in module scope, because a
+ * module-level chain would serialise two independent Hosts inside one process
+ * (the test suites mount several) and a module-level `closed` flag would leak
+ * one Host's shutdown into the next. `coalesced-fetch.ts` keys its generation
+ * state the same way, for the same reason: the object that owns the state is
+ * the identity, not the module.
+ *
+ * The chain is the concurrency fix. `reconcileDrawTool` reads the switch
+ * INSIDE the queued step, so two flips that arrive while one pass is in flight
+ * settle on the newest value instead of racing: without it, a slow ON pass can
+ * finish after a fast OFF pass and leave the tool mounted with the switch
+ * visibly off.
+ */
+type ReconcileState = {
+  /** Serial queue: every pass runs after the previous one settles. */
+  chain: Promise<void>;
+  /** Set by {@link closeDrawTool}; a queued pass that has not started bails. */
+  closed: boolean;
+  /** The registry accepted the tool but returned no disposer (older peer). */
+  sticky: boolean;
+};
+
+const RECONCILE_STATE = new WeakMap<object, ReconcileState>();
+
+/** The (created-on-demand) flip state belonging to one wiring bag. */
+function reconcileStateOf(wiring: object): ReconcileState {
+  let state = RECONCILE_STATE.get(wiring);
+  if (state === undefined) {
+    state = { chain: Promise.resolve(), closed: false, sticky: false };
+    RECONCILE_STATE.set(wiring, state);
+  }
+  return state;
+}
+
+/**
  * The wiring subset {@link registerDrawTool} reads — its own `Pick`, not the
  * whole bag.
  *
@@ -150,6 +188,11 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
     setDrawToolNote("peer-load-failed");
     return;
   }
+  // Last gate before the registry is touched: the await chain above can be
+  // long (panel store, peer module), and `teardown` may have closed this bag
+  // while it was pending. Registering here would install a tool that outlives
+  // the plugin, since nothing is left to hand it back.
+  if (reconcileStateOf(wiring).closed) return;
   try {
     const dispose = tools.register(
       defineDrawTool({
@@ -173,12 +216,24 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
         isDisposed: () => publisher.isDisposed()
       })
     );
-    // Hold the disposer so a later switch flip can drop this tool. A peer
-    // whose `register` predates the return value hands back nothing: the tool
-    // still works, it just cannot be swapped in-session, and keeping the slot
-    // `null` states that honestly instead of arming a reconcile that would
-    // throw.
-    wiring.drawRestore.current = typeof dispose === "function" ? (dispose as () => void) : null;
+    const state = reconcileStateOf(wiring);
+    if (typeof dispose === "function") {
+      // Hold the disposer so a later switch flip can drop this tool.
+      wiring.drawRestore.current = dispose as () => void;
+      state.sticky = false;
+    } else {
+      // An older registry accepts the definition but hands back no disposer:
+      // the tool WORKS and cannot be withdrawn. Two things follow, and both
+      // are load-bearing. The panel must say so (`not-removable`) — the
+      // alternative is a user switching off, reading "off", and still
+      // getting a draw tool. And the `sticky` flag must stop the next flip
+      // from registering a SECOND copy: a duplicate name is an error, so the
+      // honest state is "mounted, not swappable", not a retry loop.
+      wiring.drawRestore.current = null;
+      state.sticky = true;
+      setDrawToolNote("not-removable");
+      degrade("draw: tools registry accepted the tool but returned no disposer — this Host cannot unmount it", null, wiring.logger, null);
+    }
   } catch (error) {
     // A registry that refuses the tool degrades identically — tool absent,
     // panel fine — and is a Host problem, not a config one: say it, and state
@@ -193,32 +248,80 @@ export async function registerDrawTool(ctx: { get?: (n: string) => unknown; [key
  * holds (if any), then register it again against the current value.
  *
  * The draw counterpart of `reconcileWebSearch` (`web-search.ts`), and the
- * reason a panel flip no longer needs a Host restart. Two details are
+ * reason a panel flip no longer needs a Host restart. Three details are
  * load-bearing:
  *
- *   - the slot is emptied BEFORE the disposer runs, so a re-entrant call (a
- *     second flip arriving while this one is in flight) reads "nothing held"
- *     rather than calling a disposer that is already spent;
+ *   - **passes are serialised per wiring bag** ({@link reconcileStateOf}). The
+ *     switch is read INSIDE the queued step, so a pass that was queued while
+ *     an earlier one was still awaiting the store settles on the newest value.
+ *     Without the queue the two passes interleave: the second one finds the
+ *     slot already emptied by the first, decides there is nothing to release,
+ *     and the first one then registers using the STALE value it read before
+ *     the flip — leaving the tool mounted with the switch visibly off;
+ *   - the slot is emptied BEFORE the disposer runs, so a re-entrant call reads
+ *     "nothing held" rather than calling a disposer that is already spent;
  *   - a disposer that throws must not sink the re-registration — during
  *     shutdown the registry may already be gone, and the new registration is
  *     the caller's actual request.
  *
  * Nothing held is the ordinary case: an off→on flip has no tool to release, so
- * the slot is `null` and this degrades to a plain registration.
+ * the slot is `null` and this degrades to a plain registration. A registry
+ * that accepted the tool without a disposer is the one case that is NOT
+ * reconciled: it holds the tool and cannot give it back, so a pass is a no-op
+ * rather than a duplicate registration (see the `sticky` branch in
+ * {@link registerDrawTool}).
  * @param {{ get?: (n: string) => unknown; [key: string]: unknown }} ctx - the host root context.
  * @param {DrawToolWiring} wiring - the same subset {@link registerDrawTool} reads.
  * @param {DrawToolSide} side - test seams from `apply`'s `deps`.
- * @returns {Promise<void>}
+ * @returns {Promise<void>} resolves when THIS pass has run (queued behind any
+ *   pass already in flight).
  */
 export async function reconcileDrawTool(ctx: { get?: (n: string) => unknown; [key: string]: unknown }, wiring: DrawToolWiring, side: DrawToolSide) {
+  const state = reconcileStateOf(wiring);
+  const pass = async () => {
+    if (state.closed) return;
+    if (state.sticky) return;
+    const held = wiring.drawRestore.current;
+    wiring.drawRestore.current = null;
+    if (held !== null) {
+      try {
+        held();
+      } catch {
+        // A frozen registry must not sink the reconcile.
+      }
+    }
+    await registerDrawTool(ctx, wiring, side);
+  };
+  // The chain never carries a rejection forward: one failed pass must not stop
+  // every later flip. `registerDrawTool` already absorbs the registry's own
+  // refusals; what is left here is a genuine bug and it goes to the log.
+  state.chain = state.chain.then(pass).catch((error) => {
+    degrade("draw: reconcile pass failed", error, wiring.logger, null);
+  });
+  return state.chain;
+}
+
+/**
+ * Close the flip machinery for one wiring bag: no queued or later pass may
+ * register, and the tool this plugin holds is handed back now.
+ *
+ * Called by `teardown` instead of disposing `drawRestore.current` directly, so
+ * that a pass already in flight cannot register into a Host that is letting
+ * the plugin go — the `closed` gate is read at the top of every pass AND again
+ * just before `tools.register`.
+ * @param {object} wiring - the same bag `reconcileDrawTool` was given.
+ * @returns {void}
+ */
+export function closeDrawTool(wiring: Pick<Wiring, "drawRestore">): void {
+  const state = reconcileStateOf(wiring);
+  state.closed = true;
   const held = wiring.drawRestore.current;
   wiring.drawRestore.current = null;
   if (held !== null) {
     try {
       held();
     } catch {
-      // A frozen registry must not sink the reconcile.
+      // The registry may already be gone during shutdown.
     }
   }
-  await registerDrawTool(ctx, wiring, side);
 }

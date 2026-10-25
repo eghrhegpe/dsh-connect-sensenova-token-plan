@@ -131,14 +131,18 @@ export interface AuthData {
  * map won't compile until a key exists.
  *
  * `no-tools-service` is the one NORMAL absence (this Host exposes no tools
- * service); the other two are Host bugs whose traces also go to the log via
- * `degrade`. Adding a cause means adding it here, in the host writer, and in
- * the i18n dictionary — nothing else.
+ * service); `peer-load-failed` and `registry-refused` are Host bugs whose
+ * traces also go to the log via `degrade`; `not-removable` is neither — it is
+ * a capability boundary of an older registry, which accepts the tool but hands
+ * back no disposer, so the tool works and cannot be withdrawn. Adding a cause
+ * means adding it here, in the host writer, and in the i18n dictionary —
+ * nothing else.
  */
 export type DrawToolAbsentReason =
   | "no-tools-service"
   | "peer-load-failed"
-  | "registry-refused";
+  | "registry-refused"
+  | "not-removable";
 
 /** The `llm` block: key presence, registration state, and the roster. */
 export interface LlmData {

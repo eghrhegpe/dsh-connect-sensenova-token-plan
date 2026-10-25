@@ -190,6 +190,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.noTools": "drawEnabled 已开启，但当前 Host 没有提供 agent tools 注册服务，工具静默缺席。",
 			"draw.noToolsPeer": "drawEnabled 已开启，但 agent tools 插件包加载失败，出图工具缺席（Host 问题，非配置）。",
 			"draw.noToolsRefused": "drawEnabled 已开启，但工具注册被 Host 拒绝，出图工具缺席（Host 问题，非配置）。",
+			"draw.noToolsSticky": "工具已注册，但本机 Host 不返回注销句柄——关掉开关也摘不掉它（旧 Host 限制）。",
 			"draw.needsKey": "尚未配置 API Key；保存后即可出图。",
 			"draw.noCandidates": "当前 API Key 目录里暂无出图模型；出图不可用。",
 			"tab.quota": "积分额度",
@@ -404,6 +405,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"draw.noTools": "drawEnabled is on, but this Host exposes no agent tools service; the tool is silently absent.",
 			"draw.noToolsPeer": "drawEnabled is on, but the agent tools peer module failed to load; the draw tool is absent (a Host fault, not config).",
 			"draw.noToolsRefused": "drawEnabled is on, but the Host refused the tool registration; the draw tool is absent (a Host fault, not config).",
+			"draw.noToolsSticky": "The tool is registered, but this Host returns no disposer — turning the switch off cannot unmount it (an older Host limitation).",
 			"draw.needsKey": "No API key yet; save one to start generating images.",
 			"draw.noCandidates": "This API key's catalogue has no image model; drawing is unavailable.",
 			"tab.quota": "Quota & Usage",
@@ -1789,8 +1791,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		const candidates = Array.isArray(llm?.drawCandidateIds) ? llm.drawCandidateIds.map((id) => String(id)) : [];
 		const preferred = llm?.drawPreferredModel != null ? String(llm.drawPreferredModel) : null;
 		const effective = String(llm?.drawModel ?? "");
-		const absentKey = drawAbsentKey(llm?.drawToolNote);
-		const statusText = enabled ? absentKey ? tt(absentKey) : hasKey ? tt("draw.onList") : tt("draw.needsKey") : tt("draw.off");
+		const note = llm?.drawToolNote;
+		const absentKey = drawAbsentKey(note);
+		const statusText = absentKey !== null && (enabled || note === "not-removable") ? tt(absentKey) : enabled ? hasKey ? tt("draw.onList") : tt("draw.needsKey") : tt("draw.off");
 		const saveModel = useCallback(async (id) => {
 			setBusy(true);
 			setSwitchError(null);
@@ -1881,7 +1884,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		DRAW_ABSENT_KEY = {
 			"no-tools-service": "draw.noTools",
 			"peer-load-failed": "draw.noToolsPeer",
-			"registry-refused": "draw.noToolsRefused"
+			"registry-refused": "draw.noToolsRefused",
+			"not-removable": "draw.noToolsSticky"
 		};
 	}));
 

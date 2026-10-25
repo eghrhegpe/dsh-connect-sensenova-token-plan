@@ -337,9 +337,9 @@ const healthy = {
     // over the `drawAbsentKey` table — the only literals the scans cannot
     // resolve. This set used to shelter ten more keys behind the "dynamic"
     // label that no component ever read; those are gone with their dictionary
-    // rows, and the check below re-proves the remaining three are the
+    // rows, and the check below re-proves the remaining few are the
     // genuinely unreachable ones.
-    "draw.noTools", "draw.noToolsPeer", "draw.noToolsRefused"
+    "draw.noTools", "draw.noToolsPeer", "draw.noToolsRefused", "draw.noToolsSticky"
   ]);
   const clientFiles = (await readdir(new URL("../src/client", import.meta.url), { recursive: true }))
     .filter((name) => name.endsWith(".ts") && !name.endsWith("i18n.ts"));

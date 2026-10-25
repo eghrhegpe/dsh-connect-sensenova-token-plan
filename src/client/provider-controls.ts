@@ -136,7 +136,8 @@ export function ProviderSwitch({ llm, onDone, tt }: {
 const DRAW_ABSENT_KEY: Record<DrawToolAbsentReason, DictionaryKey> = {
   "no-tools-service": "draw.noTools",
   "peer-load-failed": "draw.noToolsPeer",
-  "registry-refused": "draw.noToolsRefused"
+  "registry-refused": "draw.noToolsRefused",
+  "not-removable": "draw.noToolsSticky"
 };
 
 /** The i18n key for a reason, or null when there is no reason to state. */
@@ -186,15 +187,22 @@ export function DrawSwitch({ llm, onDone, tt }: {
   const candidates = Array.isArray(llm?.drawCandidateIds) ? llm.drawCandidateIds.map((id: unknown) => String(id)) : [];
   const preferred = llm?.drawPreferredModel != null ? String(llm.drawPreferredModel) : null;
   const effective = String(llm?.drawModel ?? "");
-  // The one absence the panel states: the switch is on but the tool never
-  // registered. Rendered instead of "on — model list" because the latter reads
-  // as "drawing works", which is not the case. `no-tools-service` is the normal
-  // absence; the two Host-bug reasons also log via `degrade` and are named
-  // here so the user can tell them apart without opening the log.
-  const absentKey = drawAbsentKey(llm?.drawToolNote);
-  const statusText = enabled
-    ? (absentKey ? tt(absentKey) : hasKey ? tt("draw.onList") : tt("draw.needsKey"))
-    : tt("draw.off");
+  // The absence lines. Rendered instead of "on — model list" because the
+  // latter reads as "drawing works", which is not the case. `no-tools-service`
+  // is the normal absence; the two Host-bug reasons also log via `degrade` and
+  // are named here so the user can tell them apart without opening the log.
+  //
+  // `not-removable` is the one line that must survive the switch being OFF: it
+  // says the tool IS mounted and this Host cannot withdraw it, so hiding it
+  // behind `enabled` would show "off" while the agent still has the tool —
+  // exactly the confusion the line exists to prevent.
+  const note = llm?.drawToolNote;
+  const absentKey = drawAbsentKey(note);
+  const statusText = absentKey !== null && (enabled || note === "not-removable")
+    ? tt(absentKey)
+    : enabled
+      ? (hasKey ? tt("draw.onList") : tt("draw.needsKey"))
+      : tt("draw.off");
   // Pick a draw model from the panel: `null` returns to auto-pick. The Host
   // validates the id against the same catalog precedence the tool uses, so a
   // stale id degrades to the config default rather than a broken tool.

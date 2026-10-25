@@ -2,8 +2,8 @@
  * The draw tool's mount-time absence note, in memory only.
  *
  * `registerDrawTool` (draw-mount.ts) is the single place that decides whether
- * the opt-in draw tool actually got registered. Three of its bail-outs are
- * "the tool is absent" with the switch visibly on:
+ * the opt-in draw tool actually got registered. Four of its outcomes are
+ * worth stating on the panel, and each has its own line:
  *
  *   - the Host exposes no `tools` service (or its `register` is not a
  *     function) — a NORMAL absence, nothing is broken, but the panel should
@@ -11,7 +11,11 @@
  *   - the tools peer module failed to load or shipped no `defineTool` — a
  *     Host bug, logged via `degrade` AND stated on the panel;
  *   - the registry refused the registration — a Host bug, logged via
- *     `degrade` AND stated on the panel.
+ *     `degrade` AND stated on the panel;
+ *   - the registry accepted it but returned no disposer — an OLDER peer's
+ *     capability boundary, not a bug: the tool works and cannot be withdrawn.
+ *     Stated on the panel and logged, because "the switch is off and the tool
+ *     still answers" is otherwise unexplainable from the UI.
  *
  * This module holds exactly one of those reasons (or none). It is the
  * WRITER's home: `registerDrawTool` sets it, and the snapshot route

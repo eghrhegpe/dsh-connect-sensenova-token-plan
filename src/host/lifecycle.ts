@@ -34,7 +34,7 @@
 import { seedPublisherFromCatalog } from "./provider-publish.ts";
 import { retryBounded, errMsg, resolveServiceWithRetry } from "./util.ts";
 import { armProviderRefresher } from "./provider-refresh.ts";
-import { reconcileDrawTool, type DrawToolSide } from "./draw-mount.ts";
+import { closeDrawTool, reconcileDrawTool, type DrawToolSide } from "./draw-mount.ts";
 import { name } from "./host-config.ts";
 import { RACCOON_FALLBACK_MODELS, fetchRaccoonCatalog } from "./raccoon.ts";
 import { filterRaccoonRows } from "./raccoon-models.ts";
@@ -195,7 +195,8 @@ export function startSideEffects(ctx: { get?: (n: string) => unknown; [key: stri
   // whatever this plugin already holds before registering, which is exactly
   // what the panel's route does after a flip — so a mount and a flip share one
   // path, and an off→on flip lands in-session instead of at the next Host
-  // start.
+  // start. It is also a QUEUE (`reconcileDrawTool`), so a flip that arrives
+  // while this mount pass is still reading the store cannot race it.
   effects.add("draw-tool", () => reconcileDrawTool(ctx, wiring, side));
 
   // Web-search absorption (ROADMAP §6.1.7): opt-in, doubly degraded, and the
@@ -319,7 +320,7 @@ async function publishVisionStepTwo(ctx: { get?: (n: string) => unknown; [key: s
 // ------------------------------------------------------------------
 export type { WebSearchRuntime, WebSearchSelection, WebSearchToolWiring } from "./web-search.ts";
 export { webSearchSelection, applyWebSearchSelection, registerWebSearchProvider } from "./web-search.ts";
-export { registerDrawTool, reconcileDrawTool } from "./draw-mount.ts";
+export { registerDrawTool, reconcileDrawTool, closeDrawTool } from "./draw-mount.ts";
 export type { DrawToolWiring, DrawFetchResponse, DrawToolSide } from "./draw-mount.ts";
 import { reconcileWebSearch } from "./web-search.ts";
 export { reconcileWebSearch };
@@ -341,6 +342,8 @@ export { reconcileWebSearch };
  * @param {Wiring} wiring - assembled by `apply()`; the fields read here are
  *   `publisher` / `releaseProvider` / `raccoonPublisher` / `webSearchRestore`
  *   / `providerRefresh` / `drawRestore`, so the type says exactly that shape.
+ *   `drawRestore` is handed to {@link closeDrawTool} rather than called here,
+ *   because the reconcile gate has to close with it.
  * @param {Array<() => void>} offs - the unregister callbacks from
  *   {@link registerRoutes}. `Function[]` was the old spelling and it is
  *   `any[]` in disguise — a `Function` may be called with any arguments and
@@ -355,14 +358,10 @@ export function teardown(wiring: Pick<Wiring, "publisher" | "releaseProvider" | 
   }
   // Hand the agent tool back too: the registry belongs to the Host fiber, so a
   // tool registered here would otherwise outlive this plugin's unmount until
-  // the whole Host stops. Emptying the slot first is what makes a second
-  // teardown a no-op rather than a spent-disposer call.
-  try {
-    wiring.drawRestore.current?.();
-    wiring.drawRestore.current = null;
-  } catch {
-    // The registry may already be gone during shutdown.
-  }
+  // the whole Host stops. Through `closeDrawTool`, not by calling the slot
+  // directly: it also shuts the reconcile gate, so a flip still queued behind
+  // the drain cannot register a tool that nothing is left to hand back.
+  closeDrawTool(wiring);
   // Stop the background refresher's clock FIRST among the timers: a tick that
   // fires between this line and `publisher.dispose()` would be stopped by the
   // disposed gate anyway, but clearing the interval here means a withdrawing

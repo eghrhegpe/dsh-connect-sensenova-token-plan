@@ -425,7 +425,10 @@ async function rejects(fn) {
         get: (service) => {
           if (service !== "tools") return undefined;
           reads += 1;
-          return reads >= 2 ? { register: (tool) => { registered.push(tool); } } : undefined;
+          // A normal registration hands back a disposer. Returning nothing is
+          // the `not-removable` case now (asserted separately), not the
+          // "successful registration" this block is about.
+          return reads >= 2 ? { register: (tool) => { registered.push(tool); return () => {}; } } : undefined;
         }
       };
       const wiring = {
@@ -572,14 +575,108 @@ async function rejects(fn) {
         `live=${JSON.stringify(live)} disposals=${disposals.length}`);
 
       // A peer whose `register` returns nothing: the tool works, the slot
-      // stays null, and the next reconcile must not throw on a missing
-      // disposer.
+      // stays null, the panel says the tool cannot be withdrawn, and the next
+      // reconcile must not throw on a missing disposer — nor register a second
+      // copy of a tool it can no longer take back.
       const bareTools = { register: (definition) => { live.push(definition.name); } };
       const bareWiring = { ...wiring, drawRestore: { current: null } };
       await reconcileDrawTool({ get: () => bareTools }, bareWiring, side);
       check("a peer that returns no disposer leaves the slot null instead of arming a spent one",
         bareWiring.drawRestore.current === null && live.length === 2,
         `slot=${typeof bareWiring.drawRestore.current} live=${JSON.stringify(live)}`);
+      check("a peer that returns no disposer states that the tool cannot be withdrawn",
+        drawToolNote() === "not-removable", `drawToolNote=${drawToolNote()}`);
+      await reconcileDrawTool({ get: () => bareTools }, bareWiring, side);
+      check("a tool that cannot be withdrawn is not registered a second time",
+        live.length === 2, `live=${JSON.stringify(live)}`);
+    }
+    // Concurrency: two flips that overlap must settle on the LAST value. The
+    // switch read is deliberately slow so the second pass is queued while the
+    // first one is still awaiting the store — the interleaving that used to
+    // leave the tool mounted with the switch visibly off.
+    {
+      const { reconcileDrawTool } = await import("../src/host/lifecycle.ts");
+      const live = [];
+      const tools = {
+        register(definition) {
+          live.push(definition.name);
+          return () => { live.pop(); };
+        }
+      };
+      let reads = 0;
+      let switchOn = true;
+      const wiring = {
+        settings: { drawEnabled: false, drawModelId: "" },
+        configError: null,
+        providerState: { entries: [] },
+        catalogStore: { list: async () => [] },
+        resolveApiKey: async () => "sk-live",
+        publisher: { isDisposed: () => false },
+        drawStore: {
+          // The FIRST read is the slow one: it captures the ON value while the
+          // OFF flip arrives and is queued behind it.
+          enabled: async () => {
+            reads += 1;
+            if (reads === 1) {
+              await new Promise((resolve) => setTimeout(resolve, 30));
+              return true;
+            }
+            return switchOn ? true : null;
+          },
+          modelId: async () => null
+        },
+        drawRestore: { current: null },
+        logger: { warn: () => {} }
+      };
+      const side = {
+        loadToolsModule: async () => ({ defineTool: (tool) => ({ name: tool.name }) }),
+        drawFetch: async () => ({})
+      };
+      const ctx = { get: (service) => (service === "tools" ? tools : undefined) };
+      const first = reconcileDrawTool(ctx, wiring, side);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      switchOn = false;
+      const second = reconcileDrawTool(ctx, wiring, side);
+      await Promise.all([first, second]);
+      check("two overlapping flips settle on the last value (off means unmounted)",
+        switchOn === false && live.length === 0 && wiring.drawRestore.current === null,
+        `live=${JSON.stringify(live)} slot=${typeof wiring.drawRestore.current}`);
+    }
+    // Shutdown: a pass queued behind the drain must not register into a Host
+    // that is letting the plugin go.
+    {
+      const { closeDrawTool, reconcileDrawTool } = await import("../src/host/lifecycle.ts");
+      const live = [];
+      const tools = {
+        register(definition) {
+          live.push(definition.name);
+          return () => { live.pop(); };
+        }
+      };
+      const wiring = {
+        settings: { drawEnabled: true, drawModelId: "" },
+        configError: null,
+        providerState: { entries: [] },
+        catalogStore: { list: async () => [] },
+        resolveApiKey: async () => "sk-live",
+        publisher: { isDisposed: () => false },
+        drawStore: { enabled: async () => null, modelId: async () => null },
+        drawRestore: { current: null },
+        logger: { warn: () => {} }
+      };
+      const side = {
+        loadToolsModule: async () => ({ defineTool: (tool) => ({ name: tool.name }) }),
+        drawFetch: async () => ({})
+      };
+      const ctx = { get: (service) => (service === "tools" ? tools : undefined) };
+      await reconcileDrawTool(ctx, wiring, side);
+      check("a reconcile with the switch on mounts the tool", live.length === 1, `live=${JSON.stringify(live)}`);
+      closeDrawTool(wiring);
+      check("closing the mount hands the tool back",
+        live.length === 0 && wiring.drawRestore.current === null, `live=${JSON.stringify(live)}`);
+      await reconcileDrawTool(ctx, wiring, side);
+      check("a reconcile after close does not resurrect the tool",
+        live.length === 0, `live=${JSON.stringify(live)}`);
     }
     // startSideEffects: vision step two's writer is only filled once the
     // settings service can actually be reached. A poll after the late fill

@@ -904,15 +904,18 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       typeof surface.dictionaries.zh["draw.off"] === "string",
     JSON.stringify(Object.keys(surface.dictionaries.zh).filter((k) => k.startsWith("draw."))));
 
-  // The three absence reasons: switch on, the tool never registered. Each must
+  // The absence reasons: switch on, the tool never registered. Each must
   // render ITS line rather than "on — model list", which would read as
   // "drawing works". `no-tools-service` is the normal absence; the other two
   // are Host bugs and are told apart so the user does not open the log to know
-  // which one happened.
+  // which one happened. `not-removable` is the fourth: the tool IS mounted and
+  // this Host cannot withdraw it, so its line must survive the switch being
+  // OFF — the row would otherwise read "off" while the tool still answers.
   const absentReasons = [
     { reason: "no-tools-service", key: "draw.noTools" },
     { reason: "peer-load-failed", key: "draw.noToolsPeer" },
-    { reason: "registry-refused", key: "draw.noToolsRefused" }
+    { reason: "registry-refused", key: "draw.noToolsRefused" },
+    { reason: "not-removable", key: "draw.noToolsSticky" }
   ];
   for (const { reason, key } of absentReasons) {
     const tree = treeOf(render.DrawSwitch, {
@@ -928,6 +931,17 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       typeof surface.dictionaries.zh[key] === "string"
         && typeof surface.dictionaries.en[key] === "string"),
     absentReasons.map(({ key }) => `${surface.dictionaries.zh[key]} / ${surface.dictionaries.en[key]}`).join(" || "));
+  // The sticky line is the one that must render with the switch OFF: the tool
+  // is mounted and cannot be withdrawn, so "off" would be a lie.
+  {
+    const tree = treeOf(render.DrawSwitch, {
+      llm: { ...drawLlm, drawEnabled: false, drawToolNote: "not-removable" },
+      tt
+    });
+    const text = texts(tree).join("\n");
+    check("the not-removable line renders even with the switch off",
+      text.includes("draw.noToolsSticky") && !text.includes("draw.off"), text);
+  }
 
   // The row SHAPE is a contract, not a detail: `modelRow` is a column (a head
   // line over an optional parameter line), so the name and its badge must be
