@@ -12,8 +12,9 @@
  *
  * @module dsh-connect-sensenova-token-plan/routes/http
  */
-import { isAdmitted } from "../host-config.ts";
-import { errMsg, redactSecrets } from "../util.ts";
+import { hostName, isAdmitted } from "../host-config.ts";
+import { CODE } from "../codes.ts";
+import { errMsg, redactSecrets, str } from "../util.ts";
 
 /** Family default response headers for a JSON route. */
 export const JSON_HEADERS = {
@@ -78,11 +79,29 @@ export async function readJsonBody(request: any, limit = MAX_ACCOUNT_BODY_BYTES)
  * Every route opens with the identical line, so the wording and the 403 shape
  * live in one place: a route that forgets the fence, or words it differently,
  * is now the odd one out rather than a second truth.
+ *
+ * The body is SELF-EXPLAINING (issue #4): a bare "origin mismatch" reads as an
+ * authorization bug the reader has to go dig out of the source, when the
+ * actual fix is one config row. `code` is the wire code the panel keys its
+ * guidance on (`host_not_admitted` is in `NO_LOGIN_CODES`, so the panel says
+ * "open it from localhost or list this host" instead of offering a sign-in
+ * form), `host` names what was refused, and `fix` states the edit.
  * @param response - the outgoing HTTP response.
+ * @param {string} [host] - the request's raw `Host` header, for the body.
  * @returns {void}
  */
-export function refuseOrigin(response: any) {
-  writeJson(response, 403, { ok: false, error: "forbidden: origin mismatch" });
+export function refuseOrigin(response: any, host = "") {
+  const name = hostName(str(host, ""));
+  writeJson(response, 403, {
+    ok: false,
+    code: CODE.HOST_NOT_ADMITTED,
+    error:
+      name === ""
+        ? "forbidden: the request carried no Host header this plugin answers as"
+        : `forbidden: this plugin does not serve the host "${name}"`,
+    host: name,
+    fix: "add this host name to allowedHosts (cordis.patch.yml) and reload, or open the panel from localhost"
+  });
 }
 
 /**
@@ -149,7 +168,9 @@ export async function readJsonBodyOr400(request: any, response: any, limit = MAX
 export function withOrigin(handler: (request: any, response: any) => Promise<void>, allowedHosts: Set<string>) {
   return async (request: any, response: any) => {
     if (!isAdmitted(request, allowedHosts)) {
-      refuseOrigin(response);
+      // Pass the header along: the refusal names the host it turned away, so
+      // the reader does not have to guess which address the browser sent.
+      refuseOrigin(response, typeof request.headers?.host === "string" ? request.headers.host : "");
       return;
     }
     return handler(request, response);

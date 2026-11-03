@@ -23,6 +23,8 @@ import { writeJson, refuseMethod, readJsonBodyOr400, withOrigin, wantsDiagnostic
 import type { Wiring } from "../types.ts";
 import {
   pollRaccoonQrLogin,
+  pollRaccoonIamQrLogin,
+  issueRaccoonScan,
   fetchRaccoonCatalog,
   RACCOON_FALLBACK_MODELS
 } from "../raccoon.ts";
@@ -104,7 +106,12 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
   }
 
   const raccoonWalkManager = createRaccoonWalk({
+    // Two pollers for two code families (2026-11: the gateway issues codes
+    // from `/api/iam/v1`, whose envelope is the string-`code` half). The
+    // walk picks by `issued.iam`; `issueCode` is what decides that.
     fetcher: (code: string) => pollRaccoonQrLogin(code),
+    pollIam: (code: string) => pollRaccoonIamQrLogin(code),
+    issueCode: () => issueRaccoonScan(),
     saveCredential: (credential) => (raccoonStore ? raccoonStore.save(credential) : Promise.reject(new Error("no raccoon credential store"))),
     invalidateCache: () => raccoonRead.clear(),
     // No `onSettled`: it exists for callers with per-scan UI state to reset,
@@ -287,14 +294,34 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
           // a second one. Two walks would each own a different code while the
           // GET can only ever report one — a scan that looks permanently stuck.
           const cur = walkView.liveScan();
-          await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur!.url, scanCode: cur!.code });
+          if (cur === null) {
+            // `isInFlight` is also true while a scan is being ISSUED (the
+            // gate covers the network round-trip), and no code exists yet —
+            // so a second click is told to wait rather than shown a QR
+            // assembled from `null`.
+            await answer({ ok: true, status: LOGIN_STATUS.scanning, code: "qr_issuing" });
+            return;
+          }
+          await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur.url, scanCode: cur.code });
           return;
         }
-        void raccoonWalkManager.issueScan();
-        // The scan is now in flight: report it to the caller so the tab can
-        // render the QR. The GET will poll for the settled event via takeEvent().
+        // AWAITED: issuing now costs a network round-trip (server codegen +
+        // the confirm-page probe), so the scan exists when this resolves —
+        // the old fire-and-forget read `liveScan()` a tick later and papered
+        // over the gap with `cur!`. It also means `unavailable` (the
+        // confirm page 404s) is reported as an outcome here instead of a
+        // 5-minute wait that mislabels it as an expiry.
+        await raccoonWalkManager.issueScan();
+        // The scan is in flight: report it to the caller so the tab can
+        // render the QR. The GET polls for the settled event via takeEvent().
         const cur = walkView.liveScan();
-        await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur!.url, scanCode: cur!.code });
+        if (cur === null) {
+          // Only the `unavailable` outcome reaches here without a scan: there
+          // is no QR to show, so say why instead of rendering an empty frame.
+          await answer({ ok: true, status: LOGIN_STATUS.unavailable, code: "qr_unavailable" });
+          return;
+        }
+        await answer({ ok: true, status: LOGIN_STATUS.scanning, scanUrl: cur.url, scanCode: cur.code });
         return;
       }
 

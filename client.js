@@ -43,6 +43,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"panel.configError": "插件配置有误：{error}",
 			"panel.consoleTransient": "商汤控制台暂时无法读取，通常下一次自动刷新即可恢复；若持续出现，请检查网络后稍再重试。",
 			"panel.shapeDrift": "上游返回的结构可能有变：{detail}",
+			"panel.hostNotAdmitted": "面板是从本插件不提供服务的地址打开的（Host: {host}）。请从 localhost 打开，或把该主机名加进 cordis.patch.yml 的 allowedHosts 后重载插件。",
 			"composer.pillTitle": "商汤 Token Plan 额度",
 			"composer.pool5h": "5 小时",
 			"composer.pool7d": "每周",
@@ -243,6 +244,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.loginTimeout": "扫码超时（未在时限内确认）——请重新点击登录。",
 			"raccoon.loginCanceled": "扫码已取消——请重新点击登录。",
 			"raccoon.loginFailed": "登录未能保存：{error}",
+			"raccoon.scanUnavailable": "上游扫码确认页当前不可用（打开即 404），所以本轮扫码不会成功——这不是二维码过期。请稍后重试，或先用已登录的账号继续。",
 			"raccoon.httpFailed": "本机 Host 应答 HTTP {status}（小浣熊读取失败）",
 			"raccoon.noAnswer": "本机 Host 没有应答",
 			"raccoon.qrAlt": "微信扫码登录二维码",
@@ -259,6 +261,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"panel.configError": "The plugin is misconfigured: {error}",
 			"panel.consoleTransient": "The SenseNova console could not be read just now. This usually clears on the next automatic refresh; if it persists, check your network and try again shortly.",
 			"panel.shapeDrift": "The upstream payload shape may have changed: {detail}",
+			"panel.hostNotAdmitted": "This panel was opened from an address the plugin does not serve (Host: {host}). Open it from localhost, or add that host name to allowedHosts in cordis.patch.yml and reload the plugin.",
 			"composer.pillTitle": "SenseNova Token Plan quota",
 			"composer.pool5h": "5h",
 			"composer.pool7d": "weekly",
@@ -459,6 +462,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.loginTimeout": "The scan timed out (no confirmation within the deadline) — start it again.",
 			"raccoon.loginCanceled": "The scan was canceled — start it again.",
 			"raccoon.loginFailed": "Sign-in could not be saved: {error}",
+			"raccoon.scanUnavailable": "The upstream scan-confirmation page is currently unavailable (it answers 404), so this scan cannot complete — this is not an expired QR code. Try again later, or keep using the account that is already signed in.",
 			"raccoon.httpFailed": "The local Host answered HTTP {status} (the Raccoon read failed)",
 			"raccoon.noAnswer": "The local Host gave no answer",
 			"raccoon.qrAlt": "WeChat sign-in QR code",
@@ -679,21 +683,48 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	/**
 	* The failure a non-2xx snapshot response becomes.
 	*
-	* A non-2xx carries no body, so the status is the only clue. 401/403 mean
-	* the token is gone — the same story as the Host's own `jwt_expired`, and
-	* the only reading that keeps the sign-in form on screen instead of leaving
-	* the reader with a bare status code. Anything else is a plain transport
-	* string, which keeps the form reachable too.
+	* 401/403 mean the token is gone — the same story as the Host's own
+	* `jwt_expired`, and the reading that keeps the sign-in form on screen
+	* instead of leaving the reader with a bare status code. Anything else is a
+	* plain transport string, which keeps the form reachable too.
+	*
+	* A 403 is NOT always a token problem, though: the route's trust fence
+	* answers 403 too, with a `code` in the body (`host_not_admitted` when the
+	* panel was opened from an address the plugin does not serve). That code
+	* must win over the status, or the reader is offered a sign-in form for a
+	* config problem (issue #4). Only codes in `FORM_EXCLUDED_CODES` may win —
+	* an unknown 403 code still reads as `jwt_expired`, so a future code cannot
+	* silently steal the login path.
 	*
 	* Named and module-scoped for the same reason as `interpretSnapshot`: the
 	* Node-side tests drive this mapping instead of a copy of it.
+	* @param {number} status - the HTTP status.
+	* @param {unknown} [body] - the parsed body, when the caller read one.
+	* @returns {SnapshotFailure | string}
 	*/
-	function errorOfStatus(status) {
-		if (status === 401 || status === 403) return {
-			message: `HTTP ${status}`,
-			code: "jwt_expired",
-			auth: null
-		};
+	function errorOfStatus(status, body) {
+		if (status === 401 || status === 403) {
+			const refusal = typeof body === "object" && body !== null ? body : null;
+			const code = refusal?.code;
+			if (typeof code === "string" && FORM_EXCLUDED_CODES.has(code)) {
+				const host = typeof refusal?.host === "string" ? refusal.host : "";
+				return host === "" ? {
+					message: `HTTP ${status}`,
+					code,
+					auth: null
+				} : {
+					message: `HTTP ${status}`,
+					code,
+					auth: null,
+					host
+				};
+			}
+			return {
+				message: `HTTP ${status}`,
+				code: "jwt_expired",
+				auth: null
+			};
+		}
 		return `HTTP ${status}`;
 	}
 	/**
@@ -719,7 +750,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			auth,
 			needsSetup,
 			guidanceKey,
-			guidance: guidanceKey === null ? null : guidanceKey === "panel.configError" ? format(tt(guidanceKey), { error: failure?.message }) : tt(guidanceKey),
+			guidance: guidanceKey === null ? null : guidanceKey === "panel.configError" ? format(tt(guidanceKey), { error: failure?.message }) : guidanceKey === "panel.hostNotAdmitted" ? format(tt(guidanceKey), { host: typeof failure?.host === "string" ? failure.host : "" }) : tt(guidanceKey),
 			shapeWarnings: Array.isArray(data?.shapeWarnings) ? data.shapeWarnings : []
 		};
 	}
@@ -731,9 +762,14 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			jwt_expired: "panel.jwtExpired",
 			not_configured: "panel.jwtMissing",
 			config_error: "panel.configError",
-			console_error: "panel.consoleTransient"
+			console_error: "panel.consoleTransient",
+			host_not_admitted: "panel.hostNotAdmitted"
 		});
-		FORM_EXCLUDED_CODES = Object.freeze(/* @__PURE__ */ new Set(["config_error", "console_error"]));
+		FORM_EXCLUDED_CODES = Object.freeze(/* @__PURE__ */ new Set([
+			"config_error",
+			"console_error",
+			"host_not_admitted"
+		]));
 		REFUSAL_TEXT = Object.freeze({
 			login_rejected: "auth.badCredentials",
 			account_locked: "auth.locked",
@@ -2524,7 +2560,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 					...controller ? { signal: controller.signal } : null
 				});
 				if (!isCurrent()) return;
-				const body = response.ok ? await response.json().catch(() => null) : null;
+				const body = response.ok || response.status === 401 || response.status === 403 ? await response.json().catch(() => null) : null;
 				if (!isCurrent()) return;
 				const outcome = route.parse(body, response.status);
 				if (outcome.value !== null) setData(outcome.value);
@@ -2591,7 +2627,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			parse: (body, status) => {
 				if (status < 200 || status >= 300) return {
 					value: null,
-					failure: errorOfStatus(status)
+					failure: errorOfStatus(status, body)
 				};
 				const read = interpretSnapshot(body);
 				if (read.data === null) return {
@@ -3772,7 +3808,11 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				});
 				if (!isCurrent()) return;
 				if (!response.ok) {
-					fail(format(tt("raccoon.httpFailed"), { status: response.status }));
+					const refusal = response.status === 401 || response.status === 403 ? await response.json().catch(() => null) : null;
+					const code = typeof refusal?.code === "string" ? refusal.code : null;
+					const key = code === null ? void 0 : GUIDANCE_BY_CODE[code];
+					const host = typeof refusal?.host === "string" ? refusal.host : "";
+					fail(key === void 0 ? format(tt("raccoon.httpFailed"), { status: response.status }) : format(tt(key), { host }));
 					return;
 				}
 				const body = await response.json().catch(() => null);
@@ -3787,6 +3827,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				if (outcome === "timeout") setLoginNote(tt("raccoon.loginTimeout"));
 				else if (outcome === "canceled") setLoginNote(tt("raccoon.loginCanceled"));
 				else if (outcome === "failed") setLoginNote(format(tt("raccoon.loginFailed"), { error: typeof body.loginError === "string" && body.loginError !== "" ? body.loginError : "unknown" }));
+				else if (outcome === "unavailable") setLoginNote(tt("raccoon.scanUnavailable"));
 				else if (outcome === "logged_in") setLoginNote(null);
 				lastGoodAt.current = at;
 				report(null);
@@ -3865,8 +3906,17 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			try {
 				const body = await postJson(RACCOON_PATH, { action: "login" });
 				if (alive.current) {
-					if (body?.ok === true) setState(body);
-					else setLoginNote(body?.error ?? format(tt("raccoon.error"), { error: "login did not finish" }));
+					if (body?.ok === true) {
+						setState(body);
+						if (body.loginStatus === "unavailable") setLoginNote(tt("raccoon.scanUnavailable"));
+					} else {
+						const code = body !== null && typeof body.code === "string" ? body.code : null;
+						const key = code === null ? void 0 : GUIDANCE_BY_CODE[code];
+						if (key !== void 0) {
+							const host = body !== null && typeof body.host === "string" ? body.host : "";
+							setLoginNote(format(tt(key), { host }));
+						} else setLoginNote(body?.error ?? format(tt("raccoon.error"), { error: "login did not finish" }));
+					}
 				}
 			} catch (why) {
 				if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: errorText(why) }));
@@ -3930,6 +3980,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_format();
 		init_http();
 		init_runtime();
+		init_snapshot();
 		init_use_polling_interval();
 		init_raccoon_card();
 		RACCOON_POLL_MS$1 = 6e4;

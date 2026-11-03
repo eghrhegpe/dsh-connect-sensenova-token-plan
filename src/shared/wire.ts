@@ -336,7 +336,10 @@ export interface RaccoonState {
   scanCode?: string;
   /**
    * The QR walk's outcome: `"scanning"` while one waits, otherwise a terminal
-   * `logged_in` / `timeout` / `canceled` / `failed`.
+   * `logged_in` / `timeout` / `canceled` / `failed` / `unavailable`. The last
+   * one means the gateway's confirm page answered 404 when the scan was
+   * issued, so the walk ended BEFORE its deadline: it is "this cannot work
+   * right now", never "you ran out of time".
    *
    * It is an EVENT, not a state: the route hands a terminal outcome over once
    * and clears it, so only the poll that catches it sees it. The durable

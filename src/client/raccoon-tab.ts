@@ -23,6 +23,7 @@ import { errorText, format, statedCadenceMs } from "./format.ts";
 import { postJson, postJsonOrThrow } from "./http.ts";
 import { h, useCallback, useEffect, useRef, useState } from "./runtime.ts";
 import type { Tt } from "./runtime.ts";
+import { GUIDANCE_BY_CODE } from "./snapshot.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { RaccoonCard } from "./raccoon-card.ts";
 import type { RaccoonState } from "./raccoon-card.ts";
@@ -206,7 +207,18 @@ export function RaccoonTab({
       // so the status itself is the honest report.
       if (!isCurrent()) return;
       if (!response.ok) {
-        fail(format(tt("raccoon.httpFailed"), { status: response.status }));
+        // A 401/403 can be the trust fence's own refusal (issue #4: the panel
+        // was opened from a host this plugin does not serve), whose body
+        // carries a wire code. When that code has panel guidance, show the
+        // guidance: "HTTP 403" tells the reader nothing about the config row
+        // that fixes it. Every other non-OK answer stays the status report.
+        const refusal = response.status === 401 || response.status === 403
+          ? ((await response.json().catch(() => null)) as { code?: unknown; host?: unknown } | null)
+          : null;
+        const code = typeof refusal?.code === "string" ? refusal.code : null;
+        const key = code === null ? undefined : GUIDANCE_BY_CODE[code];
+        const host = typeof refusal?.host === "string" ? refusal.host : "";
+        fail(key === undefined ? format(tt("raccoon.httpFailed"), { status: response.status }) : format(tt(key), { host }));
         return;
       }
       const body = (await response.json().catch(() => null)) as RaccoonState | null;
@@ -233,7 +245,8 @@ export function RaccoonTab({
         setLoginNote(format(tt("raccoon.loginFailed"), {
           error: typeof body.loginError === "string" && body.loginError !== "" ? body.loginError : "unknown"
         }));
-      } else if (outcome === "logged_in") setLoginNote(null);
+      } else if (outcome === "unavailable") setLoginNote(tt("raccoon.scanUnavailable"));
+      else if (outcome === "logged_in") setLoginNote(null);
       // Only a SUCCESS moves the timestamp the header shows, and it clears any
       // error the previous read reported.
       lastGoodAt.current = at;
@@ -365,15 +378,32 @@ export function RaccoonTab({
     // loop had no such brake, so it kept polling for the full five minutes
     // after a scan that settled in ten seconds.
     try {
-      const body = (await postJson(RACCOON_PATH, { action: "login" })) as RaccoonState | null;
+      const body = (await postJson(RACCOON_PATH, { action: "login" })) as (RaccoonState & { code?: string; host?: unknown }) | null;
       if (alive.current) {
         if (body?.ok === true) {
           setState(body);
+          // `unavailable` is an ANSWER to this request, not a scan: the
+          // gateway's confirm page is gone, so there is no QR to show. The
+          // route reports it inline (issue #1) instead of letting the walk
+          // wait out a deadline and mislabel it as an expiry.
+          if (body.loginStatus === "unavailable") setLoginNote(tt("raccoon.scanUnavailable"));
         } else {
-          // Through the shared `format`, not a hand-rolled `.replace`: the
-          // dictionary's `{error}` slot is one interpolation rule, owned by
-          // `format.ts` (the refusal table's `auth.failed` uses the same one).
-          setLoginNote(body?.error ?? format(tt("raccoon.error"), { error: "login did not finish" }));
+          // The trust fence's own refusal (issue #4) answers with a wire code
+          // instead of prose: when that code has panel guidance, the guidance
+          // is the answer — it names the config row, which the prose beside it
+          // does not. `format` (not `tt`) because the line interpolates the
+          // refused host.
+          const code = body !== null && typeof body.code === "string" ? body.code : null;
+          const key = code === null ? undefined : GUIDANCE_BY_CODE[code];
+          if (key !== undefined) {
+            const host = body !== null && typeof body.host === "string" ? body.host : "";
+            setLoginNote(format(tt(key), { host }));
+          } else {
+            // Through the shared `format`, not a hand-rolled `.replace`: the
+            // dictionary's `{error}` slot is one interpolation rule, owned by
+            // `format.ts` (the refusal table's `auth.failed` uses the same one).
+            setLoginNote(body?.error ?? format(tt("raccoon.error"), { error: "login did not finish" }));
+          }
         }
       }
     } catch (why) {

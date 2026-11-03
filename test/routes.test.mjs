@@ -410,6 +410,19 @@ async function withNetwork(stub, body) {
     check("a rebound host is refused even though Origin agrees with it",
       rebound.statusCode === 403, String(rebound.statusCode));
 
+    // Issue #4: the 403 used to say only "origin mismatch", which reads as an
+    // authorization bug rather than a missing config row. The body now names
+    // the refused host, states the fix, and carries a code the panel can key
+    // its guidance on (host_not_admitted is in NO_LOGIN_CODES, so no sign-in
+    // form is offered for a fence refusal).
+    check("the 403 names the refused host and states the fix",
+      rebound.payload?.ok === false
+        && rebound.payload?.code === "host_not_admitted"
+        && rebound.payload?.host === "attacker.test"
+        && typeof rebound.payload?.fix === "string"
+        && rebound.payload.fix.includes("allowedHosts"),
+      JSON.stringify(rebound.payload));
+
     // Brackets and ports are not part of the name, so a rebound Host cannot
     // smuggle itself in by spelling the loopback a different way.
     const bracketed = await call(SNAPSHOT_PATH,
@@ -1603,6 +1616,17 @@ async function withNetwork(stub, body) {
     const after = (await call(RACCOON_PATH, makeRequest())).payload;
     check("T4 a terminal login outcome is delivered once, then cleared",
       Object.hasOwn(after, "loginStatus") === false, JSON.stringify(after.loginStatus ?? null));
+
+    // ── T4b: an unanswerable codegen falls back, it does not fail the login ──
+    // The gateway's IAM codegen is not stubbed above, so it throws
+    // ("unstubbed raccoon request"). That refusal must degrade to the legacy
+    // local 32-hex code and still poll on the legacy endpoint — the gateway's
+    // old endpoints are exactly what T1-T4 just exercised.
+    const fallback = await call(RACCOON_PATH, makePost({ action: "login" }));
+    const fallbackCode = fallback.payload?.scanCode ?? "";
+    check("T4b a refused server codegen falls back to the legacy local code",
+      fallback.payload?.ok === true && /^[0-9a-f]{32}$/.test(fallbackCode),
+      JSON.stringify({ ok: fallback.payload?.ok, code: fallbackCode }));
 
     // ── T5: the fast poll no longer amplifies into gateway traffic ──
     // This is the whole point: during a scan the tab polls every 2 s, and each

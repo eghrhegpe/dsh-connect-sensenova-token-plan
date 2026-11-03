@@ -44,6 +44,10 @@ import {
   RACCOON_CODE,
   isDeadRaccoonSession,
   isDeadRaccoonEnvelope,
+  createRaccoonIamQr,
+  raccoonIamQrUrl,
+  pollRaccoonIamQrLogin,
+  issueRaccoonScan,
 } from "../src/host/raccoon.ts";
 // The thinking dialect is NOT re-exported from the barrel: it has no
 // production caller, so the split pulled it off the public face. Reached by
@@ -1546,6 +1550,291 @@ function section(title) {
     walk.stop();
     check("W8 stop() is idempotent and safe on an idle walk",
       walk.view.isInFlight() === false, `inFlight=${walk.view.isInFlight()}`);
+  }
+}
+
+// --- I. the IAM codegen + poll family (2026-11 upstream migration) ----------
+// The gateway moved code issuance to `POST /api/iam/v1/auth/mp/qrcode` and
+// polls on `/api/iam/v1/auth/mp/qrcode/login`. Both answer the STRING envelope
+// (`code: "OK"`), not the web-auth family's numeric one — a parser shared with
+// the old endpoints would read every success as a failure. Group I pins the
+// protocol; group W11-W14 pins what the WALK does with it.
+{
+  const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+  // I1: a healthy codegen answer becomes the issued scan's wire facts.
+  {
+    let asked = null;
+    const created = await createRaccoonIamQr(async (url, init) => {
+      asked = { url: String(url), init };
+      return json(200, { code: "OK", data: { qrcode_code: "qr-abc", scan_path: "/login/mp", expires_in: 300, poll_interval: 2 } });
+    });
+    check("I1 server codegen reads the STRING envelope (code:'OK')",
+      created !== null && created.code === "qr-abc" && created.scanPath === "/login/mp",
+      JSON.stringify(created));
+    check("I1 the codegen POSTs an empty object to the IAM endpoint",
+      asked !== null && asked.url.endsWith("/api/iam/v1/auth/mp/qrcode") && String(asked.init?.method) === "POST",
+      asked === null ? "no call" : asked.url);
+    check("I1 the server's own deadline and cadence are carried",
+      created !== null && created.expiresInSeconds === 300 && created.pollIntervalSeconds === 2,
+      JSON.stringify(created));
+  }
+
+  // I2: every refusal shape degrades to null (the caller's fallback), never to
+  // a half-built scan — a code with no URL would render an empty QR.
+  {
+    const shapes = [
+      ["numeric envelope (the web-auth parser's success)", { code: 0, data: { qrcode_code: "qr-x" } }],
+      ["no data block", { code: "OK" }],
+      ["empty code", { code: "OK", data: { qrcode_code: "" } }],
+      ["error envelope", { code: "AUTH_ERROR", message: "nope" }]
+    ];
+    for (const [label, body] of shapes) {
+      const created = await createRaccoonIamQr(async () => json(200, body));
+      check(`I2 a codegen answer with ${label} yields no scan`, created === null, JSON.stringify(created));
+    }
+    const throwing = await createRaccoonIamQr(async () => { throw new Error("network down"); });
+    check("I2 a throwing codegen yields no scan", throwing === null, JSON.stringify(throwing));
+  }
+
+  // I3: the QR URL is the server's scan_path plus the site's own query — the
+  // legacy builder omitted `source=platform`, which the official client sends.
+  {
+    const url = raccoonIamQrUrl("qr-abc", "/login/mp");
+    const parsed = new URL(url);
+    check("I3 the IAM QR URL keeps the server's scan_path",
+      parsed.origin === "https://xiaohuanxiong.com" && parsed.pathname === "/login/mp", url);
+    check("I3 the IAM QR URL carries code + appname + source=platform",
+      parsed.searchParams.get("code") === "qr-abc"
+        && parsed.searchParams.get("appname") === "商汤小浣熊官网"
+        && parsed.searchParams.get("source") === "platform",
+      url);
+    const prefixed = raccoonIamQrUrl("qr-abc", "login/mp");
+    check("I3 a scan_path without a leading slash is normalised", new URL(prefixed).pathname === "/login/mp", prefixed);
+  }
+
+  // I4: the IAM poll's success carries an ACCESS token only — the official
+  // flow never sends a refresh token, so the credential is access-only and
+  // the walk must not invent one.
+  {
+    let asked = null;
+    const token = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3MDAwMDAwMDB9.sig";
+    const result = await pollRaccoonIamQrLogin("qr-abc", async (url, init) => {
+      asked = { url: String(url), body: init?.body };
+      return json(200, { code: "OK", data: { status: "success", access_token: token } });
+    });
+    check("I4 an IAM success returns the access token with NO refresh token",
+      result.status === RACCOON_QR_STATUS.SUCCESS && result.accessToken === token && result.refreshToken === "",
+      JSON.stringify(result));
+    check("I4 the access token's JWT exp becomes expiresAtMs",
+      result.expiresAtMs === 1700000000000, String(result.expiresAtMs));
+    check("I4 the poll POSTs the code to the IAM login endpoint",
+      asked !== null && asked.url.endsWith("/api/iam/v1/auth/mp/qrcode/login")
+        && String(asked.body).includes("qr-abc"),
+      asked === null ? "no call" : asked.url);
+    check("I4 the IAM envelope's own field names are reported for triage",
+      Array.isArray(result.dataFields) && result.dataFields.includes("access_token"), JSON.stringify(result.dataFields));
+  }
+
+  // I5: a tokenless "success" is NOT a login — an empty credential would stall
+  // the flow, so it stays pending (the legacy poll's rule, restated).
+  {
+    const result = await pollRaccoonIamQrLogin("qr-abc", async () => json(200, { code: "OK", data: { status: "success" } }));
+    check("I5 a success with no access_token stays pending",
+      result.status === RACCOON_QR_STATUS.PENDING && result.accessToken === undefined, JSON.stringify(result));
+  }
+
+  // I6: canceled is terminal; everything else (logging, an error code, a
+  // malformed body, a throw) keeps the walk waiting for its deadline.
+  {
+    const canceled = await pollRaccoonIamQrLogin("qr-abc", async () => json(200, { code: "OK", data: { status: "canceled" } }));
+    check("I6 an IAM canceled status is terminal", canceled.status === RACCOON_QR_STATUS.CANCELED, JSON.stringify(canceled));
+    const codes = ["AUTH_QRCODE_INVALID", "AUTH_QRCODE_EXPIRED"];
+    for (const code of codes) {
+      const result = await pollRaccoonIamQrLogin("qr-abc", async () => json(401, { code }));
+      check(`I6 the ${code} refusal reads as pending, not a failure`,
+        result.status === RACCOON_QR_STATUS.PENDING, JSON.stringify(result));
+    }
+    const broken = await pollRaccoonIamQrLogin("qr-abc", async () => json(500, {}));
+    check("I6 a malformed IAM answer reads as pending", broken.status === RACCOON_QR_STATUS.PENDING, JSON.stringify(broken));
+    const thrown = await pollRaccoonIamQrLogin("qr-abc", async () => { throw new Error("network down"); });
+    check("I6 a throwing IAM poll reads as pending", thrown.status === RACCOON_QR_STATUS.PENDING, JSON.stringify(thrown));
+  }
+
+  // I7: the issue path prefers the server's code, and falls back to the legacy
+  // 32-hex one when the gateway refuses codegen — a gateway that still answers
+  // the old endpoints must keep working (the walk then polls with `fetcher`).
+  {
+    const probe = (url) => new Response("<!doctype html>", { status: 200, headers: { "content-type": "text/html" } });
+    const issued = await issueRaccoonScan(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/api/iam/v1/auth/mp/qrcode")) {
+        return json(200, { code: "OK", data: { qrcode_code: "qr-srv", scan_path: "/login/mp", expires_in: 300, poll_interval: 2 } });
+      }
+      return probe(target);
+    });
+    check("I7 an answered codegen issues the server's qr- code on the IAM path",
+      issued.code === "qr-srv" && issued.iam === true && typeof issued.deadlineMs === "number"
+        && typeof issued.pollIntervalMs === "number",
+      JSON.stringify(issued));
+    check("I7 the issued scan's URL is the IAM confirm page with source=platform",
+      new URL(issued.url).searchParams.get("source") === "platform", issued.url);
+
+    const fellBack = await issueRaccoonScan(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/api/iam/v1/auth/mp/qrcode")) return json(500, { code: "AUTH_ERROR" });
+      return probe(target);
+    });
+    check("I7 a refused codegen falls back to the legacy 32-hex local code",
+      /^[0-9a-f]{32}$/.test(fellBack.code) && fellBack.iam === undefined,
+      JSON.stringify(fellBack));
+    check("I7 the fallback's URL is the legacy confirm page",
+      fellBack.url.startsWith("https://xiaohuanxiong.com/login/mp?code="), fellBack.url);
+
+    const threw = await issueRaccoonScan(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/api/iam/v1/auth/mp/qrcode")) throw new Error("network down");
+      return probe(target);
+    });
+    check("I7 a throwing codegen also falls back to the local code",
+      /^[0-9a-f]{32}$/.test(threw.code), JSON.stringify(threw));
+  }
+
+  // I8: the confirm page answering 404 is the `unavailable` outcome (issue #1:
+  // a dead page used to surface as a 5-minute "expired QR"). A probe that
+  // throws or answers anything else does NOT block the walk.
+  {
+    const unavailable = await issueRaccoonScan(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/api/iam/v1/auth/mp/qrcode")) {
+        return json(200, { code: "OK", data: { qrcode_code: "qr-srv", scan_path: "/login/mp", expires_in: 300, poll_interval: 2 } });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    check("I8 a 404 confirm page issues the unavailable outcome",
+      unavailable.unavailable === true, JSON.stringify(unavailable));
+
+    const probeThrew = await issueRaccoonScan(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/api/iam/v1/auth/mp/qrcode")) {
+        return json(200, { code: "OK", data: { qrcode_code: "qr-srv", scan_path: "/login/mp", expires_in: 300, poll_interval: 2 } });
+      }
+      throw new Error("probe down");
+    });
+    check("I8 a throwing probe still issues a usable scan",
+      probeThrew.code === "qr-srv" && probeThrew.unavailable === undefined, JSON.stringify(probeThrew));
+
+    const probe500 = await issueRaccoonScan(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/api/iam/v1/auth/mp/qrcode")) {
+        return json(200, { code: "OK", data: { qrcode_code: "qr-srv", scan_path: "/login/mp", expires_in: 300, poll_interval: 2 } });
+      }
+      return new Response("busy", { status: 503 });
+    });
+    check("I8 a non-404 probe (a 503) does not end the walk",
+      probe500.code === "qr-srv" && probe500.unavailable === undefined, JSON.stringify(probe500));
+  }
+}
+
+// --- W11-W14. the walk driven by an issued (IAM) scan -----------------------
+// The route wires `issueCode` + `pollIam`; these pin the walk's half of that
+// contract without any network: which poller runs, which deadline applies, and
+// what `unavailable` reports.
+{
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const drain = async (walk) => {
+    for (let i = 0; i < 60 && walk.view.isInFlight(); i += 1) await sleep(10);
+  };
+
+  // W11: an `unavailable` issue ends the walk AT ONCE with that status — no
+  // poll, no 5-minute wait, no credential.
+  {
+    let polls = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async () => { polls += 1; return { status: RACCOON_QR_STATUS.PENDING }; },
+      issueCode: async () => ({ code: "", url: "", unavailable: true }),
+      saveCredential: async () => { throw new Error("must not save"); },
+      invalidateCache: () => {}
+    });
+    await walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W11 an unavailable scan reports unavailable (not timeout, not failed)",
+      event.status === LOGIN_STATUS.unavailable, `${event.status}`);
+    check("W11 an unavailable scan never polls the gateway",
+      polls === 0, `polls=${polls}`);
+    check("W11 an unavailable scan leaves no live scan behind",
+      walk.view.liveScan() === null, JSON.stringify(walk.view.liveScan()));
+  }
+
+  // W12: an IAM-issued scan polls with `pollIam` (NOT `fetcher`), on the
+  // server's own cadence, and stops at the server's own deadline.
+  {
+    let iamPolls = 0;
+    let legacyPolls = 0;
+    let stored = null;
+    const walk = createRaccoonWalk({
+      fetcher: async () => { legacyPolls += 1; return { status: RACCOON_QR_STATUS.PENDING }; },
+      pollIam: async () => {
+        iamPolls += 1;
+        return iamPolls === 1
+          ? { status: RACCOON_QR_STATUS.PENDING }
+          : { status: RACCOON_QR_STATUS.SUCCESS, accessToken: "at", refreshToken: "" };
+      },
+      issueCode: async () => ({ code: "qr-srv", url: "https://x/login/mp?code=qr-srv", iam: true, deadlineMs: Date.now() + 1000, pollIntervalMs: 20 }),
+      saveCredential: async (saved) => { stored = saved; },
+      invalidateCache: () => {}
+    });
+    void walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W12 an IAM scan polls with the IAM poller, never the legacy one",
+      iamPolls >= 2 && legacyPolls === 0, `iam=${iamPolls} legacy=${legacyPolls}`);
+    check("W12 an IAM scan settles logged_in on the IAM success",
+      event.status === LOGIN_STATUS.logged_in, `${event.status}`);
+    check("W12 the IAM credential is saved access-only (no invented refresh token)",
+      stored !== null && stored.accessToken === "at" && stored.refreshToken === "",
+      JSON.stringify(stored));
+  }
+
+  // W13: an IAM scan that never settles ends at the SERVER's deadline, not at
+  // the gateway's 5-minute one — a short `expires_in` must be honoured.
+  {
+    let polls = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async () => ({ status: RACCOON_QR_STATUS.PENDING }),
+      pollIam: async () => { polls += 1; return { status: RACCOON_QR_STATUS.PENDING }; },
+      issueCode: async () => ({ code: "qr-srv", url: "https://x/login/mp?code=qr-srv", iam: true, deadlineMs: Date.now() + 60, pollIntervalMs: 10 }),
+      saveCredential: async () => {},
+      invalidateCache: () => {}
+    });
+    void walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W13 an IAM scan honours the server's short deadline (timeout, not a 5-min wait)",
+      event.status === LOGIN_STATUS.timeout, `${event.status}`);
+    check("W13 that deadline is enforced by polling, not by one long sleep",
+      polls >= 2, `polls=${polls}`);
+  }
+
+  // W14: with NO `issueCode` the walk keeps the legacy local codegen — every
+  // existing caller (and the gateway's old endpoints) must stay untouched.
+  {
+    let polls = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async (code) => { polls += 1; return { status: RACCOON_QR_STATUS.SUCCESS, accessToken: "at", refreshToken: "rt", code }; },
+      saveCredential: async () => {},
+      invalidateCache: () => {}
+    });
+    await walk.issueScan();
+    const scan = walk.view.liveScan();
+    check("W14 with no issueCode the scan carries a local 32-hex code",
+      scan !== null && /^[0-9a-f]{32}$/.test(scan.code), JSON.stringify(scan));
+    check("W14 the legacy scan's URL is the legacy confirm page",
+      scan !== null && scan.url.startsWith("https://xiaohuanxiong.com/login/mp?code="), scan === null ? "no scan" : scan.url);
+    await drain(walk);
+    check("W14 the legacy path still polls and settles",
+      polls >= 1 && walk.view.takeEvent().status === LOGIN_STATUS.logged_in, `polls=${polls}`);
   }
 }
 

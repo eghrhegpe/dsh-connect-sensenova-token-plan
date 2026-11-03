@@ -13,7 +13,13 @@
 
 import { randomBytes } from "node:crypto";
 import { obj, str, verbatim, errMsg } from "./util.ts";
-import { RACCOON_API_BASE, RACCOON_AUTH_PREFIX } from "./raccoon-consts.ts";
+import {
+  RACCOON_API_BASE,
+  RACCOON_AUTH_PREFIX,
+  RACCOON_IAM_AUTH_PREFIX,
+  RACCOON_LOGIN_TIMEOUT_MS,
+  RACCOON_QR_POLL_INTERVAL_MS
+} from "./raccoon-consts.ts";
 import {
   parseRaccoonEnvelope,
   decodeRaccoonJwtExpMs,
@@ -101,6 +107,206 @@ export async function pollRaccoonQrLogin(code: string, fetcher?: typeof fetch): 
     };
   }
   return { status: RACCOON_QR_STATUS.PENDING };
+}
+
+/**
+ * A scan that has been issued and is ready to poll: the code to hand the
+ * poller and the URL to put in the QR, and — for a server-issued scan — the
+ * server's own deadline and cadence. The walk's DEFAULT (no `issueCode`
+ * option) is the legacy local codegen, so a walk built without one keeps
+ * working against a gateway that has moved on.
+ */
+export interface RaccoonIssuedScan {
+  /** The code the poller polls. */
+  code: string;
+  /** The confirm-page URL the QR encodes. */
+  url: string;
+  /** The code came from the gateway's codegen: poll it with `pollIam`. */
+  iam?: boolean;
+  /** The server-stated expiry, as an absolute ms timestamp. */
+  deadlineMs?: number;
+  /** The server-stated poll cadence, in ms. */
+  pollIntervalMs?: number;
+  /** The confirm page answered 404: the walk ends as `unavailable`. */
+  unavailable?: boolean;
+}
+
+/**
+ * Server-issued QR codegen (2026-11: the gateway moved code issuance to
+ * `POST /api/iam/v1/auth/mp/qrcode`). The response envelope is the string
+ * `code: "OK"` half of the raccoon wire — the web-auth family's numeric
+ * `code: 0` parser does not apply here. `data` carries the `qr-`-prefixed
+ * `qrcode_code`, the confirm page's `scan_path`, and the server's own
+ * `expires_in` / `poll_interval` seconds.
+ * @param {typeof fetch} [fetcher] - injected fetch.
+ * @returns {Promise<object|null>} the issued scan's wire facts, or `null` on
+ *   any refusal, malformed envelope, or transport failure — the caller falls
+ *   back to the legacy local codegen.
+ */
+export async function createRaccoonIamQr(fetcher?: typeof fetch): Promise<{
+  code: string;
+  scanPath: string;
+  expiresInSeconds: number;
+  pollIntervalSeconds: number;
+} | null> {
+  const effective = fetcher ?? globalThis.fetch;
+  let body: { code?: unknown; data?: unknown } | null;
+  try {
+    const response = await effective(`${RACCOON_API_BASE}${RACCOON_IAM_AUTH_PREFIX}/auth/mp/qrcode`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({})
+    });
+    body = (await response.json().catch(() => null)) as { code?: unknown; data?: unknown } | null;
+  } catch {
+    return null;
+  }
+  if (body === null || str(body.code, "") !== "OK") return null;
+  const data = obj(body.data);
+  if (data === null) return null;
+  const code = str(data.qrcode_code, "");
+  if (code === "") return null;
+  const scanPath = str(data.scan_path, "") !== "" ? str(data.scan_path, "") : "/login/mp";
+  const expiresIn = Number(data.expires_in);
+  const pollInterval = Number(data.poll_interval);
+  return {
+    code,
+    scanPath,
+    // A missing cadence must not read as "never expires": fall back to the
+    // walk's own wire facts (the 5-min deadline, the 2 s cadence).
+    expiresInSeconds: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : RACCOON_LOGIN_TIMEOUT_MS / 1000,
+    pollIntervalSeconds: Number.isFinite(pollInterval) && pollInterval > 0 ? pollInterval : RACCOON_QR_POLL_INTERVAL_MS / 1000
+  };
+}
+
+/**
+ * The confirm-page URL for a server-issued code: the server's own
+ * `scan_path` (probed 2026-11: `/login/mp`) plus the query params the
+ * site's own client sends — `code`, `appname`, and `source=platform`
+ * (the legacy `raccoonQrLoginUrl` omits the last; a page that comes back
+ * may key on it).
+ */
+export function raccoonIamQrUrl(code: string, scanPath: string): string {
+  const path = scanPath.startsWith("/") ? scanPath : `/${scanPath}`;
+  const params = new URLSearchParams({ code: str(code, ""), appname: "商汤小浣熊官网", source: "platform" });
+  return `${RACCOON_API_BASE}${path}?${params.toString()}`;
+}
+
+/**
+ * One poll of a SERVER-ISSUED scan. The endpoint is the site's own login
+ * poll (`POST /api/iam/v1/auth/mp/qrcode/login`), whose envelope is the
+ * string `code: "OK"` half, so the numeric parser does not apply.
+ *
+ * Every anomaly degrades to `pending`, exactly like the legacy poll: the
+ * server's own expiry surfaces here as the AUTH_QRCODE error codes rather
+ * than a status, and the walk's deadline — set from the same `expires_in`
+ * at issue time — is what turns that into a `timeout`.
+ *
+ * The success payload observed in 2026-11 carries an `access_token` and NO
+ * `refresh_token` (the official site's flow takes the access token only):
+ * `refreshToken` is therefore stored as `""` and the credential is
+ * access-only — the store already shapes that (a rotation-less credential
+ * works until the access token expires, then the panel offers a re-scan;
+ * `refreshRaccoonCredential`'s NO_REFRESH_TOKEN is not a dead-session
+ * latch).
+ * @param {string} code - the issued `qrcode_code` (a `qr-` server code or a
+ *   legacy 32-hex one: the gateway's code spaces are shared, probed 2026-11).
+ * @param {typeof fetch} [fetcher] - injected fetch.
+ * @returns {Promise<object>} `{ status }` plus, on success, the token pair.
+ */
+export async function pollRaccoonIamQrLogin(code: string, fetcher?: typeof fetch): Promise<RaccoonQrPollResult> {
+  const effective = fetcher ?? globalThis.fetch;
+  let body: { code?: unknown; data?: unknown } | null;
+  try {
+    const response = await effective(`${RACCOON_API_BASE}${RACCOON_IAM_AUTH_PREFIX}/auth/mp/qrcode/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ qrcode_code: str(code, "") })
+    });
+    body = (await response.json().catch(() => null)) as { code?: unknown; data?: unknown } | null;
+  } catch {
+    return { status: RACCOON_QR_STATUS.PENDING };
+  }
+  const data = body === null ? null : obj(body.data);
+  const rawStatus = data === null ? "" : str(data.status, "");
+  if (rawStatus === RACCOON_QR_STATUS.CANCELED) return { status: RACCOON_QR_STATUS.CANCELED };
+  if (rawStatus === RACCOON_QR_STATUS.SUCCESS) {
+    // A success without a token is "not done yet": an empty credential would
+    // stall the flow, so it stays pending for the next poll (the legacy
+    // poll's same rule, restated for this envelope).
+    const accessToken = data === null ? "" : verbatim(data.access_token, "");
+    if (data === null || accessToken === "") return { status: RACCOON_QR_STATUS.PENDING };
+    const refreshToken = verbatim(data.refresh_token, "");
+    const expMs = decodeRaccoonJwtExpMs(accessToken);
+    return {
+      status: RACCOON_QR_STATUS.SUCCESS,
+      accessToken,
+      refreshToken,
+      ...(expMs !== undefined ? { expiresAtMs: expMs } : {}),
+      // The account display name, extracted defensively (see
+      // `extractRaccoonNickname`) — the IAM flow's name claim rides the JWT
+      // when the payload carries none.
+      nickname: extractRaccoonNickname(data, accessToken),
+      // Field NAMES only (never values): the caller logs this once per login,
+      // so an unprobed corner of the new envelope becomes evidence on the
+      // next real scan instead of a silent data breakpoint.
+      dataFields: Object.keys(data).sort()
+    };
+  }
+  // `logging` (the phone is mid-confirm), the AUTH_QRCODE error codes, and
+  // every malformed corner: keep polling until the issue-time deadline.
+  return { status: RACCOON_QR_STATUS.PENDING };
+}
+
+/**
+ * Issue a scan: the server's codegen when the gateway answers it, else the
+ * legacy local code (the confirm page stayed public: any self-made 32-hex
+ * code enters `pending`, probed 2026-09), then ONE probe of the confirm
+ * page itself: an HTTP 404 means the phone can never confirm, so the walk
+ * must end NOW — waiting out its deadline would misread "the page is gone"
+ * as "the QR expired" (issue #1). Any other probe outcome (a throw, a
+ * non-404 status) does not block the walk: the polls remain the source of
+ * truth.
+ * @param {typeof fetch} [fetcher] - injected fetch.
+ * @returns {Promise<object>} the issued scan, or the `unavailable` shape
+ *   when the confirm page answered 404.
+ */
+export async function issueRaccoonScan(fetcher?: typeof fetch): Promise<RaccoonIssuedScan> {
+  const effective = fetcher ?? globalThis.fetch;
+  let code: string;
+  let url: string;
+  let deadlineMs: number | undefined;
+  let pollIntervalMs: number | undefined;
+  const created = await createRaccoonIamQr(effective);
+  if (created !== null) {
+    code = created.code;
+    url = raccoonIamQrUrl(code, created.scanPath);
+    deadlineMs = Date.now() + created.expiresInSeconds * 1000;
+    // The site clamps its own cadence to [1 s, 60 s]; clamp the same way.
+    pollIntervalMs = Math.min(60000, Math.max(1000, Math.round(created.pollIntervalSeconds * 1000)));
+  } else {
+    code = generateRaccoonQrCode();
+    url = raccoonQrLoginUrl(code);
+  }
+  let probeStatus: number | null = null;
+  try {
+    const probe = await effective(url, { method: "GET", headers: { Accept: "text/html" } });
+    probeStatus = probe.status;
+  } catch {
+    probeStatus = null;
+  }
+  if (probeStatus === 404) return { code: "", url: "", unavailable: true };
+  if (created === null) return { code, url };
+  // Spread the optional fields rather than assigning `undefined`: the
+  // project compiles with `exactOptionalPropertyTypes`, where an explicit
+  // undefined is not the same as an absent key.
+  return {
+    code,
+    url,
+    iam: true,
+    ...(deadlineMs !== undefined ? { deadlineMs } : {}),
+    ...(pollIntervalMs !== undefined ? { pollIntervalMs } : {})
+  };
 }
 
 /**

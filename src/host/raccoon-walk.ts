@@ -32,17 +32,19 @@
  */
 import { RACCOON_QR_STATUS, RACCOON_QR_POLL_INTERVAL_MS, RACCOON_LOGIN_TIMEOUT_MS, generateRaccoonQrCode, raccoonQrLoginUrl } from "./raccoon.ts";
 import { errMsg, redactSecrets } from "./util.ts";
-import type { RaccoonQrPollResult } from "./raccoon.ts";
+import type { RaccoonIssuedScan, RaccoonQrPollResult } from "./raccoon.ts";
 
 /**
  * A settled scan carrying the credential pair.
  *
- * `pollRaccoonQrLogin` only reports `success` WITH a non-empty `accessToken`
- * (a tokenless success stays `pending`), so the pair is guaranteed here — but
- * `RaccoonQrPollResult` must keep `accessToken` optional for the other
- * statuses. Narrowing once at the boundary is what lets `saveCredential`
- * receive a `string` without a runtime re-check of a guarantee the parser
- * already made (docs/IMPROVEMENTS.md §8).
+ * Both pollers (`pollRaccoonQrLogin`, `pollRaccoonIamQrLogin`) report
+ * `success` ONLY WITH a non-empty `accessToken` (a tokenless success stays
+ * `pending`), so the pair is guaranteed here — but `RaccoonQrPollResult`
+ * must keep `accessToken` optional for the other statuses. Narrowing once
+ * at the boundary is what lets `saveCredential` receive a `string` without
+ * a runtime re-check of a guarantee the parser already made
+ * (docs/IMPROVEMENTS.md §8). `refreshToken` is `""` for the access-only
+ * IAM credential: the store's optional-refresh shape owns that meaning.
  */
 type SettledScan = RaccoonQrPollResult & { accessToken: string; refreshToken: string };
 
@@ -52,7 +54,11 @@ export const LOGIN_STATUS = Object.freeze({
   logged_in: "logged_in",
   timeout: "timeout",
   canceled: "canceled",
-  failed: "failed"
+  failed: "failed",
+  // The confirm page answered 404 at issue time: the walk ended BEFORE its
+  // deadline started. Distinct from `timeout`, which says "the time ran
+  // out waiting" — the panel note for each must not blur the two.
+  unavailable: "unavailable"
 }) satisfies Record<string, string>;
 /** Values the tab's `loginStatus` field can hold. */
 export type LoginStatus = typeof LOGIN_STATUS[keyof typeof LOGIN_STATUS];
@@ -70,7 +76,7 @@ export interface RaccoonWalkView {
   /**
    * Take the settled outcome ONCE.
    *
-   * Terminal events (`logged_in` / `timeout` / `canceled` / `failed`) are
+   * Terminal events (`logged_in` / `timeout` / `canceled` / `failed` / `unavailable`) are
    * consumed here — a later poll cannot re-announce a two-minute-old timeout.
    * `scanning` is not consumed (it is the live in-flight state).
    * @returns {{ status: LoginStatus | null, error: string | null }}
@@ -83,6 +89,8 @@ export interface RaccoonWalkView {
  *
  * @param options
  * @param {(code: string) => Promise<RaccoonQrPollResult>} options.fetcher - the gateway fetcher (for tests to inject a fake).
+ * @param {(code: string) => Promise<RaccoonQrPollResult>} options.pollIam - the poller for a server-issued (`iam`) scan; `fetcher` serves the legacy ones. OPTIONAL — the walk's default issue path is legacy, so the route is the only caller that wires it.
+ * @param {() => Promise<RaccoonIssuedScan>} options.issueCode - issues the scan's code (the route passes `issueRaccoonScan`: server codegen + the confirm-page probe, whose 404 is the `unavailable` terminal). OPTIONAL — absent means the legacy local codegen, which is also where a throwing `issueCode` degrades to.
  * @param {(credential: { accessToken: string; refreshToken: string; expiresAtMs?: number; nickname?: string }) => Promise<void>} options.saveCredential - called with `{ accessToken, refreshToken, expiresAtMs?, nickname? }`; MUST persist to the credentials service. Errors become a `failed` event.
  * @param {() => void} options.invalidateCache - called on successful login to drop reads taken under the previous credential.
  * @param {() => void} options.onSettled - called once at the START of each scan cycle (after
@@ -100,6 +108,8 @@ export interface RaccoonWalkView {
  */
 export function createRaccoonWalk(options: {
   fetcher: (code: string) => Promise<RaccoonQrPollResult>;
+  pollIam?: (code: string) => Promise<RaccoonQrPollResult>;
+  issueCode?: () => Promise<RaccoonIssuedScan>;
   saveCredential: (credential: { accessToken: string; refreshToken: string; expiresAtMs?: number; nickname?: string }) => Promise<void>;
   invalidateCache: () => void;
   onSettled?: () => void;
@@ -108,6 +118,8 @@ export function createRaccoonWalk(options: {
   let scan: { code: string; url: string } | null = null;
   /** `null` while idle; a promise while the walk runs. Cleared in finally. */
   let walk: Promise<void> | null = null;
+  /** True while the issue phase (server codegen / the page probe) runs. */
+  let issuing = false;
   let status: LoginStatus | null = null;
   let error: string | null = null;
   /**
@@ -138,14 +150,14 @@ export function createRaccoonWalk(options: {
    */
   const stoppedAt = () => stopRequested;
 
-  /** The poll interval, as an interruptible sleep. */
-  const sleepOnePoll = () =>
+  /** The poll cadence, as an interruptible sleep. */
+  const sleepOnePoll = (cadenceMs: number) =>
     new Promise<void>((resolve) => {
       const done = () => {
         wakePoll = null;
         resolve();
       };
-      const timer = setTimeout(done, RACCOON_QR_POLL_INTERVAL_MS);
+      const timer = setTimeout(done, cadenceMs);
       wakePoll = () => {
         clearTimeout(timer);
         done();
@@ -153,7 +165,7 @@ export function createRaccoonWalk(options: {
     });
 
   const view: RaccoonWalkView = {
-    isInFlight: () => walk !== null,
+    isInFlight: () => issuing || walk !== null,
     liveScan: () => scan,
     takeEvent: () => {
       // A terminal status is an EVENT, not a state: hand it over and clear it,
@@ -169,18 +181,23 @@ export function createRaccoonWalk(options: {
   };
 
   /**
-   * Run one scan cycle. Errors from save or settle do NOT propagate — they
-   * become a `failed` event so the tab can surface a reason.
+   * Run one scan cycle FROM AN ISSUED SCAN. Errors from save or settle do
+   * NOT propagate — they become a `failed` event so the tab can surface a
+   * reason. The poller is the IAM one for a server-issued scan (falling
+   * back to `fetcher` when none is wired) and `fetcher` for the legacy
+   * local code; the deadline and cadence are the server's when it stated
+   * them, the gateway's wire facts otherwise.
    */
-  async function runScan() {
-    const code = generateRaccoonQrCode();
-    const url = raccoonQrLoginUrl(code);
-    scan = { code, url };
+  async function runScan(issued: RaccoonIssuedScan) {
+    const poller = issued.iam === true ? options.pollIam ?? options.fetcher : options.fetcher;
+    const cadenceMs = issued.pollIntervalMs ?? RACCOON_QR_POLL_INTERVAL_MS;
+    const code = issued.code;
+    scan = { code, url: issued.url };
     status = LOGIN_STATUS.scanning;
     error = null;
     options.onSettled?.();
 
-    const deadline = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
+    const deadline = issued.deadlineMs ?? Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
     let canceled = false;
     let settled: SettledScan | null = null;
 
@@ -189,7 +206,7 @@ export function createRaccoonWalk(options: {
         while (Date.now() < deadline && !stoppedAt()) {
           let poll;
           try {
-            poll = await options.fetcher(code);
+            poll = await poller(code);
           } catch {
             // Transient poll error: keep waiting, don't fail the walk.
             poll = { status: RACCOON_QR_STATUS.PENDING };
@@ -209,7 +226,7 @@ export function createRaccoonWalk(options: {
             canceled = true;
             break;
           }
-          await sleepOnePoll();
+          await sleepOnePoll(cadenceMs);
         }
       } finally {
         // The scan is over; the poll loop's own cleanup lands here. The GATE is
@@ -286,19 +303,61 @@ export function createRaccoonWalk(options: {
   async function issueScan() {
     // A scan issued after `stop()` is refused rather than started: the walk
     // belongs to a route that is being unregistered, so there is no longer a
-    // tab on the other end of it.
+    // tab on the other end of it. (Synchronous on purpose: this check must
+    // hold even when no issue phase has run — W7's contract.)
     if (stoppedAt()) {
       status = LOGIN_STATUS.canceled;
       return;
     }
-    walk = runScan()
-      .catch(() => {
-        // An unexpected path (should not happen) — treat as a failed scan.
-        status = LOGIN_STATUS.failed;
-        error = error ?? null;
-      });
-    // Fire-and-forget: the route answers immediately with the scan URL.
-    void walk;
+    // One issue at a time: a second call while the issue phase (or the walk
+    // itself) runs is the same as the route's in-flight guard, moved inside
+    // the walk so the route cannot drift from it.
+    if (issuing || walk !== null) return;
+    issuing = true;
+    try {
+      let issued: RaccoonIssuedScan;
+      if (options.issueCode === undefined) {
+        // The default: the legacy local codegen — the shape every test
+        // predating server codegen relies on.
+        const legacyCode = generateRaccoonQrCode();
+        issued = { code: legacyCode, url: raccoonQrLoginUrl(legacyCode) };
+      } else {
+        try {
+          issued = await options.issueCode();
+        } catch {
+          // The issue phase failed: the legacy local code still enters
+          // `pending` on the (public) confirm page, so degrade to it rather
+          // than failing the walk over a codegen the page does not need.
+          const legacyCode = generateRaccoonQrCode();
+          issued = { code: legacyCode, url: raccoonQrLoginUrl(legacyCode) };
+        }
+      }
+      // The issue phase is where the gateway is talked to, so it can run
+      // long enough for a teardown to land: re-check before the walk owns
+      // any state.
+      if (stoppedAt()) {
+        status = LOGIN_STATUS.canceled;
+        return;
+      }
+      if (issued.unavailable === true) {
+        // The confirm page is unreachable (HTTP 404 at issue time): ending
+        // here, BEFORE the deadline starts, is the whole point — a full
+        // wait that misreads "the page is gone" as "the QR expired" is the
+        // bug this terminal exists to kill.
+        status = LOGIN_STATUS.unavailable;
+        return;
+      }
+      walk = runScan(issued)
+        .catch(() => {
+          // An unexpected path (should not happen) — treat as a failed scan.
+          status = LOGIN_STATUS.failed;
+          error = error ?? null;
+        });
+      // Fire-and-forget: the route answers once the issue phase has run.
+      void walk;
+    } finally {
+      issuing = false;
+    }
   }
 
   /**

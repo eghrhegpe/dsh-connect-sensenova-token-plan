@@ -70,7 +70,15 @@ export const CODE = Object.freeze({
   /** The console call itself failed (usually transient; the next poll clears it). */
   CONSOLE_ERROR: "console_error",
   /** The plugin row is misconfigured (the panel-facing spelling of {@link CODE.CONFIG}). */
-  CONFIG_ERROR: "config_error"
+  CONFIG_ERROR: "config_error",
+  /**
+   * The route's own host fence refused the request: the Host header is not
+   * one of `allowedHosts`, so the panel was opened from an address the
+   * plugin will not serve (issue #4: a LAN IP). Not a login problem and not
+   * a transport blip — the fix is a config row, which is why it is in
+   * {@link NO_LOGIN_CODES}.
+   */
+  HOST_NOT_ADMITTED: "host_not_admitted"
 });
 
 /**
@@ -208,6 +216,9 @@ export type CodeValue = typeof CODE[keyof typeof CODE];
  *   `config_error` — a bad endpoint override; the operator must fix it.
  *   `console_error` — the console did not answer; usually transient, and the
  *                     text must say so instead of inviting a login.
+ *   `host_not_admitted` — the panel was opened from an address this plugin
+ *                     does not serve; no account form can fix that, only the
+ *                     `allowedHosts` row can.
  *
  * This is the declaration; `client.js` ships its own copy
  * (`FORM_EXCLUDED_CODES`) because the browser bundle cannot import this
@@ -216,7 +227,8 @@ export type CodeValue = typeof CODE[keyof typeof CODE];
  */
 export const NO_LOGIN_CODES = Object.freeze(new Set([
   CODE.CONFIG_ERROR,
-  CODE.CONSOLE_ERROR
+  CODE.CONSOLE_ERROR,
+  CODE.HOST_NOT_ADMITTED
 ]));
 
 /**

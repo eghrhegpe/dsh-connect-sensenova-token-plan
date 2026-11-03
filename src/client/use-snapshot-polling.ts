@@ -46,11 +46,11 @@ import type { SnapshotData } from "./wire.ts";
 const SNAPSHOT_ROUTE: RemoteRoute<SnapshotData, SnapshotFailure | string> = {
   path: SNAPSHOT_PATH,
   parse: (body, status): RemoteRead<SnapshotData, SnapshotFailure | string> => {
-    // A non-2xx carries no body, so the status is the only clue, and the Host's
-    // own reading of it (`errorOfStatus`) is the one that keeps the sign-in
-    // form on screen for 401/403 instead of leaving a bare status code.
+    // A non-2xx usually carries no body, so the status is the clue — but a
+    // 403 may carry the trust fence's `code` (issue #4), and `errorOfStatus`
+    // reads it so a config refusal does not masquerade as an expired token.
     if (status < 200 || status >= 300) {
-      return { value: null, failure: errorOfStatus(status) };
+      return { value: null, failure: errorOfStatus(status, body) };
     }
     const read = interpretSnapshot(body);
     if (read.data === null) {

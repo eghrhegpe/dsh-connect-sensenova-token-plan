@@ -158,7 +158,17 @@ export function useRemoteRead<T, F = string>(
       // non-2xx is a transport fact — but the route's `parse` still sees it,
       // because only the route knows what a 401 means for it (the panel keeps
       // its sign-in form on screen; a balance route has no such story).
-      const body = response.ok ? await response.json().catch(() => null) : null;
+      //
+      // A 401/403 body is READ, not discarded: the trust fence's refusal
+      // carries a `code` (issue #4 — `host_not_admitted` means "you opened
+      // this from a host the plugin does not serve"), and that is the one
+      // thing that tells a config refusal apart from an expired token. A
+      // body that fails to parse stays `null`, so the status-only reading
+      // still works for a route that answers 403 with prose.
+      const body =
+        response.ok || response.status === 401 || response.status === 403
+          ? await response.json().catch(() => null)
+          : null;
       if (!isCurrent()) return;
       const outcome = route.parse(body, response.status);
       // A failure KEEPS the previous reading: the last known state is still

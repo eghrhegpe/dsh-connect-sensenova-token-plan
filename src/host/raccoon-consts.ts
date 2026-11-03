@@ -22,6 +22,12 @@ export const RACCOON_LLM_PREFIX = "/api/web/llm/v2";
 /** Credits (balance). */
 export const RACCOON_POINTS_PREFIX = "/api/web/points/v1";
 /**
+ * Server-side QR codegen + poll (2026-11-03 retest: the gateway moved code
+ * issuance to this prefix; the string-`OK` envelope half of the raccoon
+ * wire).
+ */
+export const RACCOON_IAM_AUTH_PREFIX = "/api/iam/v1";
+/**
  * Desktop one-time login reward (`/api/web/desktop/v1`) — INTENTIONALLY UNWIRED.
  *
  * Kept as wire knowledge, never as a call site: **nothing in this plugin may

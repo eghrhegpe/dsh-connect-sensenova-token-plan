@@ -12,6 +12,8 @@ export interface SnapshotFailure {
   message: unknown;
   code?: unknown;
   auth?: AuthData | null;
+  /** The host the trust fence refused (`host_not_admitted` only). */
+  host?: unknown;
 }
 
 /** The (data, error) pair the panel renders; exactly one side is non-null. */
@@ -61,17 +63,37 @@ export function interpretSnapshot(body: unknown): SnapshotRead {
 /**
  * The failure a non-2xx snapshot response becomes.
  *
- * A non-2xx carries no body, so the status is the only clue. 401/403 mean
- * the token is gone — the same story as the Host's own `jwt_expired`, and
- * the only reading that keeps the sign-in form on screen instead of leaving
- * the reader with a bare status code. Anything else is a plain transport
- * string, which keeps the form reachable too.
+ * 401/403 mean the token is gone — the same story as the Host's own
+ * `jwt_expired`, and the reading that keeps the sign-in form on screen
+ * instead of leaving the reader with a bare status code. Anything else is a
+ * plain transport string, which keeps the form reachable too.
+ *
+ * A 403 is NOT always a token problem, though: the route's trust fence
+ * answers 403 too, with a `code` in the body (`host_not_admitted` when the
+ * panel was opened from an address the plugin does not serve). That code
+ * must win over the status, or the reader is offered a sign-in form for a
+ * config problem (issue #4). Only codes in `FORM_EXCLUDED_CODES` may win —
+ * an unknown 403 code still reads as `jwt_expired`, so a future code cannot
+ * silently steal the login path.
  *
  * Named and module-scoped for the same reason as `interpretSnapshot`: the
  * Node-side tests drive this mapping instead of a copy of it.
+ * @param {number} status - the HTTP status.
+ * @param {unknown} [body] - the parsed body, when the caller read one.
+ * @returns {SnapshotFailure | string}
  */
-export function errorOfStatus(status: number): SnapshotFailure | string {
-  if (status === 401 || status === 403) return { message: `HTTP ${status}`, code: "jwt_expired", auth: null };
+export function errorOfStatus(status: number, body?: unknown): SnapshotFailure | string {
+  if (status === 401 || status === 403) {
+    const refusal = typeof body === "object" && body !== null ? (body as { code?: unknown; host?: unknown }) : null;
+    const code = refusal?.code;
+    if (typeof code === "string" && FORM_EXCLUDED_CODES.has(code)) {
+      // The refused host rides along: the guidance line names it, which is
+      // the difference between "403" and "add 172.19.0.199 to allowedHosts".
+      const host = typeof refusal?.host === "string" ? refusal.host : "";
+      return host === "" ? { message: `HTTP ${status}`, code, auth: null } : { message: `HTTP ${status}`, code, auth: null, host };
+    }
+    return { message: `HTTP ${status}`, code: "jwt_expired", auth: null };
+  }
   return `HTTP ${status}`;
 }
 
@@ -93,7 +115,11 @@ export const GUIDANCE_BY_CODE: Readonly<Record<string, keyof typeof zh>> = Objec
   // The console did not answer. `FORM_EXCLUDED_CODES` already keeps the
   // login form away from this code, so the guidance line is the whole
   // explanation — and it must say the failure is expected to pass.
-  console_error: "panel.consoleTransient"
+  console_error: "panel.consoleTransient",
+  // The route's trust fence refused the panel's own Host (issue #4): the
+  // reader opened the GUI from an address this plugin does not serve, so the
+  // guidance line must name the config row, not the account.
+  host_not_admitted: "panel.hostNotAdmitted"
 });
 
 /**
@@ -102,12 +128,14 @@ export const GUIDANCE_BY_CODE: Readonly<Record<string, keyof typeof zh>> = Objec
  *   config_error  — a bad endpoint override; the operator must fix it.
  *   console_error — the console did not answer; it usually clears on the
  *                   next poll, and the text must say so.
+ *   host_not_admitted — the panel was opened from a host this plugin does
+ *                   not serve; only the `allowedHosts` row fixes it.
  *
  * Hiding either behind a login box turns "the console is down" into
  * "please sign in". Pinned to `NO_LOGIN_CODES` in `codes.ts` by the same
  * test: this set is the copy, that one is the declaration.
  */
-export const FORM_EXCLUDED_CODES: ReadonlySet<string> = Object.freeze(new Set(["config_error", "console_error"]));
+export const FORM_EXCLUDED_CODES: ReadonlySet<string> = Object.freeze(new Set(["config_error", "console_error", "host_not_admitted"]));
 
 /**
  * The platform's classified refusals, keyed by wire code, mapped to the
@@ -164,11 +192,16 @@ export function viewOf(
   // The dictionary key, resolved with the caller's `tt`; returned as a key
   // so tests can assert the decision without owning a dictionary.
   const guidanceKey = failure === null ? null : GUIDANCE_BY_CODE[failure.code as string] ?? null;
+  // Two keys are interpolated: `configError` quotes the Host's message, and
+  // `hostNotAdmitted` names the host the fence turned away (so the reader
+  // knows which row to add, not just that a 403 happened).
   const guidance = guidanceKey === null
     ? null
     : guidanceKey === "panel.configError"
       ? format(tt(guidanceKey), { error: failure?.message })
-      : tt(guidanceKey);
+      : guidanceKey === "panel.hostNotAdmitted"
+        ? format(tt(guidanceKey), { host: typeof failure?.host === "string" ? failure.host : "" })
+        : tt(guidanceKey);
   // The Host's own contract check: a renamed upstream field would otherwise
   // look identical to "no usage yet".
   const shapeWarnings = Array.isArray(data?.shapeWarnings)

@@ -682,7 +682,7 @@ const healthy = {
   // costs a round trip to interpret — which is exactly what happened when
   // `DrawSwitch` introduced `tt(absentKey)`.
   const tableDrivenDetail = (found) => {
-    const expected = "absentKey,guidanceKey,open,quotaGuidanceKey,refusalKey".split(",");
+    const expected = "absentKey,guidanceKey,key,open,quotaGuidanceKey,refusalKey".split(",");
     const foundIds = [...found].sort().join(",");
     if (foundIds === expected.join(",")) {
       return `identifiers: ${foundIds} | conditions: ${[...conditions].sort().join(", ")}`;
@@ -698,13 +698,17 @@ const healthy = {
   // form's local for a `REFUSAL_TEXT[code]` lookup (it reads the key into a
   // name so it can tell an interpolated value from a plain one), so it carries
   // the same dictionary obligation — a table value is only checked when it is
-  // handed to `tt` directly, which is what this list records. `absentKey` is
+  // handed to `tt` directly, which is what this list records. `key` is the
+  // raccoon tab's local for the same `GUIDANCE_BY_CODE` lookup on a non-2xx
+  // answer (both the roster GET and the login POST resolve a wire code to a
+  // guidance key before handing it to `tt`), so it carries the identical
+  // obligation. `absentKey` is
   // `DrawSwitch`'s local for a `drawToolNote` → i18n-key lookup; adding a
   // reason to the host's `DrawToolAbsentReason` union must therefore land here
   // AND in `DRAW_ABSENT_KEY`, which `Record<...>` already forces at compile
   // time.
   check("the table-driven tt sites are the ones expected",
-    [...deferred].sort().join(",") === "absentKey,guidanceKey,open,quotaGuidanceKey,refusalKey",
+    [...deferred].sort().join(",") === "absentKey,guidanceKey,key,open,quotaGuidanceKey,refusalKey",
     tableDrivenDetail(deferred));
   const tableKeys = [...Object.values(tables.GUIDANCE_BY_CODE ?? {}), ...Object.values(tables.REFUSAL_TEXT ?? {})];
   const tableMissing = [...new Set(tableKeys)].filter((key) => !(key in zh) || !(key in en));

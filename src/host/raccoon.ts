@@ -30,10 +30,17 @@
  * a self-built WeChat-QR walk whose tokens land in the DSH credentials service
  * (`raccoon-store.ts`), never in this plugin's directory, git, or logs.
  *
- * Wire facts this layer encodes (all probed 2026-09 against the gateway):
- *   - envelope `{ code, message, details, data }`, success is `code === 0`;
- *   - the QR page is public: any self-made 32-hex code enters `pending` and is
- *     verified server-side, so the code is generated LOCALLY (`generateQrCode`);
+ * Wire facts this layer encodes:
+ *   - the web-auth family (`/api/web/...`) uses the envelope
+ *     `{ code, message, details, data }` with success `code === 0`;
+ *   - the IAM family (`/api/iam/v1/...`, probed 2026-11) uses the STRING
+ *     envelope `code: "OK"` — one family per parser, never a shared one;
+ *   - the QR page is public: any 32-hex code enters `pending` and is verified
+ *     server-side, so a LOCAL code still works as the fallback
+ *     (`generateRaccoonQrCode`). Code issuance moved to the gateway in 2026-11
+ *     (`POST /api/iam/v1/auth/mp/qrcode`): `issueRaccoonScan` prefers the
+ *     server's `qr-` code and keeps the local one for a gateway that refuses;
+ *     both code spaces poll on the same endpoints (probed 2026-11);
  *   - the refresh token is SINGLE-USE: the server rotates BOTH tokens, so a
  *     refresh always re-stores the pair (the store owns that write-back);
  *   - `thinking` control is a PROVIDER-LEVEL dialect (`extra_body.thinking`,
