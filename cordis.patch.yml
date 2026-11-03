@@ -51,7 +51,10 @@
         tokenSkewSeconds: 120
         # Extra host names this Host answers as, beyond the loopback defaults
         # (localhost / 127.0.0.1 / ::1). ADDED to them, never substituted — see
-        # docs/SETUP.md. Uncomment and list to serve the panel from another name.
+        # docs/SETUP.md. Uncomment and list to serve the panel from another name;
+        # to open the panel from another machine on your LAN, list that address
+        # (e.g. allowedHosts: ["172.19.0.199"]). Keep the fence on: it stops DNS
+        # rebinding and cross-site writes to the credential routes (ADR-018).
         # allowedHosts: []
         # The rest of the login flow's endpoints. Everything below is optional:
         # a key left commented keeps the platform default. Only touch these for

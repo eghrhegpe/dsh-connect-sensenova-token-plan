@@ -74,6 +74,24 @@ plugin_manager { action: "install_bundle", target: "dsh-connect-sensenova-token-
 
 > 上表主机层字段的默认值（含 `allowedHosts` 的 `localhost`/`127.0.0.1`/`[::1]`/`::1`）统一定义在 `src/host/host-config.ts` 的 `CONFIG_DEFAULTS`（`src/host/index.ts` 仅 import 并在末尾再 export，非定义处），并由 `test/config.test.mjs` 与 `cordis.patch.yml` 双向钉住；auth 类字段留空即表示"使用平台默认"，其生效值定义在 `src/host/auth-config.ts` 的 `AUTH_DEFAULTS`（2026-10 从 `sensenova-auth.ts` 拆出，见该文件头注释）。本表是这两处的**人读副本**：逐格一致性由 `test/docs.test.mjs` 检查 17 与源码对账，改默认值必须同时改这一列，否则套件红。
 
+### 从局域网 IP 打开面板（403 forbidden）
+
+面板路由的信任栅栏只服务**本机回环名**（`localhost` / `127.0.0.1` / `[::1]` / `::1`）。用局域网地址
+（如 `http://172.19.0.199:3080/`）打开 DSH 时，`Host` 头就是那个 IP，栅栏会回 `403`，响应体写明
+被拒的主机名、对应的配置项与修法（`code: host_not_admitted`）。这是**故意的**：栅栏挡的是 DNS
+rebinding（攻击者的名字解析到回环，`Origin` 与 `Host` 会**一致**）与跨站写请求（`account` 路由会写
+凭据），所以「`Origin` 与 `Host` 相等就放行」这种比法正好会放过重绑定。判定与理由见
+[ADR.md](./ADR.md) ADR-018。
+
+要让这台机器从局域网地址访问，把该主机名**追加**进 `cordis.patch.yml` 的 `allowedHosts`：
+
+```yaml
+allowedHosts: ["172.19.0.199"]
+```
+
+`allowedHosts` 只增不替（回环默认项始终保留），改完重载 Host 生效。**不要**为了省事把栅栏整个关掉：
+面板与会话里的 agent 共用同一个浏览器信任边界，关掉等于让任何能打开这个页面的人替你写凭据。
+
 ---
 
 ## 4. 改动后必须重启 Host

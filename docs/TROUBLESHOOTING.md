@@ -153,6 +153,34 @@ provider 注册与撤回的热生效设计见 [PROVIDER-HOT-RELOAD.md](./PROVIDE
 
 ---
 
+## D. 面板打不开 / 找不到入口
+
+### D1. 用局域网 IP 打开时面板报 forbidden {#d1-用局域网-ip-打开时面板报-forbidden}
+
+面板路由只服务回环名（`localhost` / `127.0.0.1` / `::1`）。用 `http://172.19.0.199:3080/` 这类地址
+打开时，`Host` 头就是那个 IP，栅栏回 `403`，响应体写明被拒的主机名与修法
+（`code: host_not_admitted`、`fix` 字段），面板上显示为「面板是从本插件不提供服务的地址打开的」。
+
+- **要在这台机器上从局域网访问**：把该主机名追加进 `cordis.patch.yml` 的 `allowedHosts`
+  （`allowedHosts: ["172.19.0.199"]`），重载 Host 生效；只增不替，回环默认项保留。
+- **不要**为了省事关掉栅栏：它挡的是 DNS rebinding（`Origin` 与 `Host` 会一致的那种）与跨站写请求，
+  面板与会话共用同一个浏览器信任边界。
+- 字段说明见 [SETUP.md](./SETUP.md) §3，裁定见 [ADR.md](./ADR.md) ADR-018。
+
+### D2. 装完了找不到入口 {#d2-装完了找不到入口}
+
+面板是 **Plugins 页里的内联插件卡**，不在侧边栏、也不是独立页面。按这个顺序查：
+
+1. 装上了没有：`dsh plugin --profile <web|desktop> list` 里有 `dsh-connect-sensenova-token-plan`；
+2. 打开 DSH 的 **Plugins** 页，找名为「商汤模型接入」的卡（三个 tab：积分额度 / 接入 API / 小浣熊）；
+3. 卡里先显示登录表单——填一次账号密码，「积分额度」tab 才有数。
+
+装完必须**完全退出 DSH（含托盘）再启动**，Host 半边只在启动时加载一次（见 [SETUP.md](./SETUP.md) §4）。
+桌面版与 `dsh web` 用的是**不同 profile**，装在 web profile 里而打开桌面版是看不到的
+（[PITFALLS.md](./PITFALLS.md) §8 与 §22）。
+
+---
+
 ## 还有别的问题？
 
 - 想知道**为什么**会有某个设计（不只是怎么办）：[PITFALLS.md](./PITFALLS.md)（现象→根因→修法，

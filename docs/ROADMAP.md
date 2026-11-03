@@ -309,6 +309,27 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 
 **探活纪律（沿用 §6.1.2 的判据）**：刷新/续期端点用**假的 `refresh_token`** 探活——真 token 是单用的，烧掉会让用户下次无法续期；假 token 同样能区分「400 = 路径在」与「404 = 路径不在」，零代价。
 
+**造码体系迁移复测（2026-11-03，无凭据，零副作用）**：上游把扫码登录**造码**从客户端搬到服务端
+`/api/iam/v1`，旧造码路径（客户端自己编 32-hex）**不再是官方路径**。逐条实测（不带任何凭据，
+失败码用假码，同 §6.1.2 判据）：
+
+| 请求 | 实测 | 判读 |
+|---|---|---|
+| `POST /api/iam/v1/auth/mp/qrcode`（空 body） | `200` **字符串信封** `{"code":"OK","data":{"qrcode_code":"qr-<uuid>","scan_path":"/login/mp","expires_in":300,"poll_interval":2,"status":"pending"}}` | 通，服务端造码；信封是 `code:"OK"` 字符串，**不是** web-auth 家族的 `code:0` 数字 |
+| `GET /login/mp?code=<真码>`（普通 UA 与微信 UA 各一次） | `404` | **确认页仍死**——手机扫到码也打不开，这才是「一直提示二维码过期」的直接成因 |
+| `POST /api/iam/v1/auth/mp/qrcode/login`（假码） | `401 {"code":"AUTH_QRCODE_INVALID"}` | 路径存在且到业务层；轮询改走这里 |
+| `POST /api/web/auth/v1/login_with_qrcode_code`（假码） | `200 {"code":0,"data":{"status":"pending"}}` | 旧轮询端点**仍活**，且接受 IAM 造的 `qr-` 码（两套码空间共享，故换造码不换轮询也不会坏） |
+
+官网 Next.js chunk 反读（`createQr`）给了这三条口径，插件照抄：扫码页 URL = `scan_path` + `code` +
+`appname` + `source=platform`（`source` 缺了会被当桌面端）；deadline = `now + 1000 * expires_in`
+（**不是**写死 5 分钟）；轮询间隔 = `clamp(1000, 60000, 1000 * poll_interval)`；成功判据是
+`status === "success"` **且** `access_token` 非空（此路径下 `refresh_token` 可能缺席）。
+
+**处置（0.8.5）**：造码优先走 IAM（失败**回落**本地 32-hex 旧造码，零回归），轮询优先走 IAM
+（信封异常一律按 `pending` 继续，不把一次读失败变成终态）；发码时**一次性探活确认页**，`404` 就直接
+进新终态 `unavailable` 并给面板一句「上游扫码页暂不可用，这不是过期」——此前只能等 300 s 后报
+「超时」，用户看到的是「二维码过期」，指错了方向。确认页恢复后无需改代码，造码/轮询已经就位。
+
 **扫码登录信封实测（2026-10-01，真扫码）**：`login_with_qrcode_code` 成功信封的 `data` **只含 `access_token`、`refresh_token`、`status` 三个字段**——没有用户对象、没有头像/手机号/用户 ID。面板展示的昵称**确定来自 access token JWT 的 `name` claim**（`extractRaccoonNickname` 的 JWT 兜底分支命中；claims 全集为 `exp/iss/jti/name/nation_code/nbf/owner_type/sid`）。这销案了「信封从未被探测、昵称来源未证实」的悬案：网关能给的全部账号信息就是这一条昵称，面板无需也无从展示更多；`raccoon.ts` 里信封字段的防御梯子保留（代价为零，防网关将来加字段）。
 
 ### 6.1.4 接入面盘点：未接的数据、死负载与「自动」的边界（2026-10-01：报告 → 当天处置）
@@ -333,7 +354,7 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 
 - **自动续期**（Token Plan / 小浣熊都有）：Token Plan 走 `acquire()`（节流闸 → 新鲜度 → refresh → 登录兜底）；小浣熊的 refresh 是**单用轮换**、整对回写，并在每次请求前 eager refresh。触发是**惰性**的——Host 半边零 `setInterval`，靠面板轮询打路由时按需触发。
 - **密码自动重登**（仅 Token Plan）：**opt-in**，必须 `SENSENOVA_PASSWORD` 在 Host 进程环境里且账号已存；没有它，refresh 一死就回面板要手动登录。平台要短信/图形验证码时自动化注定失败（面板文案 `auth.verification`）。
-- **登录本身**永远需要用户在场一次：Token Plan 是浏览器 OIDC+PKCE，小浣熊是微信扫码（最长等 5 分钟扫完）。**等的是用户，不是 HTTP 请求**：`/raccoon` 的 `login` 动作发码即回（约 100 ms），扫码 walk 在后台跑，结果经 GET 的 `loginStatus` 事件下发一次（`scanning` → `logged_in` / `timeout` / `canceled` / `failed`）。旧实现让 POST 阻塞到 5 分钟截止，客户端还在旁边跑 150 × 2 s 的补偿轮询，一次扫码要打网关几百次读——现在的缓存与单飞把这笔账压到「每窗口两次读」（`test/routes.test.mjs` T 段）。
+- **登录本身**永远需要用户在场一次：Token Plan 是浏览器 OIDC+PKCE，小浣熊是微信扫码（上限 5 分钟，由服务端 `expires_in` 给出；确认页 `404` 时**提前**收场，见 §6.1.3 的 `unavailable`）。**等的是用户，不是 HTTP 请求**：`/raccoon` 的 `login` 动作发码即回（约 100 ms），扫码 walk 在后台跑，结果经 GET 的 `loginStatus` 事件下发一次（`scanning` → `logged_in` / `timeout` / `canceled` / `unavailable` / `failed`）。旧实现让 POST 阻塞到 5 分钟截止，客户端还在旁边跑 150 × 2 s 的补偿轮询，一次扫码要打网关几百次读——现在的缓存与单飞把这笔账压到「每窗口两次读」（`test/routes.test.mjs` T 段）。
 - **签到 / 每日领取：没有做，也没有可调的端点**。Token Plan 侧从未证实存在这样的端点（§6「先证商汤有端点，否则不吸」与 §7「明确不做」仍然有效）；小浣熊侧日发积分是**服务端自动发的 `daily_grant`**（网关没给这个发放的端点），面板只读余额、把日发那部分当 breakdown 展示。所以**不存在「靠自动登录刷签到」这回事**——本插件从未发出任何签到/领取请求。
 
 #### 探针提醒：`desktop/v1/login/points/grant` 不能拿真凭据试

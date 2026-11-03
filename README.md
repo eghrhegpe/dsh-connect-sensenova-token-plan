@@ -94,6 +94,8 @@
 
 3. 打开 DSH 的 **Plugins 页**，找到本插件的插件卡（面板是页内的内联卡片，**不在侧边栏**）。
 
+找不到入口，或从局域网 IP 打开时面板报 `forbidden`？见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) D 节。
+
 ## 它是怎么工作的
 
 登录原理：
