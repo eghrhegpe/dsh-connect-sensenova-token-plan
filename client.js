@@ -244,7 +244,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.loginTimeout": "扫码超时（未在时限内确认）——请重新点击登录。",
 			"raccoon.loginCanceled": "扫码已取消——请重新点击登录。",
 			"raccoon.loginFailed": "登录未能保存：{error}",
-			"raccoon.scanUnavailable": "上游扫码确认页当前不可用（打开即 404），所以本轮扫码不会成功——这不是二维码过期。请稍后重试，或先用已登录的账号继续。",
+			"raccoon.scanUnavailable": "本轮扫码没有完成：上游的扫码确认页打不开（404），这不是二维码过期。问题在 xiaohuanxiong.com 那边——官方桌面客户端指向的也是同一页。想现在就用，先走「接入 API」（Token Plan）；上游恢复后回来扫码即可。",
+			"raccoon.providerNotConfigured": "小浣熊提供方未注册：本机还没有小浣熊登录凭据，扫码登录成功后会自动注册。上游扫码页打不开时，先走「接入 API」（Token Plan）。",
 			"raccoon.httpFailed": "本机 Host 应答 HTTP {status}（小浣熊读取失败）",
 			"raccoon.noAnswer": "本机 Host 没有应答",
 			"raccoon.qrAlt": "微信扫码登录二维码",
@@ -462,7 +463,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.loginTimeout": "The scan timed out (no confirmation within the deadline) — start it again.",
 			"raccoon.loginCanceled": "The scan was canceled — start it again.",
 			"raccoon.loginFailed": "Sign-in could not be saved: {error}",
-			"raccoon.scanUnavailable": "The upstream scan-confirmation page is currently unavailable (it answers 404), so this scan cannot complete — this is not an expired QR code. Try again later, or keep using the account that is already signed in.",
+			"raccoon.scanUnavailable": "This scan did not complete: the upstream confirmation page is down (404) — not an expired QR code. That is on xiaohuanxiong.com's side, and the official desktop client points at the same page. To keep working now, use the API Integration (Token Plan) tab; scanning works here again once upstream restores the page.",
+			"raccoon.providerNotConfigured": "The Raccoon provider is not registered: this machine has no Raccoon credential yet, and a successful QR sign-in registers it automatically. While the upstream scan page is down, use the API Integration (Token Plan) tab.",
 			"raccoon.httpFailed": "The local Host answered HTTP {status} (the Raccoon read failed)",
 			"raccoon.noAnswer": "The local Host gave no answer",
 			"raccoon.qrAlt": "WeChat sign-in QR code",
@@ -3630,7 +3632,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		}, loginNote) : null, state !== null && state.providerError !== void 0 && state.providerError !== "" ? h("div", {
 			style: S.formError,
 			role: "alert"
-		}, state.providerError) : null, loggedIn ? h("div", {
+		}, state.providerError === "not_configured" ? tt("raccoon.providerNotConfigured") : state.providerError) : null, loggedIn ? h("div", {
 			style: { marginTop: 12 },
 			role: "status"
 		}, h("div", { style: {

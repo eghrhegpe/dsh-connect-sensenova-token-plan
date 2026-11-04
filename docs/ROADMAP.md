@@ -485,6 +485,35 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 
 **改进候选（未排期）**：peer 分类器对这种体大概率判不可重试（错误体无任何限频/超时措辞，`llm-retry.ts` 的 `retryableCodes()` 五类也接不住 499），失败即快失败。这与 429 误判纠正层（`llm-error-fix.ts`）同构——上游错类，宿主侧纠正——但纠正值不值得，取决于复现率：先观察攒样本，不预支一层纠正逻辑。§7 有对应候选行。
 
+### 6.1.10 扫码确认页 `/login/mp` 下线：上游缺页复测与「不做第二条登录通道」的裁定（2026-11-04）
+
+> 起因：issue #5（xiuchuan666）报「接入小浣熊桌面端不可用，显示上游扫码确认页不可用」，回帖补充「客户端提供的登录态不可用，只有 API 提供的可以用。官方小浣熊客户端是正常使用的」。当日复测并定性，0.8.6 只改面板表述，不新增登录路径。
+
+**复测表（零副作用，只用上游返回的码与假 token，未登任何账号）**：
+
+| 端点 / 页面 | 方法 | 响应 | 判读 |
+|---|---|---|---|
+| `POST /api/iam/v1/auth/mp/qrcode`（body `{}`） | POST | `200 {code:"OK", data:{qrcode_code:"qr-<uuid>", scan_path:"/login/mp", expires_in:300, poll_interval:2, status:"pending"}}` | 造码体系**活着**，码是服务端造的 |
+| `GET /login/mp?code=…&appname=…&source=platform` | GET | **404**，body 是 Next.js 404 页（含 `_next/static/css/…`），nginx 直出、无 `x-nextjs-matched-path` | **确认页这一 Next 路由已不在构建里**，不是网关挡的 |
+| `POST /api/iam/v1/auth/mp/qrcode/login`（真码） | POST | `200 {code:"OK", data:{status:"pending"}}` | 轮询端点活着，只是永远等不到确认 |
+| `GET /login`（同域对照） | GET | 200 | 登录入口页在，被下线的是 `/login/mp` 这一个路由 |
+| `POST /api/web/llm/v2/chat/completions`（假 bearer） | POST | `401 {code:200003, message:"authorization_verify_error"}` | 网关端点活着（认证失败而非缺页） |
+
+**为什么不是插件用法错**：官方桌面客户端 `C:\Program Files\raccoon-ai\resources\app.asar` 里，`login/mp` 的唯一命中就是它自己的二维码 value——`${origin}/login/mp?code=${code}&appname=商汤小浣熊官网`（连 `source=platform` 都没有）；`auth/mp/qrcode` / `scan_path` / `iam/v1` 在该 asar 里 **0 命中**，它仍用旧的 `login_with_qrcode_code` 轮询、本地造码。**所以「官方客户端正常」靠的是它已经持有的登录态，不是另一条扫码通道**——插件与官方客户端指着同一个已下线的页面。
+
+**替代通道为什么都不采用**：
+
+| 候选 | 现状 | 裁定 |
+|---|---|---|
+| 只读导入桌面 `~/.box-agent/config/auth.json` | 文件在（`access_token`/`refresh_token`/`office_identity`），本机 refresh 到 2026-11-13 仍有效 | **不做**：上游 refresh 是单次使用 + 双枚轮换，插件刷新一次就把桌面 App 那枚作废（旧 token 复用 → `400 200822 refresh_conflict`），等价于把用户登出官方客户端；要避免只能回写桌面文件，而回写是 §6.1.1 表里标「高风险」的路线，且「桌面登录态作登录路径」已在 §6.1.1 判死 |
+| 短信登录 `/api/iam/v1/auth/login/sms` | 端点存在，但 `/sms/send` 必带 `captcha_token`（人机验证） | **不做**：无离线可复现的人机验证，等于要插件内置打码 |
+| 密码登录 `/api/iam/v1/auth/login/password/{email\|phone}` | 端点存在 | **不做**：触红线 6（密码必须 JWE 封包）且本插件现为 OIDC+PKCE 无密码通道，新增密码凭据形态代价远大于收益 |
+| 把 `scan_path` 改指 `/login` | `/login` 200 | **不成立**：登录页前端 bundle 里 `searchParams.get("code")` 只有 1 处命中，且属于 `events/refer` 分享码解析——登录页不读 `code`，无法当确认页 |
+
+**处置（0.8.6）**：面板把「本轮没完成」与「问题在哪 / 现在能用什么」分成两句（扫码结果一次性、publisher 的原因码会一直挂着），并把 publisher 的原因码 `not_configured` 翻成人话而不再原样上屏。**不新增路由、不改 host 侧错误码**——`not_configured` 是 `switch ON + no token` 的既有语义（publisher 干净卸载），host 侧由 `test/raccoon.test.mjs` 钉死。
+
+**复发观察**：上游恢复后，`GET /login/mp?code=…` 应回到 200；复测只发一次造码 + 一次页面 GET 即可判定，不需要真扫码。
+
 ### 6.2 构建链与 Client 拆分（2026-09-30：先干跑验证，当日决策重开并执行完毕）
 
 原计划「拆分先行、.ts 化稳定后再说」被合并为一步（touch 每个文件一遍而非两遍），

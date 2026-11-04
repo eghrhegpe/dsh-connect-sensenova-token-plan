@@ -1253,6 +1253,17 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
         && texts(alertsOf(tree)[0]).join("") === "peer missing",
       `checked=${String(box?.props?.checked)} alerts=${alertsOf(tree).length}`);
   }
+  // `not_configured` is the publisher reason CODE ("switch on, no credential"),
+  // not a sentence. The card must say what it means instead of printing the
+  // token at the reader — the frame above pins that real messages still pass
+  // through untouched, so this only covers the one code the Host emits.
+  {
+    const tree = card({ ok: true, enabled: true, loggedIn: false, providerError: "not_configured" });
+    check("the publisher not_configured code is spelled out, not printed",
+      alertsOf(tree).length === 1
+        && texts(alertsOf(tree)[0]).join("") === "raccoon.providerNotConfigured",
+      JSON.stringify(alertsOf(tree).map((el) => texts(el).join(""))));
+  }
 
   // The two transient notes ride in their own lines; `loginNote` is what carries
   // a walk that ended without a sign-in (the outcome is delivered once, so the

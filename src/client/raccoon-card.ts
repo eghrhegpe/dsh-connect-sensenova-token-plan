@@ -304,8 +304,18 @@ export function RaccoonCard({
     // A registration failure stays visible even while the switch is OFF —
     // hiding it behind `enabled` is the same dead-end as the account editor
     // used to be: a failed state with no visible affordance to act on it.
+    //
+    // `not_configured` is the publisher's reason CODE, not a sentence: the
+    // switch is ON and there is no credential yet. Printing the token verbatim
+    // (which 0.8.5 did) leaves the reader holding `not_configured` and no next
+    // step, so that one code is spelled out; every other provider error is
+    // already a human string from the Host and stays as-is.
     state !== null && state.providerError !== undefined && state.providerError !== ""
-      ? h("div", { style: S.formError, role: "alert" }, state.providerError)
+      ? h(
+          "div",
+          { style: S.formError, role: "alert" },
+          state.providerError === "not_configured" ? tt("raccoon.providerNotConfigured") : state.providerError
+        )
       : null,
     // The balance is the headline the user came to read (one `role="status"`
     // node, as the render suite pins), with the declared split as a deck of
