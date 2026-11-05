@@ -52,7 +52,8 @@
     "0.2.1-rc.4",
     "0.2.1-rc.5",
     "0.2.2-alpha.2",
-    "0.2.2-alpha.3"
+    "0.2.2-alpha.3",
+    "0.2.2-rc.1"
   ],
   "validatedOn": [
     "0.2.1-rc.2"
@@ -80,7 +81,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-client-ui-layout": {
@@ -105,7 +107,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-client-ui-renderer": {
@@ -130,7 +133,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-credentials": {
@@ -155,7 +159,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-home-paths": {
@@ -180,7 +185,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-host-webserver": {
@@ -205,7 +211,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-llm": {
@@ -230,7 +237,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-llm-pi-ai": {
@@ -255,7 +263,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-settings": {
@@ -280,7 +289,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     },
     "@deepseek-ai/dsh-tools": {
@@ -305,7 +315,8 @@
         "0.2.1-rc.4",
         "0.2.1-rc.5",
         "0.2.2-alpha.2",
-        "0.2.2-alpha.3"
+        "0.2.2-alpha.3",
+        "0.2.2-rc.1"
       ]
     }
   }
