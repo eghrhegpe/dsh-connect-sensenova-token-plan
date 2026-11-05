@@ -502,3 +502,12 @@
 - **根因**：造码端点 `POST /api/iam/v1/auth/mp/qrcode` 活着、轮询端点也活着，**只有确认页那个 Next 路由被下线**；而官方桌面客户端 asar 里 `login/mp` 的唯一命中就是它自己的二维码 value——它「正常可用」靠的是**已持有的登录态**，不是另一条扫码通道。也就是说：这一跳是上游服务端缺口，插件侧无论怎么改 `scan_path` 都修不出来（登录页前端 bundle 里 `searchParams.get("code")` 只有一处命中，还是 `events/refer` 的分享码解析，登录页根本不读 `code`）。另一面是**原因码当句子用**：publisher 的 `not_configured` 是「开关开着、本机还没有凭据」的机器语义（`switch ON + no token` 时干净卸载），面板却把它原样打进 `role="alert"`，于是用户看到的是一个 token，不是一个下一步。
 - **修法**（2026-11-04 已做）：① 面板把两件事拆成两句——`raccoon.scanUnavailable` 讲**本轮没完成 + 问题在上游**（扫码结果只交付一次，刷新后这条就没了），`raccoon.providerNotConfigured` 讲**原因码是什么意思 + 现在能走哪条路**（publisher 会一直挂到上游修好）；② `not_configured` 在卡片渲染处翻成人话，其余 provider 错误（已是人写的串）原样上屏，两条断言各钉一头；③ 文档侧新增 B5 症状条目与 ROADMAP §6.1.10 复测表，把「上游缺页 / 客户端靠既有登录态 / 三条替代通道为何都不采用」写成可复核的事实。
 - **教训**：**上游某一跳下线时，先分清「码造得出来吗」与「码能确认吗」**——前者活着不等于链路活着，而「官方客户端能用」通常证明的是它手里有旧凭据，不是它走了别的门。此时插件正确的产出是**一句能行动的话**（问题在哪、现在能用什么、什么时候回来），不是新开一条短信 / 密码 / 导入桌面态通道：那些都要新增凭据形态或触红线 6，代价远大于收益，而且把「上游缺页」包装成「插件有替代方案」会让下一个报告的人更晚得到真相。附带的通用条：**机器原因码永远不要原样上屏**，它回答的是「哪个分支」，不是「我该干什么」。
+
+---
+
+## 46. 声明了 `timeoutMs` 却不转发 `exec.signal`：取消只是让 agent 不再等，活儿还在烧预算
+
+- **现象**（2026-11-06 取证）：出图工具按 `ToolDefinition` 契约声明了 `timeoutMs`（期限 + 10s），但 `execute(params)` 只收一个参数，全模块零处读 `exec.signal`。用户在会话里点「停止」后，agent 那侧结束了，`fetch` 仍在跑，一路跑到 240s 默认期限；平台照旧出图、照旧扣积分，而结果没有任何人会读。
+- **根因**：`timeoutMs` 不是「宿主替你把这条调用掐了」的许可，而是**对工具实现的一句断言**——peer 的类型写明「Declaring it asserts this tool forwards `exec.signal` to a cooperative implementation that can reach quiescence when the signal aborts」，并且「the registry … cannot hard-kill same-process code」；同一条契约的 `execute` 段落还要求「settle only after its owned work reaches quiescence」，即工具**返回了但活儿还在跑**是违约形态，不是优化。本仓踩中的原因是装配期看不出问题：`defineTool` 不校验 body 是否真的用 signal，单测又都以单参数调用 `execute(params)`，于是这条断言长期只是空话。兄弟插件 agnes 的 `draw.ts`/`video.ts` 已把同一坑写成 `mergedSignal`/`isAbortError` 两件套，注释里留了病历（"a cancelled call kept running to its full budget"）。
+- **修法**（2026-11-06 已做）：`execute(params, exec?)` 接住 `exec.signal`，入口先 `aborted` 短路（已取消就一个请求都不发），再经 `mergedDrawSignal(controller, signal)` 用 `AbortSignal.any` 与内部期限合并交给 fetch——用 `any` 是为了让调用方的 abort reason 原样进 rejection，从而区分「取消」与「期限」。`isDrawCancellation` 按 error `name === "AbortError"` 判定（宿主取消是 `DOMException`，本模块期限 abort 抛普通 `Error`，永不匹配），取消**不 trip 冷却**：用户叫停不该让下一次调用再等 30 秒。
+- **教训**：**声明给宿主的每一个断言，都要有一行代码兑现**——`timeoutMs`、`isConcurrencySafe`、`output.schema` 是同一类「装配期不校验、运行期靠自觉」的契约，测试全绿证明不了它成立。判据很省事：把工具声明里每个可选字段问一遍「谁在读它、读不到会怎样」，答不出消费方的就是空头断言。另一条：**取消与失败必须分诊**，冷却/退避是给真实失败的，把用户中断也计成失败，等于在打断之上再叠一次惩罚。

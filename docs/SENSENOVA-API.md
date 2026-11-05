@@ -94,6 +94,30 @@
 
 需 `Authorization: Bearer <API Key>`（**不是控制台 JWT**，是本机推理 API key）。**免费、只读、不计费、不占推理额度**。返回 `data[].id` 列表——用来区分「套餐覆盖的 `model_ids`」与「当前 Key 真能调的模型」：差集即「需开通」的模型（`pool.lockedModels`）。API key 缺失时本插件只降级模型清单，不影响额度展示。
 
+### 3.4 计费口径：积分池怎么算，出图算不算
+
+出图与对话共用一套积分池，没有「每张图 × 元」的价目表。三件事分开写清，因为它们最常被混成一句：
+
+1. **池子**：账户有两类积分——通用积分（所有已开放模型）与 Flash-Lite 专属积分（仅 Flash-Lite 系列）。用 Flash-Lite 先扣专属、不足再扣通用，其它模型只扣通用；公测期两个池各自给 60,000 积分的滚动 5 小时额度 + 600,000 积分的滚动周额度（原始规则见 `docs/sensenova-api-reference/1、快速开始.md`）。U 系列出图模型不属于 Flash-Lite 系列，按规则只走通用池——这一句由规则文本推出，未见 `pool-usage` 的 `model_ids` 实证。
+2. **计量**：平台不公开「1 积分 = 多少 token / 多少张图」。`GET /v1/models` 的 `pricing` 五项全为 `0`（§7.1），出图响应的 `usage` 只回 token 数（`input_tokens` / `output_tokens` / `total_tokens` / `images_count`，官方 U1.5 文档的示例是 1540 / 4096 / 5636），**不回积分**。所以一次出图到底扣了几积分，只有控制台的扣减记录说得准。
+3. **观察点**：面板「每模型消耗」走的 `credit-usage-trend`（§3.2）按模型聚合积分，是唯一能把「出图花了多少」读出来的地方；配置里的 `trendMultipliers` 的 `×N` 是插件自造的对照倍率，**不是官方单价**。
+
+由此定下来的口径：**不发明单价、不预估积分、不把 token 折算成积分**。工具结果只报平台自己给的 token 用量（见 §3.5），积分层面的结论交给控制台数据。
+
+> 无公开单价还有一条推论：`n` 恒为 1 时，多张图 = 多次调用 = 多份扣减；所以出图工具在 `n>1` 时**拒绝**而不是静默夹到 1——夹取会让调用方以为拿到 4 张、账单却只扣 1 张，拒绝才和账单一致。
+
+### 3.5 出图接口 `POST /v1/images/generations`
+
+出图走推理域名 `https://token.sensenova.cn/v1`，与对话同一条 Key 线（`Bearer sk-`），运维细节见 [ARCHITECTURE.md](./ARCHITECTURE.md) §5.4。官方文档原文在 `docs/sensenova-api-reference/3、SenseNova U1.5 Lite.md` 与同目录 `4、SenseNova U1.5 Fast.md`；本插件只用其中五件事：
+
+| 事实 | 值 | 插件落点 |
+|---|---|---|
+| 一次请求几张 | 恒 1（文档把 `n` 钉在 1） | `n>1` 在发请求前拒绝（`buildDrawBody`） |
+| 尺寸 | 官方文档写 `2K`/`4K` 常量或 WxH（32 的倍数，512–4096，最长边比 ≤ 3:1）；**实测本端点拒收 `2K`/`2k`/`4K`**（2026-11-05，HTTP 400 原文只认 `auto` 或 WIDTHxHEIGHT） | `size` 原样透传，工具描述已按实测写 |
+| 水印 | 默认开；`watermark=false` 公测免费、平台明说后续转付费 | 默认 `true`，且恒显式传（防平台改默认） |
+| 返回形态 | `response_format` 文档默认 `b64_json`，`url` 是 24 小时失效的托管地址 | 工具显式要 `url`，结果里写明 24h 生命周期 |
+| 响应 `usage` | `input_tokens`/`output_tokens`/`total_tokens`/`images_count` | 解析后写进工具结果的 `hint`（「本次用量」） |
+
 ---
 
 ## 4. 错误码与登录拒绝分类

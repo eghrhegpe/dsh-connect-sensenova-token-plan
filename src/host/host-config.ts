@@ -155,7 +155,7 @@ export const CONFIG_DEFAULTS = Object.freeze({
   /** Preferred draw model id; empty means "first image-gen model of the catalog". */
   drawModelId: "",
   /** Deadline for one image request. Image models are slow; chat deadlines do not apply. Clamped into [DRAW_TIMEOUT_MIN_MS, DRAW_TIMEOUT_MAX_MS] by resolveDrawTimeoutMs. */
-  drawTimeoutMs: 120_000,
+  drawTimeoutMs: 240_000,
   /** Opt-in: register the Raccoon hosted `web_search` provider in `ctx.web`. */
   webSearchEnabled: false,
   /**

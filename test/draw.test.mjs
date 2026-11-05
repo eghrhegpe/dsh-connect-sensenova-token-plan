@@ -26,6 +26,10 @@ import {
   imageGenModelIds,
   pickDrawModel,
   buildDrawBody,
+  validateDrawSize,
+  DRAW_PARAM_NAMES,
+  mergedDrawSignal,
+  isDrawCancellation,
   parseDrawResponse,
   describeDrawFailure,
   drawOnce,
@@ -156,6 +160,31 @@ async function rejects(fn) {
     normalizeDrawOutputFormat("WEBP") === "webp" &&
     normalizeDrawWatermark() === true &&
     normalizeDrawWatermark(false) === false);
+  check("an invalid size is REFUSED by buildDrawBody, a valid one travels",
+    (() => {
+      try { buildDrawBody({ model: "m", prompt: "p", size: "1000x1000" }); return false; } catch { return true; }
+    })() && buildDrawBody({ model: "m", prompt: "p", size: "2048x2048" }).size === "2048x2048");
+}
+
+// --- 4b. validateDrawSize: the endpoint's REAL grammar, probed 2026-11-05 ----
+{
+  check("empty and auto pass (the documented default)",
+    validateDrawSize("") === "" && validateDrawSize("auto") === "");
+  check("in-range multiples of 32 pass, case-insensitive",
+    validateDrawSize("1024x1024") === "" && validateDrawSize("2720x1536") === "" &&
+    validateDrawSize("1536x4096") === "" && validateDrawSize("1024X1024") === "");
+  // The vendor docs advertise 2K/4K constants; the endpoint 400s them. The
+  // refusal must name the replacement, not just reject.
+  check("the 2K/4K doc names are refused WITH the endpoint's real grammar",
+    /auto/.test(validateDrawSize("2K")) && /WIDTHxHEIGHT/.test(validateDrawSize("2K")) &&
+    validateDrawSize("4k") !== "" && validateDrawSize("2048") !== "");
+  check("non-multiples of 32 are refused by that rule",
+    /multiples of 32/.test(validateDrawSize("1000x1000")));
+  check("out-of-range sides are refused by the range rule",
+    /512-4096/.test(validateDrawSize("480x480")) && /512-4096/.test(validateDrawSize("4128x4128")));
+  check("a ratio above 3:1 is refused by the ratio rule",
+    /3:1/.test(validateDrawSize("4096x1000")) && validateDrawSize("4096x1376") === "" &&
+    /3:1/.test(validateDrawSize("4096x1344")));
 }
 
 // --- 5. parseDrawResponse ----------------------------------------------------
@@ -165,6 +194,18 @@ async function rejects(fn) {
   check("revised_prompt is kept", urlCase.revisedPrompt === "better");
   const b64Case = parseDrawResponse({ data: [{ b64_json: "AAAA" }] });
   check("b64_json is extracted", b64Case.b64Json === "AAAA" && b64Case.url === "");
+  const metered = parseDrawResponse({
+    data: [{ url: "https://img/y.png" }],
+    usage: { input_tokens: 1540, input_tokens_details: { image_tokens: 0, text_tokens: 1540 }, output_tokens: 4096, total_tokens: 5636, images_count: 1 }
+  });
+  check("the platform-metered usage rides along (it is the only cost signal)",
+    metered.usage.inputTokens === 1540 && metered.usage.outputTokens === 4096 &&
+    metered.usage.totalTokens === 5636 && metered.usage.imagesCount === 1,
+    JSON.stringify(metered.usage));
+  check("numeric-string usage is accepted (console shape)",
+    parseDrawResponse({ data: [{ url: "https://img/y.png" }], usage: { input_tokens: "8785", output_tokens: "4096" } }).usage.inputTokens === 8785);
+  check("a response without usage reports zeros, never a failed draw",
+    parseDrawResponse({ data: [{ url: "https://img/z.png" }] }).usage.totalTokens === 0);
   check("a missing data[0] throws",
     (await rejects(() => parseDrawResponse({ data: [] }))) !== null &&
     (await rejects(() => parseDrawResponse(null))) !== null);
@@ -248,6 +289,54 @@ async function rejects(fn) {
   }
   check("a missing fetchImpl throws (wiring bug, not a network error)",
     (await rejects(() => drawOnce({ fetchImpl: undefined, endpoint, apiKey: "sk", body: {} }))) !== null);
+  {
+    // Declaring timeoutMs asserts the body forwards exec.signal: a cancelled
+    // call that kept running would burn the whole deadline (and the credit
+    // pool) after the agent was already told to stop.
+    let seenSignal = null;
+    const spy = (_url, options) => {
+      seenSignal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason));
+      });
+    };
+    const caller = new AbortController();
+    const pending = drawOnce({
+      fetchImpl: spy, endpoint, apiKey: "sk", body: { model: "m", prompt: "p" },
+      timeoutMs: 60_000, signal: caller.signal
+    });
+    const message = await rejects(() => {
+      caller.abort(new DOMException("cancelled by the caller", "AbortError"));
+      return pending;
+    });
+    check("the caller signal is merged onto the request (not the deadline alone)",
+      seenSignal !== null && seenSignal !== caller.signal, "merged");
+    check("a caller cancellation rejects with the abort reason", /cancelled by the caller/.test(message ?? ""), message);
+    check("an AbortError reads as a cancellation, not a deadline",
+      isDrawCancellation(new DOMException("x", "AbortError")) === true);
+    check("the module's own deadline is NOT a cancellation",
+      isDrawCancellation(new Error("draw timeout after 240000ms")) === false);
+  }
+  {
+    const controller = new AbortController();
+    check("no caller signal leaves the deadline controller standing alone",
+      mergedDrawSignal(controller) === controller.signal &&
+      mergedDrawSignal(controller, undefined) === controller.signal);
+    const other = new AbortController();
+    const merged = mergedDrawSignal(controller, other.signal);
+    const before = merged.aborted;
+    other.abort();
+    check("the merged signal aborts from the caller side too", before === false && merged.aborted === true);
+  }
+  {
+    let calls = 0;
+    const message = await rejects(() => drawOnce({
+      fetchImpl: async () => { calls += 1; return { ok: true, json: async () => ({}) }; },
+      endpoint, apiKey: "sk", body: { model: "m", prompt: "p" },
+      signal: AbortSignal.abort(new Error("already cancelled"))
+    }));
+    check("an already-aborted caller is refused before any request", calls === 0 && /already cancelled/.test(message ?? ""), message);
+  }
 }
 
 // --- 8. the cooldown gate -----------------------------------------------------
@@ -289,6 +378,8 @@ async function rejects(fn) {
     check("success renders the markdown-image hint",
       result.source === "sensenova" && result.url === "https://img/ok.png" &&
       /!\[图\]\(https:\/\/img\/ok\.png\)/.test(result.hint), result.hint);
+    check("a response without usage prints no cost line (0 tokens would read as free)",
+      !/本次用量/.test(result.hint), result.hint);
     check("the default model is the first discovered",
       result.model === "sensenova-u1-fast");
     check("a manual model override travels",
@@ -316,6 +407,98 @@ async function rejects(fn) {
   {
     const message = await rejects(() => makeTool({ getEntries: () => [] }).execute({ prompt: "a cat" }));
     check("an empty draw catalog degrades with the catalog hint", /没有出图模型/.test(message ?? ""), message);
+  }
+  {
+    // A dropped parameter is "did less and said nothing" with a charged pool:
+    // quality/seed/style must be refused BEFORE the request, like n>1.
+    let calls = 0;
+    const counted = makeTool({
+      fetchImpl: async () => { calls += 1; return { ok: true, json: async () => ({ data: [{ url: "https://img/ok.png" }] }) }; }
+    });
+    const message = await rejects(() => counted.execute({ prompt: "a cat", quality: "hd", seed: 7 }));
+    check("unknown parameters are refused by name and fire no request",
+      /quality/.test(message ?? "") && /seed/.test(message ?? "") && calls === 0, message);
+    check("the refusal lists exactly the accepted names",
+      DRAW_PARAM_NAMES.every((name) => (message ?? "").includes(name)), message);
+  }
+  {
+    // A 4xx is a request-shape answer: tripping the cooldown would hide the
+    // message behind "上一次出图失败" and make the caller wait 30s to learn
+    // the fix it can apply immediately.
+    let trips = 0;
+    const gate = { blocked: () => false, trip: () => { trips += 1; }, remainingMs: () => 0 };
+    const bad400 = defineDrawTool({
+      defineTool: passthrough,
+      resolveApiKey: async () => "sk-live",
+      getEntries: () => entries,
+      settings,
+      fetchImpl: async () => ({ ok: false, status: 400, text: async () => "invalid size" }),
+      cooldown: gate
+    });
+    await rejects(() => bad400.execute({ prompt: "a cat" }));
+    check("a 400 refusal does NOT trip the cooldown (fix it and call again)", trips === 0, String(trips));
+    const gate429 = { blocked: () => false, trip: () => { trips += 1; }, remainingMs: () => 0 };
+    const rate = defineDrawTool({
+      defineTool: passthrough,
+      resolveApiKey: async () => "sk-live",
+      getEntries: () => entries,
+      settings,
+      fetchImpl: async () => ({ ok: false, status: 429, text: async () => "rate limit" }),
+      cooldown: gate429
+    });
+    await rejects(() => rate.execute({ prompt: "a cat" }));
+    check("a 429 DOES trip the cooldown (platform-side, protect the pool)", trips === 1, String(trips));
+  }
+  {
+    // A caller cancellation is the agent asking to stop, not a failed
+    // attempt: gating its next call for 30s would punish it twice.
+    let trips = 0;
+    const gate = { blocked: () => false, trip: () => { trips += 1; }, remainingMs: () => 0 };
+    const cancelled = defineDrawTool({
+      defineTool: passthrough,
+      resolveApiKey: async () => "sk-live",
+      getEntries: () => entries,
+      settings,
+      fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason));
+      }),
+      cooldown: gate
+    });
+    const controller = new AbortController();
+    controller.abort(new DOMException("user stopped the turn", "AbortError"));
+    const message = await rejects(() => cancelled.execute({ prompt: "a cat" }, { signal: controller.signal }));
+    check("a caller cancellation does NOT trip the cooldown", trips === 0 && message !== null, `${trips} ${message}`);
+    check("the cancellation reason reaches the caller", /user stopped the turn/.test(message ?? ""), message);
+    // And the already-cancelled entry gate: no request fired at all.
+    let calls = 0;
+    const counted = defineDrawTool({
+      defineTool: passthrough,
+      resolveApiKey: async () => "sk-live",
+      getEntries: () => entries,
+      settings,
+      fetchImpl: async () => { calls += 1; return { ok: true, json: async () => ({ data: [{ url: "https://img/ok.png" }] }) }; },
+      cooldown: { blocked: () => false, trip: () => {}, remainingMs: () => 0 }
+    });
+    const message2 = await rejects(() => counted.execute({ prompt: "a cat" }, { signal: AbortSignal.abort(new Error("late arrival")) }));
+    check("an already-cancelled call fires no request", calls === 0 && /late arrival/.test(message2 ?? ""), message2);
+  }
+  {
+    // A timeout may have been metered by the platform already: it keeps the
+    // trip (no flag on the error, the safe default).
+    let trips = 0;
+    const gate = { blocked: () => false, trip: () => { trips += 1; }, remainingMs: () => 0 };
+    const hanging = defineDrawTool({
+      defineTool: passthrough,
+      resolveApiKey: async () => "sk-live",
+      getEntries: () => entries,
+      settings: { ...settings, drawTimeoutMs: 1000 },
+      fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+      }),
+      cooldown: gate
+    });
+    const message = await rejects(() => hanging.execute({ prompt: "a cat" }));
+    check("a timeout still trips the cooldown", trips === 1 && message !== null, `${trips} ${message}`);
   }
   {
     // Failure trips the cooldown: the immediate retry is refused with the
@@ -353,6 +536,17 @@ async function rejects(fn) {
     check("a junk getEntries source degrades with the catalog hint", /没有出图模型/.test(message ?? ""), message);
   }
   {
+    const meteredTool = makeTool({
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ data: [{ url: "https://img/ok.png" }], usage: { input_tokens: 1540, output_tokens: 4096, total_tokens: 5636 } })
+      })
+    });
+    const result = await meteredTool.execute({ prompt: "a cat" });
+    check("the hint reports the call's metered tokens",
+      /本次用量: 输入 1540 \/ 输出 4096 tokens（合计 5636）/.test(result.hint), result.hint);
+  }
+  {
     const liveCatalog = [
       { id: "sensenova-u1-fast", output_modalities: ["image"] },
       { id: "sensenova-u1.5-lite", output_modalities: ["image"] },
@@ -367,6 +561,12 @@ async function rejects(fn) {
       /watermark/.test(tool.parameters.watermark.description));
     check("an async getEntries (the index.js shape) is awaited and used",
       result.model === "sensenova-u1-fast");
+    check("the tool BODY carries cost, lifetime and the one-image rule (not only the params)",
+      /credit pool/.test(tool.description) &&
+      /24h/.test(tool.description) &&
+      /one image per request/.test(tool.description) &&
+      /cooldown/.test(tool.description),
+      tool.description);
   }
   {
     const message = await rejects(() => makeTool({ isDisposed: () => true }).execute({ prompt: "a cat" }));
