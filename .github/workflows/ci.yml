@@ -176,7 +176,14 @@ jobs:
           if node -e "process.exit(require('node:fs').existsSync(process.argv[1]) ? 0 : 1)" "$ANCHOR"; then
             echo "cached runtime already present: $ANCHOR"
           else
-            npm install -g @deepseek-ai/dsh || echo "dsh CLI not installable here; the peer suites will fail loudly (this gate must not pass without them)"
+            # Pinned to the RESOLVED version, never the bare name: while the
+            # registry's "latest" tag points at a prerelease (0.2.2-rc.1, and
+            # before it 0.2.1-rc.x), npm 10 — bundled with node-22 — expands the
+            # bare spec to "@*", and a "*" range never matches prereleases: the
+            # install dies with ETARGET/notarget and every peer suite below then
+            # fails STRICT. An explicit prerelease spec is allowed by every npm,
+            # and the resolve step above already names that version.
+            npm install -g "@deepseek-ai/dsh@${{ steps.dsh-version.outputs.version }}" || echo "dsh CLI not installable here; the peer suites will fail loudly (this gate must not pass without them)"
           fi
           # Only this decides whether the cache is written: an anchor still
           # missing after the install means there is nothing worth saving.
@@ -255,7 +262,9 @@ jobs:
           if have_runtime && dsh --version >/dev/null 2>&1; then
             echo "cached CLI already present and runnable: $(command -v dsh)"
           else
-            npm install -g @deepseek-ai/dsh || { echo "dsh CLI install failed — the e2e gate cannot run; failing loudly"; exit 1; }
+            # Same pinning as the offline job: the bare name expands to "@*",
+            # which never matches a prerelease "latest" under npm 10.
+            npm install -g "@deepseek-ai/dsh@${{ steps.dsh-version.outputs.version }}" || { echo "dsh CLI install failed — the e2e gate cannot run; failing loudly"; exit 1; }
           fi
           # Proof of a RUNNABLE CLI, not just a successful install: a broken shim
           # must also fail this job instead of letting e2e-gate SKIP green. It
