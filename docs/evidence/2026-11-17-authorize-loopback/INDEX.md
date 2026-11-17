@@ -1,5 +1,7 @@
 # 证据：官方浏览器授权链（/authorize → /login → 授权码）2026-11-17 可用性判定
 
+> 归属：ADR-020（`docs/ADR.md`）的证据件。本目录在 `docs/` 下（随仓库提交），不属于 `upstream/` 容器，故不在 `docs/REFERENCES.md` 登记（该文件只管 `upstream/` 承重件）。
+
 2026-11-17 12:46–12:47（Asia/Shanghai），浏览器截图（用户操作，地址栏可见 URL；图中不含 `code=` 值，无凭据泄漏）。
 背景：小浣熊 QR 扫码确认页 `/login/mp` 自 11-04 起 404（本仓 ROADMAP §6.1.10），两家插件的
 QR 扫码链路同死。官方桌面客户端（11-05 构建，`C:\Program Files\raccoon-ai`）的登录主链已换成
@@ -23,11 +25,17 @@ QR 扫码链路同死。官方桌面客户端（11-05 构建，`C:\Program Files
 2. loopback 变体（`&desktop_callback=loopback&redirect=http://127.0.0.1:<port>/auth/callback&state=<64hex>`）：
    - 页面侧上下文解析（客户端 bundle 内 `R()` 函数，已原样离线复跑）：合法，context 含 `desktopCallback:"loopback"`；
    - 服务端 SSR flight 数据同样接受该参数组；
-   - **未端到端验证的一跳**：签发后服务端是否真按 `redirect` 跳回 loopback（本次实测走的是深链成功屏，
-     图 4）。插件实现落地时用 4321 端口探针一次性点穿即可定案（探针脚本见会话记录，规则照官方
-     `webLoginLoopback.js`：GET / host / origin / sec-fetch-dest / path / query 键白名单 / state 64hex
-     timingSafeEqual / 一次性）。
+   - **该跳当日点穿（16:34，插件实现完成后复跑）**：真实用户同意后，服务端按 `redirect` 把一次性 code
+     跳回 `http://127.0.0.1:4321/auth/callback`——固定端口探针（规则照官方 `webLoginLoopback.js`：
+     GET / host / origin / sec-fetch-dest / path / query 键白名单 / state 64hex timingSafeEqual /
+     一次性）收下并完成换码，回包 `code:0`。形状事实见判定 5。
 3. 兑换端点 `POST /api/web/auth/v1/login_with_authorization_code` 活着（同日 bogus code 探针：
    `400 code 200035 authorization_code_not_found_error`）。
-4. 配套事实（官方 11-05 客户端源码）：IAM token（`iss` 以 `/iam` 结尾）不存 refresh、续期提前窗为 0；
-   非 IAM 才有 300s 提前窗（`scheduleAuth.js` L76）——与参考插件整段抄 300s 的差异项。
+4. 配套事实（官方 11-05 客户端源码）：IAM token（`iss` 以 `/iam` 结尾）续期提前窗为 0、且**官方自己**不持久化它的
+   refresh；非 IAM 才有 300s 提前窗（`scheduleAuth.js` L76）——与参考插件整段抄 300s 的差异项。
+   「官方不存」≠「网关不发」：见判定 5 的真机形状。
+5. **真机回包形状**（16:34 点穿那次，只记形状不记值）：`data` 字段为 `access_token,refresh_token`；
+   access 是 IAM 型，`iss` = `xiaohuanxiong.com/iam`——**不带 scheme 的 host 形**（官方 fallback
+   `new URL(LOGIN_URL).host + "/iam"` 即此值；`iss` 按等值比对，带 scheme 的预期会误拒每个真 token，
+   插件以 `RACCOON_IAM_ISSUER` 常量为单一真源）；refresh **存在**且与 access **同刻过期**（+30 天）；
+   `office_identity` 为空串（个人号正常形状，换码透传，空就存空）。

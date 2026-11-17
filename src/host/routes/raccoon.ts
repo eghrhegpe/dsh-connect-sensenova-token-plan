@@ -1,8 +1,8 @@
 /**
  * The Raccoon route (ROADMAP §6.1 "second upstream provider"): one GET
  * reporting the secret-free state a tab renders, one POST carrying `{ action }`
- * for the six panel actions (provider switch, web search, the official-App
- * read-only source, pushed models, QR login, logout). The QR login is a single
+ * for the seven panel actions (provider switch, web search, the official-App
+ * read-only source, pushed models, QR login, browser-authorize login, logout). The QR login is a single
  * server-side walk (no client long-poll); the credential never touches this plugin's directory,
  * git, or logs — it goes straight to the DSH credentials service through
  * `raccoonStore`.
@@ -26,8 +26,12 @@ import {
   pollRaccoonIamQrLogin,
   issueRaccoonScan,
   fetchRaccoonCatalog,
-  RACCOON_FALLBACK_MODELS
+  RACCOON_FALLBACK_MODELS,
+  startRaccoonAuthorizeReceiver,
+  exchangeRaccoonAuthorizationCode,
+  RACCOON_AUTHORIZE_TIMEOUT_MS
 } from "../raccoon.ts";
+import type { RaccoonAuthorizeReceiver } from "../raccoon.ts";
 // The tab's read model lives in its own peer-free module (it is not HTTP), so
 // this handler owns only the walk and the four mutations. The catalogue cache
 // window comes with it: `collectRaccoonRows` reads through the same cache.
@@ -119,23 +123,89 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
     // and this route has none — the outcome flows through the view, which is
     // what the read model reads. Passing a no-op said the same thing with more
     // ceremony.
-    // Login-settled side effect: when the switch is on, drive the publisher
-    // so the just-signed-in account's catalogue reaches DSH's picker right
-    // away. Best-effort: a publish miss must not flip the login outcome (the
-    // walk swallows the hook's exceptions); the next switch toggle or the
-    // mount seed retries.
+    // Login-settled side effect, shared by BOTH login channels: when the
+    // switch is on, drive the publisher so the just-signed-in account's
+    // catalogue reaches DSH's picker right away. Best-effort: a publish miss
+    // must not flip the login outcome (the walk swallows the hook's
+    // exceptions); the next switch toggle or the mount seed retries. The
+    // shared helper is what keeps the walk's hook and the authorize settle
+    // from re-deriving the same guard + publish chain — that re-derivation
+    // is the same-file clone the duplication gate keeps out of this file.
     onLoggedIn: () => {
-      if (raccoonPublisher === null || raccoonPublisher === undefined || raccoonPublisher.isDisposed()) return;
-      optional(raccoonSwitch?.enabled()).then((sw: boolean | null) => {
-        if (resolveSwitchOff(sw)) {
-          collectRaccoonRows(null).then(({ rows, officeIdentity }) => {
-            void raccoonPublisher.publish(rows, officeIdentity);
-          }).catch(() => {});
-        }
-      }).catch(() => {});
+      publishForNewLogin();
     }
   });
+  /** The shared post-login side effect (see the walk hook's comment). */
+  const publishForNewLogin = () => {
+    if (raccoonPublisher === null || raccoonPublisher === undefined || raccoonPublisher.isDisposed()) return;
+    optional(raccoonSwitch?.enabled()).then((sw: boolean | null) => {
+      if (resolveSwitchOff(sw)) {
+        collectRaccoonRows(null).then(({ rows, officeIdentity }) => {
+          void raccoonPublisher.publish(rows, officeIdentity);
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+  };
   const walkView = raccoonWalkManager.view;
+
+  // ── authorize: the browser-authorization loopback (ADR-020) ─────────────
+  // The QR confirm page is dead upstream (404 since 11-04); this is the
+  // official client's own login chain — the /authorize page in the system
+  // browser, the callback on OUR loopback receiver, the code exchange. One
+  // receiver per process (single-flight, the walk's idiom): a second
+  // `start` re-ports the in-flight one instead of binding a second port.
+  // The `authorization_code` rides ONLY here, from the receiver into the
+  // exchange — never into a response body (the GET/POST `authorize` view
+  // carries the public URL + a status word, nothing credential-shaped).
+  let authorizeReceiver: RaccoonAuthorizeReceiver | null = null;
+  let authorizeStatus: "idle" | "waiting" | "authorized" | "failed" | "timeout" | "canceled" = "idle";
+  let authorizeError = "";
+  const authorizeView = () => ({
+    status: authorizeStatus,
+    // The URL is only useful while waiting: once the receiver settles the
+    // port is closed, and an old URL would 404 in the browser with no hint
+    // of why — so it is exposed for exactly the `waiting` window.
+    ...(authorizeStatus === "waiting" && authorizeReceiver !== null && authorizeReceiver.authorizeUrl !== "" ? { url: authorizeReceiver.authorizeUrl } : {}),
+    ...(authorizeError !== "" ? { error: authorizeError } : {})
+  });
+  /** The fire-and-forget continuation: receive the code, exchange, save, publish. */
+  const settleAuthorize = async (receiver: RaccoonAuthorizeReceiver, store: NonNullable<typeof raccoonStore>) => {
+    const res = await receiver.result;
+    if (authorizeReceiver !== receiver) return; // superseded — never
+    authorizeReceiver = null;
+    if (!res.ok || res.code === undefined) {
+      authorizeStatus = res.reason === "closed" ? "canceled" : res.reason === "timeout" ? "timeout" : "failed";
+      if (res.reason !== "closed" && res.reason !== "timeout") authorizeError = "bind";
+      return;
+    }
+    const exchange = await exchangeRaccoonAuthorizationCode(res.code, {});
+    if (!exchange.ok || exchange.accessToken === undefined) {
+      authorizeStatus = "failed";
+      authorizeError = exchange.reason ?? "unknown";
+      return;
+    }
+    try {
+      await store.save({
+        accessToken: exchange.accessToken,
+        refreshToken: exchange.refreshToken ?? "",
+        ...(exchange.accessExpiresAtMs !== undefined ? { expiresAtMs: exchange.accessExpiresAtMs } : {}),
+        ...(exchange.officeIdentity !== undefined ? { officeIdentity: exchange.officeIdentity } : {}),
+        ...(exchange.nickname !== undefined ? { nickname: exchange.nickname } : {})
+      });
+      // Same reason as the walk's cache invalidation: the new account's
+      // numbers must not be served from the previous one's cache window.
+      raccoonRead.clear();
+    } catch {
+      authorizeStatus = "failed";
+      authorizeError = "save_failed";
+      return;
+    }
+    authorizeStatus = "authorized";
+    authorizeError = "";
+    // The SAME post-login side effect as the walk channel (the shared helper
+    // keeps the two channels from re-deriving the guard + publish chain).
+    publishForNewLogin();
+  };
 
   const offRoute = ctx.webServer.register({
     kind: "exact",
@@ -177,7 +247,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
       if (method === "GET") {
         // Only a GET may opt into the triage scaffold (`?debug=1`); the POST
         // branches re-report through `answer()`, which passes no flag.
-        writeJson(response, 200, await raccoonState(wantsDiagnostics(request)), { "cache-control": "no-store" });
+        writeJson(response, 200, { ...(await raccoonState(wantsDiagnostics(request))), authorize: authorizeView() }, { "cache-control": "no-store" });
         return;
       }
       if (method !== "POST") {
@@ -189,7 +259,10 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
       const { action } = body.value;
       const answer = async (extra = {}) => {
         const state = await raccoonState();
-        writeJson(response, 200, { ...state, ...extra }, { "cache-control": "no-store" });
+        // Every mutation re-reports the authorize view with the state, so the
+        // tab never has to distinguish "the GET I didn't make" from "the POST
+        // that answered": one shape, one place it comes from.
+        writeJson(response, 200, { ...state, authorize: authorizeView(), ...extra }, { "cache-control": "no-store" });
       };
       /**
        * The whole flow BOTH boolean switches share (`switch` and `desktop`):
@@ -359,6 +432,59 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
         return;
       }
 
+      // ── authorize: the browser-authorization loopback (ADR-020) ──
+      // `step: "start"` binds (or re-ports) the one receiver and answers with
+      // its public URL — the OPENING of the system browser is the CLIENT's
+      // job (`window.open`), which keeps this route free of host privileges.
+      // `step: "cancel"` closes the wait early. The terminal outcomes
+      // (authorized / failed / timeout / canceled) surface through the GET's
+      // `authorize` view on the tab's next poll; this response reports the
+      // START outcome only.
+      if (action === "authorize") {
+        if (raccoonStore === null || raccoonStore === undefined) {
+          await answer({ ok: false, error: "the raccoon credential store is unavailable" });
+          return;
+        }
+        if (body.value.step === "cancel") {
+          if (authorizeReceiver !== null) {
+            authorizeReceiver.cancel();
+            // The continuation settles the status to `canceled`; answer the
+            // CURRENT view so the caller sees the in-flight wait it just cut.
+            await answer({ ok: true, authorize: authorizeView() });
+            return;
+          }
+          await answer({ ok: true, authorize: authorizeView() });
+          return;
+        }
+        if (authorizeReceiver !== null) {
+          // Single-flight: re-port the in-flight receiver (the walk's idiom —
+          // a second click never binds a second port).
+          await answer({ ok: true, authorize: authorizeView() });
+          return;
+        }
+        let receiver: RaccoonAuthorizeReceiver;
+        try {
+          receiver = await startRaccoonAuthorizeReceiver({ port: 0, timeoutMs: RACCOON_AUTHORIZE_TIMEOUT_MS });
+        } catch (error) {
+          await answer({ ok: false, error: redactedError(error) });
+          return;
+        }
+        authorizeReceiver = receiver;
+        authorizeStatus = "waiting";
+        authorizeError = "";
+        // The receiver outlives this request, exactly as the walk does:
+        // up to a five-minute wait, ending in a credential save. If the
+        // bind itself refused, the result is already settled `failed` and
+        // the continuation settles the view at once — report that instead
+        // of a `waiting` the page would then open into a dead port.
+        const settledAtOnce = receiver.authorizeUrl === "";
+        void settleAuthorize(receiver, raccoonStore);
+        await answer(settledAtOnce
+          ? { ok: false, error: "the loopback receiver did not bind", authorize: authorizeView() }
+          : { ok: true, authorize: authorizeView() });
+        return;
+      }
+
       // ── logout: forget the stored credential and release the provider ──
       if (action === "logout") {
         if (raccoonStore === null || raccoonStore === undefined) {
@@ -389,7 +515,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
         return;
       }
 
-      writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"webSearch\"|\"desktop\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
+      writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"webSearch\"|\"desktop\"|\"models\"|\"login\"|\"authorize\"|\"logout\" }" }, { "cache-control": "no-store" });
     }, settings.allowedHosts)
   });
 
@@ -402,6 +528,11 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
   // running — which is every teardown but the one that races a live walk.
   return () => {
     raccoonWalkManager.stop();
+    // The receiver is the second side effect that outlives its request: a
+    // live loopback port on 127.0.0.1 that nobody is supposed to reach after
+    // the plugin is gone. `cancel` settles the wait as `closed` and closes
+    // the port; a no-op when nothing is in flight.
+    authorizeReceiver?.cancel();
     offRoute();
   };
 }

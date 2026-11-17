@@ -26,7 +26,7 @@ import type { Tt } from "./runtime.ts";
 import { GUIDANCE_BY_CODE } from "./snapshot.ts";
 import { usePollingInterval } from "./use-polling-interval.ts";
 import { RaccoonCard } from "./raccoon-card.ts";
-import type { RaccoonState } from "./raccoon-card.ts";
+import type { CardRaccoonState } from "./raccoon-card.ts";
 
 /**
  * The cadence the tab opens with, before any answer has stated one.
@@ -70,7 +70,7 @@ export function RaccoonTab({
   // re-renders live; passing `null` on unmount clears the cluster.
   onReportStatus?: (status: { updatedAt: number; error: string | null; onRefresh: () => void } | null) => void;
 }): unknown {
-  const [state, setState] = useState<RaccoonState | null>(null);
+  const [state, setState] = useState<CardRaccoonState | null>(null);
   // There is deliberately NO local `loading`/`error` state here. Both used to
   // exist as write-only pairs (`const [_error, setError] = …`) — the values
   // were never read, so a failed read updated nothing the user could see. The
@@ -221,7 +221,7 @@ export function RaccoonTab({
         fail(key === undefined ? format(tt("raccoon.httpFailed"), { status: response.status }) : format(tt(key), { host }));
         return;
       }
-      const body = (await response.json().catch(() => null)) as RaccoonState | null;
+      const body = (await response.json().catch(() => null)) as CardRaccoonState | null;
       if (!isCurrent()) return;
       if (body === null || body.ok === false) {
         // A failed read does not reset the timestamp we already reported.
@@ -269,6 +269,11 @@ export function RaccoonTab({
   // deadline), so the tab has no timer of its own to leak: it simply polls
   // faster while the route says so, and drops back the moment it stops.
   const scanning = state?.loginStatus === "scanning";
+  // The authorize wait is the loopback's own deadline on the SERVER (the
+  // receiver's five-minute window); the tab only drops to the fast cadence
+  // while the route says `waiting`, and holds no timer that could outlive it
+  // — the same shape as the scan's fast cadence one line below.
+  const authWaiting = state?.authorize?.status === "waiting";
 
   // The cadence is STATED by the Host in every answer (it owns the two cache
   // windows the poll has to respect), and the module constants are only what
@@ -299,7 +304,7 @@ export function RaccoonTab({
     alive.current = true;
     void load();
   }, [load]);
-  usePollingInterval(fire, scanning ? scanPollMs : pollMs, { failed });
+  usePollingInterval(fire, scanning || authWaiting ? scanPollMs : pollMs, { failed });
   // Unmount ONLY: mark the tab dead and release whatever it had in flight.
   // Split from the loop above because that hook's cleanup also runs on every
   // cadence rebuild (a scan starting or ending, a back-off engaging), where this
@@ -328,7 +333,7 @@ export function RaccoonTab({
       // clearing wiped the header's raccoon cluster until the next successful
       // GET, which the unmount-only effect below avoids.
     };
-  }, [load, onReportStatus, scanning, pollMs, scanPollMs]);
+  }, [load, onReportStatus, scanning, authWaiting, pollMs, scanPollMs]);
 
   // Unmount ONLY: drop this tab's freshness from the header (the quota/api tabs
   // own their own clusters, so nothing else should show this one's). Split from
@@ -379,7 +384,7 @@ export function RaccoonTab({
         // A conditional spread, not an `??`: under exactOptionalPropertyTypes,
         // writing `undefined` into a field is a DIFFERENT fact from leaving it
         // alone, and "this Host said nothing" must keep the last answer.
-        return next ? { ...current, desktop: next as Exclude<RaccoonState["desktop"], undefined> } : current;
+        return next ? { ...current, desktop: next as Exclude<CardRaccoonState["desktop"], undefined> } : current;
       });
     } catch (why) {
       if (alive.current) setLoginNote(format(tt("raccoon.desktopError"), { error: errorText(why) }));
@@ -400,7 +405,7 @@ export function RaccoonTab({
     // loop had no such brake, so it kept polling for the full five minutes
     // after a scan that settled in ten seconds.
     try {
-      const body = (await postJson(RACCOON_PATH, { action: "login" })) as (RaccoonState & { code?: string; host?: unknown }) | null;
+      const body = (await postJson(RACCOON_PATH, { action: "login" })) as (CardRaccoonState & { code?: string; host?: unknown }) | null;
       if (alive.current) {
         if (body?.ok === true) {
           setState(body);
@@ -434,6 +439,41 @@ export function RaccoonTab({
       if (alive.current) setLoginBusy(false);
     }
   }, [tt]);
+
+  // The browser-authorize loopback (ADR-020). The POST answers the moment the
+  // loopback receiver has BOUND (the wait itself is server-side, like the
+  // walk's scan), so this is a short round-trip: it hands back the URL, the
+  // tab opens the system browser on it, and the existing poll loop carries
+  // the terminal state back through the GET's `authorize` view.
+  const startAuthorize = useCallback(async () => {
+    setLoginNote(null);
+    try {
+      const body = (await postJson(RACCOON_PATH, { action: "authorize", step: "start" })) as (CardRaccoonState & { ok?: boolean; error?: string; authorize?: { status: string; url?: string; error?: string } }) | null;
+      if (alive.current) {
+        if (body?.ok === true && body.authorize?.status === "waiting" && typeof body.authorize.url === "string") {
+          setState(body as CardRaccoonState);
+          // The system browser opens from the CLIENT: no host privilege, and
+          // a popup-blocked browser still leaves the manual link in the card.
+          window.open(body.authorize.url, "_blank", "noopener");
+        } else if (body !== null && body.ok === false) {
+          setLoginNote(typeof body.error === "string" && body.error !== "" ? body.error : tt("raccoon.noAnswer"));
+        } else if (body !== null) {
+          setState(body as CardRaccoonState);
+        }
+      }
+    } catch (why) {
+      if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: errorText(why) }));
+    }
+  }, [tt]);
+
+  const cancelAuthorize = useCallback(async () => {
+    try {
+      const body = (await postJson(RACCOON_PATH, { action: "authorize", step: "cancel" })) as CardRaccoonState | null;
+      if (alive.current && body !== null) setState(body);
+    } catch {
+      // The receiver times out on its own; the next GET re-reports.
+    }
+  }, []);
 
   const logout = useCallback(async () => {
     setLoginNote(null);
@@ -489,6 +529,8 @@ export function RaccoonTab({
     onSwitch: (enabled: boolean) => void toggle(enabled),
     onIds: (ids: string[]) => void saveIds(ids),
     onWebSearch: (enabled: boolean) => void toggleWebSearch(enabled),
-    onDesktop: (enabled: boolean) => void toggleDesktop(enabled)
+    onDesktop: (enabled: boolean) => void toggleDesktop(enabled),
+    onAuthorize: () => void startAuthorize(),
+    onAuthorizeCancel: () => void cancelAuthorize()
   });
 }

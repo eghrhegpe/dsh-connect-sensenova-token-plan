@@ -51,6 +51,22 @@ const DAY_MS = 86_400_000;
 export type { RaccoonState };
 
 /**
+ * The route's authorize overlay (ADR-020): every /raccoon answer carries it
+ * alongside `RaccoonState` (the GET overlay and the POST `answer` helper both
+ * spread it in). It is intentionally NOT part of the `RaccoonState` wire
+ * type — the read model (`raccoon-status.ts`) produces that type, and the
+ * overlay is ROUTE state, produced by `routes/raccoon.ts`.
+ */
+export interface RaccoonAuthorizeView {
+  status: string;
+  url?: string;
+  error?: string;
+}
+
+/** The card's view of the /raccoon answer: the wire state plus its overlay. */
+export type CardRaccoonState = RaccoonState & { authorize?: RaccoonAuthorizeView | null };
+
+/**
  * The QR image the login code encodes. The payload is the gateway's own
  * public login page URL (~144 bytes), which fits the v1–10/M capacity the
  * local encoder supports; `buildQrMatrix` throwing is the out-of-range
@@ -93,6 +109,8 @@ function qrImageOf(scanUrl: string | null | undefined, tt: Tt): unknown {
  * @param {(enabled: boolean) => void} props.onWebSearch - flip the web_search opt-in.
  * @param {(enabled: boolean) => void} props.onDesktop - flip the official-App read-only source (§6.1.11).
  * @param {(ids: string[]) => void} props.onIds - save the pushed-model list.
+ * @param {() => void} props.onAuthorize - start the browser-authorize loopback (ADR-020).
+ * @param {() => void} props.onAuthorizeCancel - cancel the in-flight authorize wait.
  * @returns {unknown} the tab's card tree.
  */
 /**
@@ -103,6 +121,25 @@ function qrImageOf(scanUrl: string | null | undefined, tt: Tt): unknown {
  * future Host, a category this build never heard of) falls back to the generic
  * line rather than showing the code.
  */
+/**
+ * The authorize failure's `error` is a CLOSED set of reason words (the
+ * exchange's refusal taxonomy plus the route's two own words: `bind` and
+ * `save_failed`). The table is the only thing that turns a word into a
+ * sentence — an unmapped word (a future route) falls back to the generic
+ * line, never to the raw token.
+ */
+export const RACCOON_AUTHORIZE_REASON_KEYS: Record<string, Parameters<Tt>[0]> = {
+  code_not_found: "raccoon.authorizeReasonNotFound",
+  session_dead: "raccoon.authorizeReasonSessionDead",
+  server_error: "raccoon.authorizeReasonServer",
+  network: "raccoon.authorizeReasonNetwork",
+  invalid_response: "raccoon.authorizeReasonInvalid",
+  refresh_missing: "raccoon.authorizeReasonRefreshMissing",
+  token_invalid: "raccoon.authorizeReasonTokenInvalid",
+  bind: "raccoon.authorizeReasonBind",
+  save_failed: "raccoon.authorizeReasonSaveFailed"
+};
+
 const RACCOON_DESKTOP_REASON_KEYS: Record<string, Parameters<Tt>[0]> = {
   missing: "raccoon.desktopReasonMissing",
   unreadable: "raccoon.desktopReasonUnreadable",
@@ -114,9 +151,9 @@ const RACCOON_DESKTOP_REASON_KEYS: Record<string, Parameters<Tt>[0]> = {
 };
 
 export function RaccoonCard({
-  state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch, onDesktop
+  state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch, onDesktop, onAuthorize, onAuthorizeCancel
 }: {
-  state: RaccoonState | null;
+  state: CardRaccoonState | null;
   tt: Tt;
   loginBusy: boolean;
   loginNote: string | null;
@@ -128,6 +165,8 @@ export function RaccoonCard({
   onIds: (ids: string[]) => void;
   onWebSearch: (enabled: boolean) => void;
   onDesktop: (enabled: boolean) => void;
+  onAuthorize: () => void;
+  onAuthorizeCancel: () => void;
 }): unknown {
   const enabled = state?.enabled === true;
   const loggedIn = state?.loggedIn === true;
@@ -138,10 +177,17 @@ export function RaccoonCard({
   // the reason wording all read the same object, and `state` is optional
   // everywhere else in this component.
   const desktop = state?.desktop ?? null;
+  // The browser-authorize loopback (ADR-020), a route overlay: three of its
+  // states are visible here — the waiting window (the link + cancel below)
+  // and the two terminals the note under the login line spells out.
+  const authorize = state?.authorize ?? null;
+  const authWaiting = authorize !== null && authorize.status === "waiting";
+  const authTerminal = authorize !== null
+    && (authorize.status === "failed" || authorize.status === "timeout" || authorize.status === "canceled");
   // What disables the login controls. The POST itself returns at once, so the
   // WAIT is the scan, not the request: without it in the condition the button
   // would re-enable while its own QR is still on screen.
-  const waiting = loginBusy || scanning;
+  const waiting = loginBusy || scanning || authWaiting;
   // The gateway's login response does not always carry a nickname; rendering
   // "已登录：" with an empty tail reads as broken, so a blank nick drops the
   // suffix rather than showing a dangling colon.
@@ -271,26 +317,60 @@ export function RaccoonCard({
           role: loginStatus.alert ? "alert" : "status"
         }, loginStatus.text),
         h("span", { style: S.spacer }),
+        // Two ways in when there is no usable credential (not signed in, or
+        // signed in but EXPIRED — the re-login case): the QR walk and the
+        // browser-authorize loopback (ADR-020). While the confirm page is
+        // 404 upstream only the second one lands, but the panel offers both
+        // and says which is the fallback, not which one works today.
         loggedIn
           ? (state?.credentialExpired === true
-              ? h("button", {
-                  type: "button",
-                  style: S.button,
-                  onClick: onLogin,
-                  disabled: waiting
-                }, waiting ? tt("raccoon.loggingIn") : tt("raccoon.reLogin"))
+              ? h("div", { style: { display: "flex", gap: 8 } },
+                  h("button", {
+                    type: "button",
+                    style: S.button,
+                    onClick: onLogin,
+                    disabled: waiting
+                  }, waiting ? tt("raccoon.loggingIn") : tt("raccoon.reLogin")),
+                  h("button", {
+                    type: "button",
+                    style: S.button,
+                    onClick: onAuthorize,
+                    disabled: waiting,
+                    title: tt("raccoon.authorizeHint")
+                  }, tt("raccoon.authorizeOpen")))
               : h("button", { type: "button", style: S.button, onClick: onLogout }, tt("raccoon.logout")))
-          : h("button", {
-              type: "button",
-              style: S.button,
-              onClick: onLogin,
-              disabled: waiting
-            }, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login"))
+          : h("div", { style: { display: "flex", gap: 8 } },
+              h("button", {
+                type: "button",
+                style: S.button,
+                onClick: onLogin,
+                disabled: waiting
+              }, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login")),
+              h("button", {
+                type: "button",
+                style: S.button,
+                onClick: onAuthorize,
+                disabled: waiting,
+                title: tt("raccoon.authorizeHint")
+              }, tt("raccoon.authorizeOpen")))
       ),
       // The QR encodes the scan URL the route is CURRENTLY waiting on (it
       // re-issues one per login; the tab's poll picks it up in `state.scanUrl`).
       !loggedIn && state?.scanUrl !== undefined && state?.scanUrl !== ""
         ? qrImageOf(state.scanUrl, tt)
+        : null,
+      // The browser-authorize WAITING window (ADR-020): the link the tab
+      // already opened — kept as the manual path (if the browser blocked the
+      // popup, the link is what works) — and the cancel.
+      authWaiting
+        ? h("div", { style: { marginTop: 8 } },
+            h("div", { style: S.statCaption, role: "status" }, tt("raccoon.authorizeWaiting")),
+            h("div", { style: { display: "flex", gap: 8, marginTop: 4 } },
+              authorize !== null && authorize.url !== undefined
+                ? h("a", { href: authorize.url, target: "_blank", rel: "noreferrer", style: S.externalLink }, tt("raccoon.authorizeOpenLink"))
+                : null,
+              h("button", { type: "button", style: S.button, onClick: onAuthorizeCancel }, tt("raccoon.authorizeCancel"))),
+            h("div", { style: { ...S.muted, fontSize: 11, marginTop: 4 } }, tt("raccoon.authorizeHint")))
         : null,
       // The credential clocks sit under the status they time-stamp: both are
       // properties of this account's login, not of the credit figure it funds.
@@ -361,6 +441,15 @@ export function RaccoonCard({
     ),
     loginNote !== null
       ? h("div", { style: { ...S.formNote, fontSize: 12, marginTop: 8 }, role: "status" }, loginNote)
+      : null,
+    // The authorize terminal states (ADR-020): `failed` translates its reason
+    // word through the closed reason table — the raw token never reaches the
+    // screen, the same rule the 0.8.6 desktop-reason fix established.
+    authTerminal
+      ? h("div", { style: { ...S.formNote, fontSize: 12, marginTop: 8 }, role: "status" },
+          authorize.status === "failed"
+            ? format(tt("raccoon.authorizeFailed"), { reason: tt(RACCOON_AUTHORIZE_REASON_KEYS[authorize.error ?? ""] ?? "raccoon.authorizeReasonUnknown") })
+            : authorize.status === "timeout" ? tt("raccoon.authorizeTimeout") : tt("raccoon.authorizeCanceled"))
       : null,
     // A registration failure stays visible even while the switch is OFF —
     // hiding it behind `enabled` is the same dead-end as the account editor

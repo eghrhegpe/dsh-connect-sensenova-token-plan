@@ -324,6 +324,30 @@ export const zh = {
   "raccoon.httpFailed": "本机 Host 应答 HTTP {status}（小浣熊读取失败）",
   "raccoon.noAnswer": "本机 Host 没有应答",
   "raccoon.qrAlt": "微信扫码登录二维码",
+  // The browser-authorize loopback (ADR-012) — the official client's own
+  // login chain, the fallback while the QR confirm page is 404 upstream.
+  // The `reason` slot is a CLOSED set of reason words the route reports
+  // (the exchange's refusal taxonomy + two route-level words), mapped in
+  // `raccoon-card.ts`'s RACCOON_AUTHORIZE_REASON_KEYS — printing the raw
+  // word is the failure the 0.8.6 `not_configured` fix removed.
+  "raccoon.authorizeOpen": "浏览器登录",
+  "raccoon.authorizeHint": "打开 xiaohuanxiong.com 授权页，在网页内完成登录（手机号 / 微信扫码）并确认后自动完成——扫码确认页不可用时的替代入口",
+  "raccoon.authorizeWaiting": "等待浏览器授权…（完成后自动刷新）",
+  "raccoon.authorizeOpenLink": "在浏览器中打开授权页",
+  "raccoon.authorizeCancel": "取消等待",
+  "raccoon.authorizeFailed": "浏览器授权未完成：{reason}",
+  "raccoon.authorizeReasonNotFound": "授权码已失效（过期或已使用）——请重新发起",
+  "raccoon.authorizeReasonSessionDead": "网页登录态已失效——请重新发起",
+  "raccoon.authorizeReasonServer": "授权服务暂不可用——请稍后重试",
+  "raccoon.authorizeReasonNetwork": "网络故障——请检查网络后重试",
+  "raccoon.authorizeReasonInvalid": "应答格式异常——请重新发起",
+  "raccoon.authorizeReasonRefreshMissing": "应答缺少续期令牌——请重新发起",
+  "raccoon.authorizeReasonTokenInvalid": "令牌校验未通过——请重新发起",
+  "raccoon.authorizeReasonBind": "本机回调端口未能监听——请重新发起",
+  "raccoon.authorizeReasonSaveFailed": "凭据未能保存——请重新发起",
+  "raccoon.authorizeReasonUnknown": "未知原因",
+  "raccoon.authorizeTimeout": "浏览器授权已超时——如需登录请重新点击",
+  "raccoon.authorizeCanceled": "浏览器授权已取消——如需登录请重新点击",
   "raccoon.error": "小浣熊操作失败：{error}"
 } satisfies Record<string, string>;
 
@@ -564,6 +588,25 @@ export const en: typeof zh = {
   "raccoon.httpFailed": "The local Host answered HTTP {status} (the Raccoon read failed)",
   "raccoon.noAnswer": "The local Host gave no answer",
   "raccoon.qrAlt": "WeChat sign-in QR code",
+  // The browser-authorize loopback (ADR-012) — parity with the zh table above.
+  "raccoon.authorizeOpen": "Sign in via browser",
+  "raccoon.authorizeHint": "Opens the xiaohuanxiong.com authorize page; finish sign-in there (phone / WeChat QR) and it completes automatically — the fallback while the scan-confirm page is down",
+  "raccoon.authorizeWaiting": "Waiting for the browser authorization… (the panel refreshes itself when it completes)",
+  "raccoon.authorizeOpenLink": "Open the authorize page in your browser",
+  "raccoon.authorizeCancel": "Cancel the wait",
+  "raccoon.authorizeFailed": "The browser authorization did not complete: {reason}",
+  "raccoon.authorizeReasonNotFound": "the authorization code has lapsed (expired or used) — start again",
+  "raccoon.authorizeReasonSessionDead": "the web session is dead — start again",
+  "raccoon.authorizeReasonServer": "the authorization service is unavailable — try again later",
+  "raccoon.authorizeReasonNetwork": "a network failure — check the connection and retry",
+  "raccoon.authorizeReasonInvalid": "an unexpected answer shape — start again",
+  "raccoon.authorizeReasonRefreshMissing": "the answer carries no renewal token — start again",
+  "raccoon.authorizeReasonTokenInvalid": "the token failed validation — start again",
+  "raccoon.authorizeReasonBind": "the local callback port could not bind — start again",
+  "raccoon.authorizeReasonSaveFailed": "the credential could not be saved — start again",
+  "raccoon.authorizeReasonUnknown": "unknown reason",
+  "raccoon.authorizeTimeout": "The browser authorization timed out — click again to start a new one",
+  "raccoon.authorizeCanceled": "The browser authorization was canceled — click again to start a new one",
   "raccoon.error": "Raccoon operation failed: {error}"
 };
 

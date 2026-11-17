@@ -263,6 +263,24 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.httpFailed": "本机 Host 应答 HTTP {status}（小浣熊读取失败）",
 			"raccoon.noAnswer": "本机 Host 没有应答",
 			"raccoon.qrAlt": "微信扫码登录二维码",
+			"raccoon.authorizeOpen": "浏览器登录",
+			"raccoon.authorizeHint": "打开 xiaohuanxiong.com 授权页，在网页内完成登录（手机号 / 微信扫码）并确认后自动完成——扫码确认页不可用时的替代入口",
+			"raccoon.authorizeWaiting": "等待浏览器授权…（完成后自动刷新）",
+			"raccoon.authorizeOpenLink": "在浏览器中打开授权页",
+			"raccoon.authorizeCancel": "取消等待",
+			"raccoon.authorizeFailed": "浏览器授权未完成：{reason}",
+			"raccoon.authorizeReasonNotFound": "授权码已失效（过期或已使用）——请重新发起",
+			"raccoon.authorizeReasonSessionDead": "网页登录态已失效——请重新发起",
+			"raccoon.authorizeReasonServer": "授权服务暂不可用——请稍后重试",
+			"raccoon.authorizeReasonNetwork": "网络故障——请检查网络后重试",
+			"raccoon.authorizeReasonInvalid": "应答格式异常——请重新发起",
+			"raccoon.authorizeReasonRefreshMissing": "应答缺少续期令牌——请重新发起",
+			"raccoon.authorizeReasonTokenInvalid": "令牌校验未通过——请重新发起",
+			"raccoon.authorizeReasonBind": "本机回调端口未能监听——请重新发起",
+			"raccoon.authorizeReasonSaveFailed": "凭据未能保存——请重新发起",
+			"raccoon.authorizeReasonUnknown": "未知原因",
+			"raccoon.authorizeTimeout": "浏览器授权已超时——如需登录请重新点击",
+			"raccoon.authorizeCanceled": "浏览器授权已取消——如需登录请重新点击",
 			"raccoon.error": "小浣熊操作失败：{error}"
 		};
 		en = {
@@ -496,6 +514,24 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.httpFailed": "The local Host answered HTTP {status} (the Raccoon read failed)",
 			"raccoon.noAnswer": "The local Host gave no answer",
 			"raccoon.qrAlt": "WeChat sign-in QR code",
+			"raccoon.authorizeOpen": "Sign in via browser",
+			"raccoon.authorizeHint": "Opens the xiaohuanxiong.com authorize page; finish sign-in there (phone / WeChat QR) and it completes automatically — the fallback while the scan-confirm page is down",
+			"raccoon.authorizeWaiting": "Waiting for the browser authorization… (the panel refreshes itself when it completes)",
+			"raccoon.authorizeOpenLink": "Open the authorize page in your browser",
+			"raccoon.authorizeCancel": "Cancel the wait",
+			"raccoon.authorizeFailed": "The browser authorization did not complete: {reason}",
+			"raccoon.authorizeReasonNotFound": "the authorization code has lapsed (expired or used) — start again",
+			"raccoon.authorizeReasonSessionDead": "the web session is dead — start again",
+			"raccoon.authorizeReasonServer": "the authorization service is unavailable — try again later",
+			"raccoon.authorizeReasonNetwork": "a network failure — check the connection and retry",
+			"raccoon.authorizeReasonInvalid": "an unexpected answer shape — start again",
+			"raccoon.authorizeReasonRefreshMissing": "the answer carries no renewal token — start again",
+			"raccoon.authorizeReasonTokenInvalid": "the token failed validation — start again",
+			"raccoon.authorizeReasonBind": "the local callback port could not bind — start again",
+			"raccoon.authorizeReasonSaveFailed": "the credential could not be saved — start again",
+			"raccoon.authorizeReasonUnknown": "unknown reason",
+			"raccoon.authorizeTimeout": "The browser authorization timed out — click again to start a new one",
+			"raccoon.authorizeCanceled": "The browser authorization was canceled — click again to start a new one",
 			"raccoon.error": "Raccoon operation failed: {error}"
 		};
 	}));
@@ -3531,12 +3567,15 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			} }, scanUrl);
 		}
 	}
-	function RaccoonCard({ state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch, onDesktop }) {
+	function RaccoonCard({ state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch, onDesktop, onAuthorize, onAuthorizeCancel }) {
 		const enabled = state?.enabled === true;
 		const loggedIn = state?.loggedIn === true;
 		const scanning = state?.loginStatus === "scanning";
 		const desktop = state?.desktop ?? null;
-		const waiting = loginBusy || scanning;
+		const authorize = state?.authorize ?? null;
+		const authWaiting = authorize !== null && authorize.status === "waiting";
+		const authTerminal = authorize !== null && (authorize.status === "failed" || authorize.status === "timeout" || authorize.status === "canceled");
+		const waiting = loginBusy || scanning || authWaiting;
 		const nick = String(state?.nickname ?? "");
 		const models = Array.isArray(state?.models) ? state.models : [];
 		const expiresAt = typeof state?.expiresAtMs === "number" ? state.expiresAtMs : null;
@@ -3604,21 +3643,59 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				fontSize: 13
 			} : { fontSize: 13 },
 			role: loginStatus.alert ? "alert" : "status"
-		}, loginStatus.text), h("span", { style: S.spacer }), loggedIn ? state?.credentialExpired === true ? h("button", {
+		}, loginStatus.text), h("span", { style: S.spacer }), loggedIn ? state?.credentialExpired === true ? h("div", { style: {
+			display: "flex",
+			gap: 8
+		} }, h("button", {
 			type: "button",
 			style: S.button,
 			onClick: onLogin,
 			disabled: waiting
-		}, waiting ? tt("raccoon.loggingIn") : tt("raccoon.reLogin")) : h("button", {
+		}, waiting ? tt("raccoon.loggingIn") : tt("raccoon.reLogin")), h("button", {
+			type: "button",
+			style: S.button,
+			onClick: onAuthorize,
+			disabled: waiting,
+			title: tt("raccoon.authorizeHint")
+		}, tt("raccoon.authorizeOpen"))) : h("button", {
 			type: "button",
 			style: S.button,
 			onClick: onLogout
-		}, tt("raccoon.logout")) : h("button", {
+		}, tt("raccoon.logout")) : h("div", { style: {
+			display: "flex",
+			gap: 8
+		} }, h("button", {
 			type: "button",
 			style: S.button,
 			onClick: onLogin,
 			disabled: waiting
-		}, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login"))), !loggedIn && state?.scanUrl !== void 0 && state?.scanUrl !== "" ? qrImageOf(state.scanUrl, tt) : null, clockParts.length > 0 ? h("div", {
+		}, waiting ? tt("raccoon.loggingIn") : tt("raccoon.login")), h("button", {
+			type: "button",
+			style: S.button,
+			onClick: onAuthorize,
+			disabled: waiting,
+			title: tt("raccoon.authorizeHint")
+		}, tt("raccoon.authorizeOpen")))), !loggedIn && state?.scanUrl !== void 0 && state?.scanUrl !== "" ? qrImageOf(state.scanUrl, tt) : null, authWaiting ? h("div", { style: { marginTop: 8 } }, h("div", {
+			style: S.statCaption,
+			role: "status"
+		}, tt("raccoon.authorizeWaiting")), h("div", { style: {
+			display: "flex",
+			gap: 8,
+			marginTop: 4
+		} }, authorize !== null && authorize.url !== void 0 ? h("a", {
+			href: authorize.url,
+			target: "_blank",
+			rel: "noreferrer",
+			style: S.externalLink
+		}, tt("raccoon.authorizeOpenLink")) : null, h("button", {
+			type: "button",
+			style: S.button,
+			onClick: onAuthorizeCancel
+		}, tt("raccoon.authorizeCancel"))), h("div", { style: {
+			...S.muted,
+			fontSize: 11,
+			marginTop: 4
+		} }, tt("raccoon.authorizeHint"))) : null, clockParts.length > 0 ? h("div", {
 			style: {
 				...S.statCaption,
 				marginTop: 8
@@ -3655,7 +3732,14 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				marginTop: 8
 			},
 			role: "status"
-		}, loginNote) : null, state !== null && state.providerError !== void 0 && state.providerError !== "" ? h("div", {
+		}, loginNote) : null, authTerminal ? h("div", {
+			style: {
+				...S.formNote,
+				fontSize: 12,
+				marginTop: 8
+			},
+			role: "status"
+		}, authorize.status === "failed" ? format(tt("raccoon.authorizeFailed"), { reason: tt(RACCOON_AUTHORIZE_REASON_KEYS[authorize.error ?? ""] ?? "raccoon.authorizeReasonUnknown") }) : authorize.status === "timeout" ? tt("raccoon.authorizeTimeout") : tt("raccoon.authorizeCanceled")) : null, state !== null && state.providerError !== void 0 && state.providerError !== "" ? h("div", {
 			style: S.formError,
 			role: "alert"
 		}, state.providerError === "not_configured" ? tt("raccoon.providerNotConfigured") : state.providerError) : null, loggedIn ? h("div", {
@@ -3706,7 +3790,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			style: S.externalLink
 		}, tt("raccoon.clientLink")));
 	}
-	var QR_SIZE, DAY_MS, RACCOON_DESKTOP_REASON_KEYS;
+	var QR_SIZE, DAY_MS, RACCOON_AUTHORIZE_REASON_KEYS, RACCOON_DESKTOP_REASON_KEYS;
 	var init_raccoon_card = __esmMin((() => {
 		init_format();
 		init_models();
@@ -3718,6 +3802,17 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_styles();
 		QR_SIZE = 208;
 		DAY_MS = 864e5;
+		RACCOON_AUTHORIZE_REASON_KEYS = {
+			code_not_found: "raccoon.authorizeReasonNotFound",
+			session_dead: "raccoon.authorizeReasonSessionDead",
+			server_error: "raccoon.authorizeReasonServer",
+			network: "raccoon.authorizeReasonNetwork",
+			invalid_response: "raccoon.authorizeReasonInvalid",
+			refresh_missing: "raccoon.authorizeReasonRefreshMissing",
+			token_invalid: "raccoon.authorizeReasonTokenInvalid",
+			bind: "raccoon.authorizeReasonBind",
+			save_failed: "raccoon.authorizeReasonSaveFailed"
+		};
 		RACCOON_DESKTOP_REASON_KEYS = {
 			missing: "raccoon.desktopReasonMissing",
 			unreadable: "raccoon.desktopReasonUnreadable",
@@ -3876,6 +3971,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		}, [report, tt]);
 		loadRef.current = () => void load();
 		const scanning = state?.loginStatus === "scanning";
+		const authWaiting = state?.authorize?.status === "waiting";
 		const pollMs = statedCadenceMs(state?.pollSeconds, RACCOON_POLL_MS$1);
 		const scanPollMs = statedCadenceMs(state?.scanPollSeconds, RACCOON_SCAN_POLL_MS);
 		const failed = readFailure !== null;
@@ -3883,7 +3979,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			alive.current = true;
 			load();
 		}, [load]);
-		usePollingInterval(fire, scanning ? scanPollMs : pollMs, { failed });
+		usePollingInterval(fire, scanning || authWaiting ? scanPollMs : pollMs, { failed });
 		useEffect(() => () => {
 			alive.current = false;
 			generation.current += 1;
@@ -3898,6 +3994,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			load,
 			onReportStatus,
 			scanning,
+			authWaiting,
 			pollMs,
 			scanPollMs
 		]);
@@ -3980,6 +4077,33 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				if (alive.current) setLoginBusy(false);
 			}
 		}, [tt]);
+		const startAuthorize = useCallback(async () => {
+			setLoginNote(null);
+			try {
+				const body = await postJson(RACCOON_PATH, {
+					action: "authorize",
+					step: "start"
+				});
+				if (alive.current) {
+					if (body?.ok === true && body.authorize?.status === "waiting" && typeof body.authorize.url === "string") {
+						setState(body);
+						window.open(body.authorize.url, "_blank", "noopener");
+					} else if (body !== null && body.ok === false) setLoginNote(typeof body.error === "string" && body.error !== "" ? body.error : tt("raccoon.noAnswer"));
+					else if (body !== null) setState(body);
+				}
+			} catch (why) {
+				if (alive.current) setLoginNote(format(tt("raccoon.error"), { error: errorText(why) }));
+			}
+		}, [tt]);
+		const cancelAuthorize = useCallback(async () => {
+			try {
+				const body = await postJson(RACCOON_PATH, {
+					action: "authorize",
+					step: "cancel"
+				});
+				if (alive.current && body !== null) setState(body);
+			} catch {}
+		}, []);
 		const logout = useCallback(async () => {
 			setLoginNote(null);
 			try {
@@ -4028,7 +4152,9 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			onSwitch: (enabled) => void toggle(enabled),
 			onIds: (ids) => void saveIds(ids),
 			onWebSearch: (enabled) => void toggleWebSearch(enabled),
-			onDesktop: (enabled) => void toggleDesktop(enabled)
+			onDesktop: (enabled) => void toggleDesktop(enabled),
+			onAuthorize: () => void startAuthorize(),
+			onAuthorizeCancel: () => void cancelAuthorize()
 		});
 	}
 	var RACCOON_POLL_MS$1, RACCOON_SCAN_POLL_MS;

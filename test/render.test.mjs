@@ -1112,6 +1112,10 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
     onLogout: () => {},
     onSwitch: () => {},
     onIds: () => {},
+    onWebSearch: () => {},
+    onDesktop: () => {},
+    onAuthorize: () => {},
+    onAuthorizeCancel: () => {},
     ...extra
   });
   // The first role="status"/"alert" element in tree order is the login card's
@@ -1136,6 +1140,45 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
         && !texts(tree).join("").includes("raccoon.balance"),
       texts(tree).join(" | "));
   }
+
+  // The browser-authorize frames (ADR-020): a second login entry beside the
+  // scan, the waiting window (link + cancel + hint), and the terminal notes.
+  {
+    const tree = card({ ok: true, enabled: false, loggedIn: false });
+    check("the signed-out frame offers the browser-authorize entry beside the scan",
+      lineHas(tree, "raccoon.authorizeOpen") && lineHas(tree, "raccoon.login"),
+      texts(tree).join(" | "));
+  }
+  {
+    const tree = card({ ok: true, loggedIn: false, authorize: { status: "waiting", url: "https://xiaohuanxiong.com/authorize?state=x" } });
+    check("the authorize waiting window draws the link, the cancel, and the hint",
+      lineHas(tree, "raccoon.authorizeWaiting") && lineHas(tree, "raccoon.authorizeOpenLink")
+        && lineHas(tree, "raccoon.authorizeCancel") && lineHas(tree, "raccoon.authorizeHint"),
+      texts(tree).join(" | "));
+    const link = findElement(tree, (props) => typeof props.href === "string" && props.href.includes("/authorize"));
+    check("the waiting window's link targets the authorize page in a new tab",
+      link !== null && link.props.target === "_blank", String(link?.props?.href));
+  }
+  {
+    const tree = card({ ok: true, loggedIn: false, authorize: { status: "failed", error: "code_not_found" } });
+    // Under this suite's identity `tt`, `format` interpolates no `{reason}`
+    // slot into the KEY — so the translation is invisible here; what the
+    // suite CAN pin is the note itself and the red line: the raw reason word
+    // must never reach the screen (the 0.8.6 `not_configured` rule).
+    check("a failed authorize draws its note and never the raw reason word",
+      lineHas(tree, "raccoon.authorizeFailed") && !texts(tree).join("").includes("code_not_found"),
+      texts(tree).join(" | "));
+  }
+  {
+    const tree = card({ ok: true, loggedIn: false, authorize: { status: "timeout" } });
+    check("a timed-out authorize says so and points back at the button",
+      lineHas(tree, "raccoon.authorizeTimeout"),
+      texts(tree).join(" | "));
+  }
+  // The reason table's CLOSED SET and its zh-locale translation are pinned
+  // in `raccoon.test.mjs` (the official-App row frames section), where the
+  // real zh dictionary makes the interpolation inspectable — this suite's
+  // identity `tt` erases it by construction.
 
   // A scan in flight: the QR is the point, and the button must not offer a
   // SECOND scan while the first one is still on screen.

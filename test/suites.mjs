@@ -94,6 +94,7 @@ export const SUITES = Object.freeze([
   { name: "draw.test.mjs", kind: "suite", note: "draw absorption + degrade markers" },
   { name: "doctor.test.mjs", kind: "suite", note: "doctor symptom codes" },
   { name: "raccoon.test.mjs", kind: "suite", note: "second upstream: QR encoder, walk, catalogue" },
+  { name: "raccoon-authorize.test.mjs", kind: "suite", note: "second upstream: browser-authorize loopback receiver + code exchange (ADR-020)" },
   { name: "raccoon-status.test.mjs", kind: "suite", note: "raccoon state assembly (optional deps)" },
   { name: "raccoon-search.test.mjs", kind: "suite", note: "hosted web_search provider" },
   { name: "raccoon-web.test.mjs", kind: "suite", note: "search selection takeover/restore" },

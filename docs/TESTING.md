@@ -58,6 +58,7 @@ npm run test:peer-contract # 仅 peer-contract.test.mjs（peer 可达时追加�
 | `test/peer-contract.test.mjs` | **peer 契约护栏（peer 可达时）**：钉死「peer 判 QUOTA + 含限频信号 → 本插件 `reclassifyFinish` 纠正回 RATE_LIMIT」的端到端行为契约；`extractStructuredType` 必须仍能从 peer 拼好的 message 回捞结构化 type；peer 缺席则 SKIP |
 | `test/doctor.test.mjs` | **CLI 诊断（peer-free）**：`doctor.ts` 对状态文件只读扫描——provider / draw / catalog 开关与生效值、profile 分段目录、零凭据读取 |
 | `test/raccoon.test.mjs` | **第二上游（peer-free）**：小浣熊协议层（扫码信封解析、refresh 轮换、余额/目录读取）、两个 store、描述符映射、publisher 状态机、QR 编码器、开关 store |
+| `test/raccoon-authorize.test.mjs` | **第二上游·浏览器授权（peer-free，ADR-020）**：loopback 接收端七规则（真实 127.0.0.1 socket，含一次性 409 与拒绝只出类别词）+ 换码成功门双分型（IAM 无 refresh / legacy 必须有）与全部拒绝原因 + URL 构造器的前置校验 + 原因表封闭集 |
 | `test/raccoon-status.test.mjs` | **小浣熊面板读模型（peer-free）**：`raccoon-status.ts` 的 `readRaccoonStatus` 直接以假 store/假缓存驱动——终态事件在**首个 await 之前**读取（T3 修复的排序）、`?debug=1` 脚手架只在显式 opt-in 时出现且代理密码/遮蔽凭据只以指纹出网、缓存键按**凭据指纹**且余额 60 s/目录 300 s（真 `coalesced-fetch` 对桩 fetch 验一次窗口一次调用）、roster 的 live/empty/unreadable 三态、过期凭据的原地续期与过期事实、可选 switch/store 缺席时降级不崩 |
 | `test/raccoon-search.test.mjs` | **小浣熊内置联网搜索（peer-free，见 [ROADMAP.md](./ROADMAP.md) §6.1.7）**：MCP over HTTP 传输（streamable，`initialize` → `tools/call`、`Mcp-Session-Id` 回传、SSE 解析 + 三种错误信封）与 `RaccoonSearchProvider` 挂 `ctx.web` 的注册形状、`searchProviderId` 接管语义 |
 | `test/raccoon-web.test.mjs` | **小浣熊搜索的接管与恢复（peer-free）**：`webSearchEnabled` 开关接管 `searchProviderId`（防 `WEB_PROVIDER_AMBIGUOUS`）、teardown 恢复被顶掉的后端 |

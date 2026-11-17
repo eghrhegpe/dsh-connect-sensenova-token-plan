@@ -13,6 +13,7 @@
  * | {@link ./raccoon-codes} | the rotation-failure taxonomy | — |
  * | {@link ./raccoon-http} | headers, envelope, JWT readers | — |
  * | {@link ./raccoon-auth} | QR generate/poll, refresh | consts, codes, http |
+ * | {@link ./raccoon-authorize} | browser-authorize loopback + code exchange | consts, http, util |
  * | {@link ./raccoon-catalog} | row transforms, catalogue, balance | consts, http |
  * | {@link ./raccoon-fallback} | static roster, pinned thinking dialect | — |
  *
@@ -61,6 +62,7 @@ export * from "./raccoon-consts.ts";
 export * from "./raccoon-codes.ts";
 export * from "./raccoon-http.ts";
 export * from "./raccoon-auth.ts";
+export * from "./raccoon-authorize.ts";
 export * from "./raccoon-catalog.ts";
 // NOT `export *`: `raccoonThinkingExtraBody` is deliberately not re-exported
 // from here — it has no production caller, and the suite reaches it by named

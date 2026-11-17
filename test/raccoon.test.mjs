@@ -2310,7 +2310,8 @@ function section(title) {
       const tree = treeOf(render.RaccoonCard, {
         state, tt, loginBusy: false, loginNote: null, modelsNote: null, idsBusy: false,
         onLogin: () => {}, onLogout: () => {}, onSwitch: () => {}, onIds: () => {},
-        onWebSearch: () => {}, onDesktop: () => {}
+        onWebSearch: () => {}, onDesktop: () => {},
+        onAuthorize: () => {}, onAuthorizeCancel: () => {}
       });
       // `texts()` hands back the TEXT NODES, one per rendered element, not a
       // string: a substring check (does a raw code appear ANYWHERE on screen?)
@@ -2358,6 +2359,41 @@ function section(title) {
     check("the switch is reachable before it is ever turned on (that is how you turn it on)",
       labelsOf(off.tree).includes(zh["raccoon.desktop"]) && !off.text.includes(zh["raccoon.desktopIdle"]) && !off.text.includes(zh["raccoon.desktopLive"]),
       labelsOf(off.tree).join(","));
+
+    // The browser-authorize frames (ADR-020), under the SAME real zh
+    // dictionary: the waiting window's affordances and the terminal notes
+    // worded from their reason — the raw reason word never reaches the
+    // screen, the 0.8.6 rule applied to the new channel.
+    const waiting = shot({ ok: true, loggedIn: false, authorize: { status: "waiting", url: "https://xiaohuanxiong.com/authorize?state=x" } });
+    check("the authorize waiting window offers the link, the cancel, and the hint",
+      waiting.text.includes(zh["raccoon.authorizeWaiting"]) && waiting.text.includes(zh["raccoon.authorizeOpenLink"])
+        && waiting.text.includes(zh["raccoon.authorizeCancel"]) && waiting.text.includes(zh["raccoon.authorizeHint"]),
+      waiting.text.slice(0, 160));
+    const authFailed = shot({ ...base, authorize: { status: "failed", error: "code_not_found" } });
+    // The note's template carries a `{reason}` slot, so the screen shows the
+    // INTERPOLATED sentence, not the dictionary value — assert the stable
+    // prefix of the template plus the translated reason word.
+    const failedPrefix = zh["raccoon.authorizeFailed"].split("{reason}")[0];
+    check("a failed authorize is worded from its reason word; the raw word never reaches the screen",
+      authFailed.text.includes(failedPrefix) && authFailed.text.includes(zh["raccoon.authorizeReasonNotFound"])
+        && !authFailed.text.includes("code_not_found"),
+      authFailed.text.slice(0, 160));
+    const authUnknown = shot({ ...base, authorize: { status: "failed", error: "reason_from_a_newer_host" } });
+    check("an unregistered authorize reason falls back to the generic line, never to the word",
+      authUnknown.text.includes(zh["raccoon.authorizeReasonUnknown"]) && !authUnknown.text.includes("reason_from_a_newer_host"),
+      authUnknown.text.slice(0, 160));
+    const authTimedOut = shot({ ...base, authorize: { status: "timeout" } });
+    check("a timed-out authorize names the outcome and the way back",
+      authTimedOut.text.includes(zh["raccoon.authorizeTimeout"]),
+      authTimedOut.text.slice(0, 160));
+    // The closed set on the table itself: every reason word the route can
+    // report maps to a sentence key, and the table holds no stragglers.
+    const { RACCOON_AUTHORIZE_REASON_KEYS } = await import("../src/client/raccoon-card.ts");
+    const reasonWords = ["code_not_found", "session_dead", "server_error", "network", "invalid_response", "refresh_missing", "token_invalid", "bind", "save_failed"];
+    check("the authorize reason table is the closed set of route reason words",
+      reasonWords.every((word) => typeof RACCOON_AUTHORIZE_REASON_KEYS[word] === "string")
+        && Object.keys(RACCOON_AUTHORIZE_REASON_KEYS).length === reasonWords.length,
+      JSON.stringify(Object.keys(RACCOON_AUTHORIZE_REASON_KEYS)));
   } catch (error) {
     fail("official-App row frames", error);
   }
