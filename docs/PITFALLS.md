@@ -515,7 +515,7 @@
 ## 47. 「照旧契约抄一遍」的坑：`office_identity` 不是 org code
 
 - **现象**：把官方桌面客户端 `~/.box-agent/config/auth.json` 里那枚凭据原样交给 `raccoonHeaders()`，小浣熊网关的**每一个**读都失败——`400 {"code":200022,"message":"org_not_found_error"}`。注意它**不是 401**：token 是好的，同一个 token 把 `X-Org-Code` 留空就打回 `200`（实测 2026-11-17）。
-- **根因**：`raccoonHeaders()` 的映射是 `office_identity → X-Org-Code`。这条映射在扫码凭据上从未被真正检验过——个人版的 org code 本来就该是空串（归档契约 [upstream-protocol.md](../upstream/dsh-raccoon-work-old0.16/docs/upstream-protocol.md) §3：`X-Org-Code` = `getOrgCode()`，个人版为空），于是「发出去的头正好是空的」和「映射是对的」两种情况长得一模一样。桌面文件里的 `office_identity` 却是身份**标签**（字面量 `personal`），不是组织码：归档契约只把它和 `office_org_name`/`office_org_role` 并成一行「全部可选，字符串」，没说它能当请求头用。
+- **根因**：`raccoonHeaders()` 的映射是 `office_identity → X-Org-Code`。这条映射在扫码凭据上从未被真正检验过——个人版的 org code 本来就该是空串（归档契约 `upstream/dsh-raccoon-work-old0.16/docs/upstream-protocol.md` §3（容器不进仓库，登记见 [docs/REFERENCES.md](./REFERENCES.md) §2）：`X-Org-Code` = `getOrgCode()`，个人版为空），于是「发出去的头正好是空的」和「映射是对的」两种情况长得一模一样。桌面文件里的 `office_identity` 却是身份**标签**（字面量 `personal`），不是组织码：归档契约只把它和 `office_org_name`/`office_org_role` 并成一行「全部可选，字符串」，没说它能当请求头用。
 - **修法**：**新来源在自己那儿把形状定死，而不是在共用映射处加分支**。`raccoon-desktop-creds.ts` 投影凭据时把 `officeIdentity` 与 `refreshToken` 一起钉成空串：前者绕开本坑，后者顺手断掉「拿着不该刷的 token 去刷」的整条链路（§6.1.1）。如果改成给 `raccoonHeaders()` 加一句「值是 `personal` 就别说出去」，那是把一个来源的语义变成全上游的共同负担，也正是 ARCHITECTURE §5.5 不让做的事。
 - **门禁**：`test/raccoon.test.mjs` 第 12 段——投影后的凭据必须让 `raccoonHeaders(cred)["X-Org-Code"] === ""`，同时 `Authorization` 逐字带上那枚 token。
 

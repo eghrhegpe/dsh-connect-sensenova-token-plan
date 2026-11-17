@@ -523,7 +523,7 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 | 复测量（全部只读：零写、零 refresh、零计费） | 结果 |
 |---|---|
 | `~/.box-agent/config/auth.json` 的字段 | 只剩 `access_token`（432 字节 JWT）+ `office_identity`（字面量 `personal`）；整棵 `~/.box-agent` 搜不到 `refresh_token` 字样——refresh 挪进了 Electron 渲染端存储（`%APPDATA%\office-raccoon\Local Storage\leveldb`），**那扇门本插件不进** |
-| access JWT 窗口 | `iat`→`exp` **整 30 天**；旧契约档 [upstream-protocol.md](../upstream/dsh-raccoon-work-old0.16/docs/upstream-protocol.md) §1 记的是 access 3h / refresh 30d——「App 没开就只剩 3 小时」这句因此过期 |
+| access JWT 窗口 | `iat`→`exp` **整 30 天**；旧契约档 `upstream/dsh-raccoon-work-old0.16/docs/upstream-protocol.md` §1（容器不进仓库，登记见 [docs/REFERENCES.md](./REFERENCES.md) §2） 记的是 access 3h / refresh 30d——「App 没开就只剩 3 小时」这句因此过期 |
 | `GET /api/web/llm/v2/model_catalog` 带这枚 token | **`200 code:0`**。与小浣熊 tab **同一认证域**；§6.1.1 那两次 `401` 打的是 `platform.sensenova.cn`（Token Plan 域），**两件事别混**——本节没有推翻 §6.1.1，推翻的是把 §6.1.1 读成「桌面 token 哪儿都不能用」的那种读法 |
 | `GET /api/web/points/v1/balance` 带这枚 token | **`200`**，`available_points` 就是面板在念的那口池（不新增第二套计费宇宙） |
 | 把 `office_identity` 的值当 `X-Org-Code` 发 | **`400 200022 org_not_found_error`**；同一个头留空 → `200` |
