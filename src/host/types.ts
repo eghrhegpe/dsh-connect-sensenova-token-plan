@@ -128,6 +128,18 @@ export interface RaccoonStoreDeps {
   credentials?: any;
   /** Injected fetch for the refresh call (tests stub it; defaults to global fetch). */
   fetcher?: typeof fetch;
+  /**
+   * The read-only official-App source (ROADMAP §6.1.11): `enabled()` is the
+   * panel switch, `read()` is `readRaccoonDesktopCredential()`. Absent = the
+   * store answers from its own slot only, i.e. exactly the pre-§6.1.11
+   * behaviour — what every existing caller, suite, and the Token Plan side get.
+   * Nothing here can write: the reader imports no fetcher and the store
+   * refuses to refresh a desktop-origin credential.
+   */
+  desktop?: {
+    enabled?: () => Promise<boolean | null>;
+    read?: () => Promise<any>;
+  };
 }
 
 /** Dependency bag for the Raccoon provider publisher (`raccoon-publish.ts`). */
@@ -234,6 +246,8 @@ export interface Wiring {
   resolveRaccoonToken: () => Promise<string>;
   /** The Raccoon `web_search` provider switch; may be absent on some Hosts. */
   webSearchStore: ReturnType<typeof import("./raccoon-web-store.ts").createFileRaccoonWebStore> | null;
+  /** The read-only official-App source switch (§6.1.11); `null` when unwired. */
+  raccoonDesktopSwitch: ReturnType<typeof import("./raccoon-desktop-store.ts").createFileRaccoonDesktopStore> | null;
   /**
    * The Raccoon roster's first-sighting history (`createFileRaccoonRosterSeenStore`).
    *

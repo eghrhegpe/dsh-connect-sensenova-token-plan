@@ -511,3 +511,12 @@
 - **根因**：`timeoutMs` 不是「宿主替你把这条调用掐了」的许可，而是**对工具实现的一句断言**——peer 的类型写明「Declaring it asserts this tool forwards `exec.signal` to a cooperative implementation that can reach quiescence when the signal aborts」，并且「the registry … cannot hard-kill same-process code」；同一条契约的 `execute` 段落还要求「settle only after its owned work reaches quiescence」，即工具**返回了但活儿还在跑**是违约形态，不是优化。本仓踩中的原因是装配期看不出问题：`defineTool` 不校验 body 是否真的用 signal，单测又都以单参数调用 `execute(params)`，于是这条断言长期只是空话。兄弟插件 agnes 的 `draw.ts`/`video.ts` 已把同一坑写成 `mergedSignal`/`isAbortError` 两件套，注释里留了病历（"a cancelled call kept running to its full budget"）。
 - **修法**（2026-11-06 已做）：`execute(params, exec?)` 接住 `exec.signal`，入口先 `aborted` 短路（已取消就一个请求都不发），再经 `mergedDrawSignal(controller, signal)` 用 `AbortSignal.any` 与内部期限合并交给 fetch——用 `any` 是为了让调用方的 abort reason 原样进 rejection，从而区分「取消」与「期限」。`isDrawCancellation` 按 error `name === "AbortError"` 判定（宿主取消是 `DOMException`，本模块期限 abort 抛普通 `Error`，永不匹配），取消**不 trip 冷却**：用户叫停不该让下一次调用再等 30 秒。
 - **教训**：**声明给宿主的每一个断言，都要有一行代码兑现**——`timeoutMs`、`isConcurrencySafe`、`output.schema` 是同一类「装配期不校验、运行期靠自觉」的契约，测试全绿证明不了它成立。判据很省事：把工具声明里每个可选字段问一遍「谁在读它、读不到会怎样」，答不出消费方的就是空头断言。另一条：**取消与失败必须分诊**，冷却/退避是给真实失败的，把用户中断也计成失败，等于在打断之上再叠一次惩罚。
+
+## 47. 「照旧契约抄一遍」的坑：`office_identity` 不是 org code
+
+- **现象**：把官方桌面客户端 `~/.box-agent/config/auth.json` 里那枚凭据原样交给 `raccoonHeaders()`，小浣熊网关的**每一个**读都失败——`400 {"code":200022,"message":"org_not_found_error"}`。注意它**不是 401**：token 是好的，同一个 token 把 `X-Org-Code` 留空就打回 `200`（实测 2026-11-17）。
+- **根因**：`raccoonHeaders()` 的映射是 `office_identity → X-Org-Code`。这条映射在扫码凭据上从未被真正检验过——个人版的 org code 本来就该是空串（归档契约 [upstream-protocol.md](../upstream/dsh-raccoon-work-old0.16/docs/upstream-protocol.md) §3：`X-Org-Code` = `getOrgCode()`，个人版为空），于是「发出去的头正好是空的」和「映射是对的」两种情况长得一模一样。桌面文件里的 `office_identity` 却是身份**标签**（字面量 `personal`），不是组织码：归档契约只把它和 `office_org_name`/`office_org_role` 并成一行「全部可选，字符串」，没说它能当请求头用。
+- **修法**：**新来源在自己那儿把形状定死，而不是在共用映射处加分支**。`raccoon-desktop-creds.ts` 投影凭据时把 `officeIdentity` 与 `refreshToken` 一起钉成空串：前者绕开本坑，后者顺手断掉「拿着不该刷的 token 去刷」的整条链路（§6.1.1）。如果改成给 `raccoonHeaders()` 加一句「值是 `personal` 就别说出去」，那是把一个来源的语义变成全上游的共同负担，也正是 ARCHITECTURE §5.5 不让做的事。
+- **门禁**：`test/raccoon.test.mjs` 第 12 段——投影后的凭据必须让 `raccoonHeaders(cred)["X-Org-Code"] === ""`，同时 `Authorization` 逐字带上那枚 token。
+
+---

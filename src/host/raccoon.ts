@@ -24,11 +24,15 @@
  *
  * Mechanism reference only (ROADMAP §6.1: "机制参考，不抄代码"): the endpoints,
  * the QR/SMS login walk, and the credit semantics were probed against the live
- * gateway and re-stated here, not ported. The desktop `~/.box-agent` token
- * route is REJECTED (§6.1.1: the refresh token is single-use; a 401 ×2 write-
- * back probe), so this half never touches a desktop credential file — login is
- * a self-built WeChat-QR walk whose tokens land in the DSH credentials service
- * (`raccoon-store.ts`), never in this plugin's directory, git, or logs.
+ * gateway and re-stated here, not ported. The desktop `~/.box-agent` token is
+ * available to this upstream in exactly ONE shape: the read-only view in
+ * `raccoon-desktop-creds.ts` (§6.1.11). Refreshing it, writing it back, and
+ * reaching Token Plan with it all stay REJECTED (§6.1.1: the refresh token is
+ * single-use; a 401 ×2 cross-domain probe) — and nothing reached from this
+ * barrel can even open that file: the six modules below import no filesystem.
+ * Own login stays the self-built WeChat-QR walk whose tokens land in the DSH
+ * credentials service (`raccoon-store.ts`), never in this plugin's directory,
+ * git, or logs.
  *
  * Wire facts this layer encodes:
  *   - the web-auth family (`/api/web/...`) uses the envelope

@@ -194,12 +194,18 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
   // The refresh token's window (≈30 days): how long the login survives
   // before a re-scan is the ONLY way back.
   let refreshExpiresAtMs: number | null = null;
+  // Whose login is serving the requests right now — `desktop-file` (the
+  // official App's own access token, read-only, §6.1.11) or `qr-scan` (the
+  // credential this plugin logged in). A panel-facing field on purpose: the
+  // tab badges it, and `credentialSource` below stays the ?debug=1 diagnostic.
+  let credentialOrigin: "desktop-file" | "qr-scan" | null = null;
   try {
     if (store !== null) {
       let state = await store.state().catch(() => null);
       loggedIn = state?.hasCredential === true;
       nickname = state?.nickname ?? "";
       credentialSource = state?.source ?? null;
+      credentialOrigin = (state?.credentialOrigin as "desktop-file" | "qr-scan" | null) ?? null;
       if (loggedIn) {
         // The same pre-request ritual the seed path calls — one call into the
         // store's `prepareForRequest`, never a second copy of it.
@@ -216,6 +222,7 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
           loggedIn = state?.hasCredential === true;
           nickname = state?.nickname ?? "";
           credentialSource = state?.source ?? null;
+          credentialOrigin = (state?.credentialOrigin as "desktop-file" | "qr-scan" | null) ?? null;
         }
         if (typeof state?.expiresAtMs === "number") {
           expiresAtMs = state.expiresAtMs;
@@ -375,6 +382,17 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
     hostProxyEnv
   } : {};
   const panelWebSearch = deps.webSearchStore ? await deps.webSearchStore.enabled().catch(() => null) : null;
+  // The read-only App source's own facts (§6.1.11): is the switch on, is the
+  // App's credential usable right now, and if not, which CATEGORY says why.
+  // `null` = the source is not wired in this build, so the tab hides the row
+  // instead of showing a switch that does nothing. Secret-free by construction
+  // (no path, no token — see raccoon-desktop-creds.ts).
+  const desktopFacts = store !== null && typeof (store as any).desktopState === "function"
+    ? await (store as any).desktopState().catch(() => null)
+    : null;
+  // `supported: false` means the source is not wired at all in this Host —
+  // which the tab must read as "no row", not as "a switch that does nothing".
+  const desktop = desktopFacts?.supported === false ? null : desktopFacts;
   return {
     ok: true,
     enabled: effectiveEnabled,
@@ -398,6 +416,8 @@ export async function readRaccoonStatus(deps: RaccoonStatusDeps, withDiagnostics
     // credential exists"; this says whether it can still serve. The tab
     // renders a distinct re-login affordance on this flag.
     credentialExpired,
+    ...pickDefined({ credentialOrigin }),
+    ...pickDefined({ desktop }),
     ...pickDefined({ expiresAtMs }),
     ...pickDefined({ refreshExpiresAtMs }),
     // The in-flight scan (if a login walk is waiting): the tab re-renders its

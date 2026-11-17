@@ -387,8 +387,11 @@ check("patch tokenSkewSeconds matches code default", Number(activeValue("tokenSk
   const wiringBody = typesSrc.match(/export interface Wiring \{([\s\S]*?)\n\}/)?.[1] ?? "";
   const wiringFields = wiringBody.split("\n")
     .filter((line) => /^\s{2}[A-Za-z_]\w*\??\s*:/.test(line));
+  // The newest member is `raccoonDesktopSwitch` (ROADMAP §6.1.11, the read-only
+  // official-App source): a new field in the bag IS a new fact about the mount, so
+  // it arrives here on purpose rather than by drift.
   check("Wiring's field count is the one this suite reasons about",
-    wiringFields.length === 28, `${wiringFields.length} fields`);
+    wiringFields.length === 29, `${wiringFields.length} fields`);
 
   // Every route declares its own subset, and `registerRoutes` calls each exactly
   // once. A route module added without joining the facade would mount nothing

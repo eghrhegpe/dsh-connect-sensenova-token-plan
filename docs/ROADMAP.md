@@ -514,6 +514,41 @@ profiles Map 的引用身份，不是内容**。本插件的 `profiles: () => pr
 
 **复发观察**：上游恢复后，`GET /login/mp?code=…` 应回到 200；复测只发一次造码 + 一次页面 GET 即可判定，不需要真扫码。
 
+### 6.1.11 只读复用官方客户端登录态：形态 A 落地，§6.1.10 的「只读导入不做」被部分取代（2026-11-17）
+
+> **状态**：**已落地，未发版**（公开行为随下一次发版进 CHANGELOG）。opt-in、默认关。范围**只到「读」**：自刷与回写继续否决，§6.1.1 那条一字未改。owner 拍板的账本见 [ADR.md](./ADR.md) ADR-019。
+
+**为什么这次能读**：§6.1.10 判死只读导入的理由只有一条——「上游 refresh 单次使用，插件刷新一次就把桌面 App 那枚作废」。那条理由预设「文件里有 refresh 可刷」。2026-11-17 对本机实装（当天 11:09 刚登录）复看，预设换掉了：
+
+| 复测量（全部只读：零写、零 refresh、零计费） | 结果 |
+|---|---|
+| `~/.box-agent/config/auth.json` 的字段 | 只剩 `access_token`（432 字节 JWT）+ `office_identity`（字面量 `personal`）；整棵 `~/.box-agent` 搜不到 `refresh_token` 字样——refresh 挪进了 Electron 渲染端存储（`%APPDATA%\office-raccoon\Local Storage\leveldb`），**那扇门本插件不进** |
+| access JWT 窗口 | `iat`→`exp` **整 30 天**；旧契约档 [upstream-protocol.md](../upstream/dsh-raccoon-work-old0.16/docs/upstream-protocol.md) §1 记的是 access 3h / refresh 30d——「App 没开就只剩 3 小时」这句因此过期 |
+| `GET /api/web/llm/v2/model_catalog` 带这枚 token | **`200 code:0`**。与小浣熊 tab **同一认证域**；§6.1.1 那两次 `401` 打的是 `platform.sensenova.cn`（Token Plan 域），**两件事别混**——本节没有推翻 §6.1.1，推翻的是把 §6.1.1 读成「桌面 token 哪儿都不能用」的那种读法 |
+| `GET /api/web/points/v1/balance` 带这枚 token | **`200`**，`available_points` 就是面板在念的那口池（不新增第二套计费宇宙） |
+| 把 `office_identity` 的值当 `X-Org-Code` 发 | **`400 200022 org_not_found_error`**；同一个头留空 → `200` |
+
+最后一行是「照旧契约抄一遍就能跑」的反例，也是本次唯一会让全线失败的坑：`raccoonHeaders()` 一直按 `office_identity → X-Org-Code` 映射（扫码凭据那侧该字段恒空，这个坑睡了两年），而桌面文件里那枚是**身份标签**、不是 org code。
+
+**落地形态**：`src/host/raccoon-desktop-creds.ts`（读文件 → 投成凭据形状）+ `src/host/raccoon-desktop-store.ts`（面板开关，第四个 switch store）+ `raccoon-store.ts` 的**一个槽、两个供源**。`resolve()` 每次读现场决定：开关开且文件里那枚新鲜 → 用官方客户端的；否则回落扫码凭据（原样躺在凭据服务里，谁都没被覆盖）。所以它**不是「在两个登录之间切换」的控件**：开它不要求先登录，关它不需要重扫，两边都可能缺席而面板照常。
+
+**与 [PITFALLS.md](./PITFALLS.md) §45 的关系**（那条写的是「上游页面下线时……不是自造第二条登录通道」）：本节**没有**新增登录通道——不造码、不轮询、不写登录态，只是**读**一个已经登录的进程留下的凭据文件；「自造通道」指的是替上游完成一次登录，本插件的扫码 walk 仍是唯一会登录的路径。两者的共同底线是同一条：插件不替上游发明登录，也不去修上游的会话。
+
+**四条硬约束（每条都有门禁，不是承诺）**：
+
+| 约束 | 靠什么成立 |
+|---|---|
+| 永不刷新 | `raccoon-desktop-creds.ts` 不 import 任何 fetcher（结构上发不出请求）；`store.refresh()` 对 `desktop-file` 来源**在联网之前**本地拒绝、回 `no_refresh_token`；`prepareForRequest()` 更早短路。测试用计数 fetcher 断言「一次请求都没发出去」 |
+| 永不写回、永不删 | 该模块无写路径；`forget()`（面板「退出登录」）只清本插件自己的槽——App 的文件与这条来源各由自己的开关管 |
+| 永不复制进 DSH 凭据服务 | 文件是权威源，store 是视图：抄一份进来就会在 App 轮换后变成僵尸凭据。红线 1 约束的是**我们拥有的**凭据，把别人的登录抄一份不叫拥有，叫过期。测试断言 `service.set` 计数为 0 |
+| 投出去的 `refreshToken` 与 `officeIdentity` 恒空 | 前者断掉刷新链路的入口，后者是上面那条 `X-Org-Code` 实测坑的修法；`test/raccoon.test.mjs` 第 12/13 段各钉一遍 |
+
+**面板**：小浣熊 tab 的第三个开关「官方客户端直连（只读）」，外加一行状态——开着且读到了说什么，开着但没读到说**原因的人话**（`missing`/`expired`/`malformed` 等七个类别逐条译名，延续 0.8.6「原因码不再原样上屏」的纪律，没登记的类别落通用句）。Host 没接线时整行不渲染：不给一个按下去没反应的开关。
+
+**复测判据（开工前先跑，1 次只读请求）**：`GET /api/web/llm/v2/model_catalog` 带 `auth.json` 里的 `access_token` → `200` = 本节成立；`401 200003` = App 与网关的域关系变了，关掉开关、退回 §6.1.10 的判定。**推理面（`chat/completions`）本轮未实证**：catalog 与 balance 的 `200` 只证明「鉴权通 + 同一口池」，能不能出字、扣的是不是这口池，要一次计费请求才算证完——文档与面板都不替它背书。
+
+**B 路线（自刷 + 回写）的复活条件**：不是「等 App 把 refresh_token 放回文件」，而是要先回答两个新问题——文件里已无 refresh 可读，要 B 只能去啃渲染端 leveldb（无契约、随版本漂移，比写文件更脏）；而 A 现在就是 30 天窗口，B 当年唯一的好处已经不在。**没有新收益，就别开写别人凭据文件的口子。**
+
 ### 6.2 构建链与 Client 拆分（2026-09-30：先干跑验证，当日决策重开并执行完毕）
 
 原计划「拆分先行、.ts 化稳定后再说」被合并为一步（touch 每个文件一遍而非两遍），
@@ -686,7 +721,7 @@ lockfile）并实跑 `test/build-gate.mjs`，构建失败与产物缺失在 CI �
 | **P1 ✅** | 出图吸收（§5.4 接法 B）：`draw.ts`（peer-free：结构化识别 / 端点拼接 / 429 分诊 / 失败冷却）+ `index.ts` opt-in 接线（`drawEnabled` 默认关，无 tools 服务即缺席）；快照契约零改动 | 低 | `test/draw.test.mjs`（56 项）已落地；离线 12 套件全绿 |
 | **P1 ✅** | `doctor --json`（`src/host/doctor.ts` + `tools/doctor.mjs`，已落地 2026-10-01） | 低 | `test/doctor.test.mjs` 进 `npm test` 链 |
 | P1（可选） | §4 官方文档保真（改名/链接，不提炼不 `git rm`） | 低（仅重命名 + 链接） | `docs.test.mjs` |
-| **P2 ✅ 部分落地** | 第二上游 provider：已随 0.4.3 落地（三个 tab 之一 + `sensenova-raccoon`），2026-10-01 补做网关契约复测，**契约成立**（§6.1.2）；剩余未做的是 desktop 融合路径（第二**登录路径**，见 §6.1.1）——它已实测判死，维持观望。接入面盘点与死负载处置见 §6.1.4（2026-10-01：诊断收进 `?debug=1` + 常量单真源） | 高（新上游 + 新凭据生命周期） | 已落地：`test/raccoon.test.mjs` 离线 101 项 + `docs.test.mjs` 检查 9 + **`test/live-raccoon.mjs`（2026-10-01 补齐此前的「仍缺」项，比照 §2.2 给商汤做的 `live-contract`：L1 无凭据路由存在性含对照组 + L2 带凭据契约；两条红线写死在脚本里） |
+| **P2 ✅ 部分落地** | 第二上游 provider：已随 0.4.3 落地（三个 tab 之一 + `sensenova-raccoon`），2026-10-01 补做网关契约复测，**契约成立**（§6.1.2）；desktop 登录态已按**只读复用**落地（形态 A，§6.1.11：读官方客户端的 access token，永不刷新／回写／复制进凭据服务，opt-in 默认关）；**跨域**那条路（桌面 token 打 Token Plan）仍判死（§6.1.1 不变）。接入面盘点与死负载处置见 §6.1.4（2026-10-01：诊断收进 `?debug=1` + 常量单真源） | 高（新上游 + 新凭据生命周期） | 已落地：`test/raccoon.test.mjs` 离线 101 项 + `docs.test.mjs` 检查 9 + **`test/live-raccoon.mjs`（2026-10-01 补齐此前的「仍缺」项，比照 §2.2 给商汤做的 `live-contract`：L1 无凭据路由存在性含对照组 + L2 带凭据契约；两条红线写死在脚本里） |
 | P2（可选） | 每日积分机制的唯一悬案（§6.1.8）：「当天登录」的服务端语义（登录事件 vs. 任意认证请求）——复测方法已定：凭据当天在读只读 `GET /bills` 看当日 `daily_grant.expire_at`，零副作用；若做面板「每日发放有效期」展示，数据源是 `bills`（`balance` 不返有效期） | 低（只读端点，无新凭据域） | 接入展示时按小浣熊域 `raccoon-status` + 面板测试补断言 |
 | P2（可选，先观察） | 网关 499 `client_request_aborted_error` 的宿主侧纠正（§6.1.9）：比照 429 误判纠正层的同构做法，在流出口把这种体归入可重试类，让退避重试吃掉偶发的网关内部取消。**触发条件 = 复现率说话**：偶发一次不值得预支一层纠正逻辑；攒到复现样本（带 `x-request-id` 与时间点）再动 | 低（流出口纠正，不动 peer 内部；peer-free 判据可离线钉测） | 若做：`test/error-fix.test.mjs` 同构补用例 + `test/retry.test.mjs` 复核分类契约 |
 | **P2 ✅ 部分落地**（可选剩余） | 对话框用量胶囊（§6.3）：MVP 已落地（2026-10-15：`composer-usage-pill.ts` 两层结构 + `auto` 归属门控 + 池归组 + 重置进 tooltip，`apply.ts` 注册 `conversation.input.right`，切模型回归钉在 `render-dom.test.mjs` E 段；`composer-slot-gate.mjs` 在名册）；2026-10-16 补齐**套餐名前缀**（`商汤 · ` / `浣熊 · `）与**小浣熊档画自己的积分余额**（存量语义，按事实分级；见 §6.3 末段），把两处轮询实现合并进 `src/client/use-remote-read.ts`（`duplication-gate.mjs` 判红手抄副本后裁定「抽，不加白名单」），落地**点击展开面板**（原始 used/limit + 精确重置时刻 + 池归属），并做完**面板的第二次审** A→E：点外部/Esc 关闭、按 `poolType` 说清池归组、小浣熊余额四份构成、滚动周统一为「每周 / weekly」、返赠余额进面板脚注——**其中 `reset_at` 的秒/毫秒单位错配在线上从未画出一行重置时刻，本轮修掉**（见 §6.3「面板的第二次审」段）。2026-10-16 **第三次审**修掉状态分类三处（读失败误报「不在池内」/ 兜底句自称「通用池」/ 未声明上限印 `0 / 0`）与 tooltip 丢活重置，并补 React `key`（见 §6.3「额度卡的第三次审」段）。剩余：`auto/always/off` 三档开关 + 面板设置项 | 低（剩余项 = 三档开关写 settings；Host 侧零新路由，复用快照） | 已落地：`render-dom.test.mjs` E 段（胶囊存在性/切模型/空 `next`）+ F 段（外观属性形状）+ G 段（前缀与余额读数）+ **H 段（面板开合/兄弟结构/原始数字/阈值同源/切 provider 随卸载/展开零请求/三种关闭方式/池类型归组/余额构成/返赠脚注/重置单位与跨日格式/判定级断言：tier 三档·专属池正例·活重置·零上限·读失败·全程缺 key 警告）** + `composer-slot-gate.mjs` + `duplication-gate.mjs` 3 个克隆全在白名单；剩余若做：三档开关测试 + `docs.test.mjs` |

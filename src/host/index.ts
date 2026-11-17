@@ -40,6 +40,8 @@ import { createApiKeyStore } from "./api-key-store.ts";
 import { createRaccoonStore } from "./raccoon-store.ts";
 import { createFileRaccoonStore } from "./raccoon-switch-store.ts";
 import { createFileRaccoonWebStore } from "./raccoon-web-store.ts";
+import { createFileRaccoonDesktopStore } from "./raccoon-desktop-store.ts";
+import { readRaccoonDesktopCredential } from "./raccoon-desktop-creds.ts";
 import { createFileRaccoonRosterSeenStore } from "./raccoon-roster-seen-store.ts";
 import { createRaccoonPublisher } from "./raccoon-publish.ts";
 import { createProviderPublisher } from "./provider-publish.ts";
@@ -224,15 +226,29 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
 
   // ── Second upstream provider: Raccoon Work (商汤小浣熊) — ROADMAP §6.1 ──
   // A fully independent credential + registration pair. It NEVER touches the
-  // Token Plan publisher's state (its own `createRaccoonPublisher`), and the
-  // desktop `~/.box-agent` token route is rejected by design (§6.1.1): the
-  // credential is only ever the DSH credentials-service reference that the
-  // panel's self-built QR login writes. The switch is opt-in default OFF —
-  // a Host that never touches the Raccoon tab registers no Raccoon provider.
-  const raccoonStore = createRaccoonStore({
-    credentials: () => ctx.get("credentials") ?? null
-  });
+  // Token Plan publisher's state (its own `createRaccoonPublisher`). The
+  // credential is either the DSH credentials-service reference the panel's
+  // self-built QR login writes, or — with the read-only switch below on —
+  // the official App's own access token, viewed but never copied, refreshed,
+  // or rewritten (§6.1.1 keeps the write-back REJECTED: refreshing burns the
+  // App's single-use token; §6.1.11 allows the read: the App's access token is
+  // a 30-day JWT, so reading needs none of that). The provider switch is
+  // opt-in default OFF — a Host that never touches the Raccoon tab registers
+  // no Raccoon provider.
   const raccoonSwitch = createFileRaccoonStore({ profile, logger: ctx.logger });
+  // The read-only official-App source (§6.1.11), also default OFF: this switch
+  // gates whether the Host may look at `~/.box-agent/config/auth.json` at all.
+  // It is not a source selector — `raccoon-store.ts` answers
+  // "fresh desktop file, else the scanned pair" per read, so no login is ever
+  // replaced by a toggle and turning it off costs nothing to undo.
+  const raccoonDesktopSwitch = createFileRaccoonDesktopStore({ profile, logger: ctx.logger });
+  const raccoonStore = createRaccoonStore({
+    credentials: () => ctx.get("credentials") ?? null,
+    desktop: {
+      enabled: () => raccoonDesktopSwitch.enabled(),
+      read: () => readRaccoonDesktopCredential()
+    }
+  });
   // The web-search mount reuses the SAME credential chain as the Raccoon
   // provider (ROADMAP §6.1.7): one QR sign-in, one token, no separate config.
   const resolveRaccoonToken = async () => {
@@ -352,6 +368,9 @@ function apply(ctx: any, config: any = {}, deps: HostDeps = {}) {
     // absence as the state (`webSearchRestore?: () => void`).
     resolveRaccoonToken,
     webSearchStore: raccoonWebStore,
+    // The panel's "官方客户端直连" row reads and writes this switch; the
+    // credential precedence itself lives in the store, not here.
+    raccoonDesktopSwitch,
     webSearchRestore: { current: null },
     // The roster's first-sighting history: read by the Raccoon route's status
     // model so the pill can mark a model the gateway added after the user's

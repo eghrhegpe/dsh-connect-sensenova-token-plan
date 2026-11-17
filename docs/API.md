@@ -127,13 +127,14 @@
 `{ "drawModelId": "sensenova-u1.5-lite" }`（或 `null` = 自动选择）—— 把出图模型偏好写入同一个 `draw.json`。生效时机与开关相同：保存后走同一段 `reconcileDrawTool` 重新注册，重注册时重读偏好，用它覆盖 `cordis.patch.yml` 的 `drawModelId`（优先级：面板 > 配置；面板清除后回落配置，配置也为空则自动取目录第一个出图模型），因此模型偏好在同一会话内即刻对工具生效。非空字符串之外的非 null 值返回 400；跨域返回 403。`{ "forget": true }` **仅清除出图开关**的面板保存值，并**刻意保留**模型偏好——`src/host/draw-store.ts` 的 `forget()` 用现有 `modelId` 重写该行，重置模型偏好的入口是显式传 `drawModelId`（`src/host/routes/draw.ts` 未暴露 `forgetModel`）；别把 `forget` 读成「重置全部」。
 
 ### `GET /api/dsh-connect-sensenova-token-plan/raccoon`
-小浣熊（第二上游，`sensenova-raccoon`，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §5.5）面板轮询的去密状态：登录态（`loggedIn` / `loginStatus` / `scanUrl` / `scanCode`）、余额与凭证时钟、生效的开关与推送模型数、以及 `webSearchEnabled` 的生效值与来源。`?debug=1`（**仅 GET 可用**）额外附 401 分诊脚手架六字段（`accessTokenPrefix` / `credentialSource` / `raccoonEnvShadow` / `envCredentialFingerprint` / `accessTokenFingerprint` / `hostProxyEnv`，其中 `hostProxyEnv` 做掩码），POST 分支从不携带——脚手架只经显式 GET 出盘；`balanceDetail` 是常规失败详情字段，GET/POST 都会随状态带出，不在脚手架内。
+小浣熊（第二上游，`sensenova-raccoon`，见 [ARCHITECTURE.md](./ARCHITECTURE.md) §5.5）面板轮询的去密状态：登录态（`loggedIn` / `loginStatus` / `scanUrl` / `scanCode`）、余额与凭证时钟、生效的开关与推送模型数、以及 `webSearchEnabled` 的生效值与来源。`credentialOrigin` 说**现在是谁的登录在服务**（`desktop-file` = 官方桌面客户端的 access token，只读视图，见 [ROADMAP.md](./ROADMAP.md) §6.1.11；`qr-scan` = 本插件自己扫码拿到的）；`desktop` 是那条只读来源自身的状态 `{ enabled, available, reason?, expiresAtMs? }`，`reason` 只给类别（`missing`/`unreadable`/`too_large`/`malformed`/`no_token`/`no_expiry`/`expired`），路径与 token 永不出镜；Host 未接线该来源时 `desktop` 缺席，面板因此整行不渲染。`?debug=1`（**仅 GET 可用**）额外附 401 分诊脚手架六字段（`accessTokenPrefix` / `credentialSource` / `raccoonEnvShadow` / `envCredentialFingerprint` / `accessTokenFingerprint` / `hostProxyEnv`，其中 `hostProxyEnv` 做掩码），POST 分支从不携带——脚手架只经显式 GET 出盘；`balanceDetail` 是常规失败详情字段，GET/POST 都会随状态带出，不在脚手架内。
 
 ### `POST /api/dsh-connect-sensenova-token-plan/raccoon`
 一个端点、按 body 的 `action` 分发（与上面六条 Token Plan 路由的「一资源一路由」不同；请求体上限 **2 KB**，跨域 403，未知 action 400）：
 
 - `{ "action": "switch", "enabled": boolean }` —— 小浣熊 provider 开关；保存后**同一请求内**用当前名单（live 目录或内置备用，经面板允许清单过滤）重新发布 provider。
 - `{ "action": "webSearch", "enabled": boolean }` —— 联网搜索接管开关；保存后 reconcile `ctx.web` 的 `searchProviderId`（无 `web` 服务的 Host 上仅落库、下次启动生效）。
+- `{ "action": "desktop", "enabled": boolean }` —— 官方客户端**只读**来源的开关（§6.1.11）：写的是本插件私有状态文件 `raccoon-desktop.json`，**不动**官方客户端的任何文件、也不动扫码凭据；保存后与 `switch` 一样当场用当前名单重新发布 provider（描述符的请求头是按凭据定型的，来源换了必须重建）。非布尔 `enabled` 返回 400。
 - `{ "action": "models", "enabledModelIds": string[] }` —— 小浣熊的模型允许清单（空数组 = 全推；上限 500，超出 400），保存后重新发布。
 - `{ "action": "login" }` —— 发起微信扫码：返回 `status: "scanning"` 与 `scanUrl` / `scanCode`（二维码负载）；已有在途 scan 时**复用**它而非重发。凭据写入 DSH 凭据服务（与 Token Plan 的凭据**互不相通**，各走各的引用名）。
 - `{ "action": "logout" }` —— 忘记小浣熊凭据、清掉其专属缓存、并把 provider 发布落到 `not_configured` 卸载分支（仍经面板允许清单过滤，与其余发布路径同型）。

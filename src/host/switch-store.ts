@@ -48,6 +48,73 @@ export function normalizeSwitchEnabled(raw: unknown): boolean | null {
 }
 
 /** The shared plumbing a switch store hands to its per-store methods. */
+/**
+ * The four-method surface every BOOLEAN switch store has — `enabled` /
+ * `isSet` / `save` / `forget` — built once on top of {@link createSwitchStore}.
+ *
+ * Why this exists: `raccoon-web-store.ts` and `raccoon-desktop-store.ts` were
+ * line-identical except for three constants, which `duplication-gate.mjs`
+ * (rightly) reported as an unregistered clone. The shared shape was the bug,
+ * not the pairing — so the shape moved here and each store keeps only its own
+ * label, file name, and version constant.
+ *
+ * The payload is `{ version, enabled, updatedAt }`; `normalize` accepts ONLY
+ * the current version and reads a real boolean (`null` = never saved), the
+ * same "读容忍、写拒绝" discipline as ADR-006 for every other state file.
+ * @param {object} config - the store's identity.
+ * @param {string} config.label - the ADR-006 write-guard label.
+ * @param {string} [config.refusalLabel] - the human phrase in the non-boolean refusal
+ *   (defaults to `label`); each store's wording predates this factory and stays.
+ * @param {string} config.file - the state file name.
+ * @param {string} config.file - the state file name.
+ * @param {number} config.version - the only shape this build reads.
+ * @param {object} [options] - {@link StoreOptions} (profile, dir, ttlMs, logger).
+ * @returns {Promise<boolean|null> | (() => Promise<boolean|null>) | object} the four-method store.
+ */
+export function createBooleanSwitchStore(config: { label: string; file: string; version: number; refusalLabel?: string }, options: any = {}) {
+  const { label, file, version, refusalLabel = label } = config;
+  const base = createSwitchStore<{ enabled: boolean | null }>({
+    label,
+    file,
+    version,
+    knownVersions: [version],
+    normalize: (raw) => {
+      const source = (raw && typeof raw === "object" ? raw : {}) as { version?: unknown; enabled?: unknown };
+      if (source.version !== version) return null;
+      return { enabled: normalizeSwitchEnabled(source.enabled) };
+    },
+    writeInherited: (value) => ({ version, enabled: value.enabled, updatedAt: new Date().toISOString() }),
+  }, options);
+  const read = () => base.read();
+  const write = async (payload: object) => {
+    const refusal = await base.writePayload(payload);
+    if (refusal !== null) throw new Error(refusal);
+  };
+
+  return {
+    /** The saved switch value; `null` = never saved (the config default rules). */
+    async enabled() {
+      return (await read())?.enabled ?? null;
+    },
+    /** Whether the panel has ever saved a value here. */
+    async isSet() {
+      return (await read()) !== null;
+    },
+    /** Persist a switch value (atomic). A non-boolean is refused, not coerced. */
+    async save(value: boolean) {
+      const enabled = normalizeSwitchEnabled(value);
+      if (enabled === null) throw new TypeError(refusalLabel + " expects a boolean");
+      await write({ version, enabled, updatedAt: new Date().toISOString() });
+      base.remember({ enabled });
+    },
+    /** Forget the panel-saved value. */
+    async forget() {
+      await write({ version, updatedAt: new Date().toISOString() });
+      base.remember(null);
+    }
+  };
+}
+
 export interface SwitchStoreBase<T> {
   /** The parsed record, or `null` when nothing is set. */
   read(): Promise<T | null>;

@@ -91,11 +91,30 @@ function qrImageOf(scanUrl: string | null | undefined, tt: Tt): unknown {
  * @param {() => void} props.onLogout - forget the credential.
  * @param {(enabled: boolean) => void} props.onSwitch - flip the opt-in switch.
  * @param {(enabled: boolean) => void} props.onWebSearch - flip the web_search opt-in.
+ * @param {(enabled: boolean) => void} props.onDesktop - flip the official-App read-only source (§6.1.11).
  * @param {(ids: string[]) => void} props.onIds - save the pushed-model list.
  * @returns {unknown} the tab's card tree.
  */
+/**
+ * Why the App's file is not an usable credential, in words. The Host sends a
+ * CATEGORY and this table is the only thing that turns it into a sentence —
+ * printing the code itself is the failure 0.8.6 removed for the scan page
+ * (a reader handed `no_expiry` has no next step). An unmapped category (a
+ * future Host, a category this build never heard of) falls back to the generic
+ * line rather than showing the code.
+ */
+const RACCOON_DESKTOP_REASON_KEYS: Record<string, Parameters<Tt>[0]> = {
+  missing: "raccoon.desktopReasonMissing",
+  unreadable: "raccoon.desktopReasonUnreadable",
+  too_large: "raccoon.desktopReasonTooLarge",
+  malformed: "raccoon.desktopReasonMalformed",
+  no_token: "raccoon.desktopReasonNoToken",
+  no_expiry: "raccoon.desktopReasonNoExpiry",
+  expired: "raccoon.desktopReasonExpired"
+};
+
 export function RaccoonCard({
-  state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch
+  state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch, onDesktop
 }: {
   state: RaccoonState | null;
   tt: Tt;
@@ -108,12 +127,17 @@ export function RaccoonCard({
   onSwitch: (enabled: boolean) => void;
   onIds: (ids: string[]) => void;
   onWebSearch: (enabled: boolean) => void;
+  onDesktop: (enabled: boolean) => void;
 }): unknown {
   const enabled = state?.enabled === true;
   const loggedIn = state?.loggedIn === true;
   // A scan is waiting on the phone. The ROUTE owns that fact (and the walk's
   // deadline), so nothing here holds a timer.
   const scanning = state?.loginStatus === "scanning";
+  // The read-only App source (§6.1.11), bound once: the row, the caption, and
+  // the reason wording all read the same object, and `state` is optional
+  // everywhere else in this component.
+  const desktop = state?.desktop ?? null;
   // What disables the login controls. The POST itself returns at once, so the
   // WAIT is the scan, not the request: without it in the condition the button
   // would re-enable while its own QR is still on screen.
@@ -189,11 +213,18 @@ export function RaccoonCard({
       clockParts.push(h("span", { key: "exp" }, format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })));
     }
     if (refreshAt !== null) {
-      const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
-      clockParts.push(h("span", {
-        key: "refresh",
-        title: format(tt("raccoon.refreshTip"), { days })
-      }, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
+      if (refreshAt <= Date.now()) {
+        // The window is already closed: "续期至 <past date>" (with the {days}
+        // tooltip clamped to 1) would read as an open renewal — it is not.
+        // One fact instead: it is closed, and a re-scan is the only way in.
+        clockParts.push(h("span", { key: "refresh" }, ` · ${tt("raccoon.refreshClosed")}`));
+      } else {
+        const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
+        clockParts.push(h("span", {
+          key: "refresh",
+          title: format(tt("raccoon.refreshTip"), { days })
+        }, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
+      }
     }
   }
 
@@ -296,7 +327,37 @@ export function RaccoonCard({
         busy: waiting,
         label: tt("raccoon.webSearch"),
         title: tt("raccoon.webSearchTitle")
-      }))
+      })),
+      // The read-only official-App source (§6.1.11). It is a THIRD SUPPLIER of
+      // the one credential slot, not a "switch between two logins" control:
+      // the store answers with a fresh App file when it can and with the
+      // scanned pair otherwise, so this row never replaces, copies, or deletes
+      // anybody's login — which is why it can sit beside the other two instead
+      // of competing with them. Hidden entirely when this Host has no such
+      // switch wired, so a dead control is never offered.
+      desktop === null
+        ? null
+        : h("div", { style: { marginTop: 8 } }, h(ToggleSwitch, {
+            checked: desktop.enabled === true,
+            onChange: () => onDesktop(desktop.enabled !== true),
+            busy: waiting,
+            label: tt("raccoon.desktop"),
+            title: tt("raccoon.desktopTitle")
+          })),
+      // What the switch above is actually achieving, in one line: serving from
+      // the App / the switch is on but nothing usable was found (with the
+      // REASON spelled out, never the raw code) / nothing to say.
+      desktop?.enabled !== true
+        ? null
+        : h(
+            "div",
+            { style: { ...S.statCaption, marginTop: 6 }, role: "status" },
+            desktop.available === true
+              ? tt("raccoon.desktopLive")
+              : format(tt("raccoon.desktopIdle"), {
+                  reason: tt(RACCOON_DESKTOP_REASON_KEYS[desktop.reason ?? ""] ?? "raccoon.desktopReasonUnknown")
+                })
+          )
     ),
     loginNote !== null
       ? h("div", { style: { ...S.formNote, fontSize: 12, marginTop: 8 }, role: "status" }, loginNote)

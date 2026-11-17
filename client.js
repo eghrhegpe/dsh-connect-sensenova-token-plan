@@ -207,6 +207,19 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.webSearchTitle": "开启后 DSH 的联网搜索工具改用小浣熊凭据搜索，不需要你再给搜索端点配 key；前提是小浣熊已登录。",
 			"raccoon.switchError": "切换失败：{error}",
 			"raccoon.webSearchError": "联网搜索开关失败：{error}",
+			"raccoon.desktop": "官方客户端直连（只读）",
+			"raccoon.desktopTitle": "开着就直接复用本机「商汤小浣熊」桌面客户端已登录的 access token：零配置、不用扫码。本插件只读那个文件——从不刷新它，也从不写回；实测那枚 token 有效期 30 天。关掉开关立刻回到扫码登录，两边互不影响，谁都不会被登出。",
+			"raccoon.desktopLive": "正在使用官方客户端的登录态（只读；本插件不会刷新或改写它）。",
+			"raccoon.desktopIdle": "开关已开，但本机现在没有可用的官方客户端登录态——仍在使用扫码登录。原因：{reason}",
+			"raccoon.desktopReasonMissing": "没找到官方客户端的登录文件（未安装，或从未登录过）",
+			"raccoon.desktopReasonUnreadable": "登录文件读不了（权限，或正被改写）",
+			"raccoon.desktopReasonTooLarge": "登录文件异常大，已跳过",
+			"raccoon.desktopReasonMalformed": "登录文件不是合法 JSON",
+			"raccoon.desktopReasonNoToken": "登录文件里没有 access token",
+			"raccoon.desktopReasonNoExpiry": "token 没有可校验的有效期声明，已跳过",
+			"raccoon.desktopReasonExpired": "token 已过期——打开一次官方客户端，让它自己续上即可",
+			"raccoon.desktopReasonUnknown": "未知原因",
+			"raccoon.desktopError": "官方客户端直连开关失败：{error}",
 			"raccoon.login": "微信扫码登录",
 			"raccoon.loggingIn": "等待扫码确认…",
 			"raccoon.logout": "退出登录",
@@ -226,6 +239,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.expiresAt": "凭据有效至 {date}",
 			"raccoon.refreshUntil": "续期至 {date}",
 			"raccoon.refreshTip": "{days} 天内免重扫",
+			"raccoon.refreshClosed": "续期窗口已关闭，需重新扫码登录",
 			"raccoon.models": "模型（{count}）",
 			"raccoon.modelsFallback": "网关目录暂不可读——以下为内置备用模型",
 			"raccoon.modelsEmpty": "网关当前没有开放可见模型——以下为内置备用模型",
@@ -425,6 +439,19 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.webSearch": "Enable web search (Raccoon)",
 			"raccoon.webSearchTitle": "On makes DSH's web search tool search through the Raccoon credential, so you no longer need a key for the search endpoint; Raccoon must be signed in.",
 			"raccoon.webSearchError": "Web search switch failed: {error}",
+			"raccoon.desktop": "Official desktop app (read-only)",
+			"raccoon.desktopTitle": "On reuses the access token this machine's Raccoon desktop app already signed in with — zero setup, no scan. The plugin only READS that file: it never refreshes the token and never writes the file back (measured 30-day token). Turning it off hands control straight back to your QR sign-in; neither login replaces or logs out the other.",
+			"raccoon.desktopLive": "Serving from the official desktop app's sign-in (read-only; this plugin never refreshes or rewrites it).",
+			"raccoon.desktopIdle": "The switch is on, but no usable desktop-app sign-in was found — still serving from your QR sign-in. Reason: {reason}",
+			"raccoon.desktopReasonMissing": "the desktop app's sign-in file was not found (not installed, or never signed in)",
+			"raccoon.desktopReasonUnreadable": "the file could not be read (permissions, or mid-rewrite)",
+			"raccoon.desktopReasonTooLarge": "the file is implausibly large, so it was skipped",
+			"raccoon.desktopReasonMalformed": "the file is not valid JSON",
+			"raccoon.desktopReasonNoToken": "the file carries no access token",
+			"raccoon.desktopReasonNoExpiry": "the token states no verifiable expiry, so it was skipped",
+			"raccoon.desktopReasonExpired": "the token has lapsed — open the desktop app once and it renews itself",
+			"raccoon.desktopReasonUnknown": "unknown",
+			"raccoon.desktopError": "Official-app source switch failed: {error}",
 			"raccoon.switchError": "Switch failed: {error}",
 			"raccoon.login": "Sign in with WeChat QR",
 			"raccoon.loggingIn": "Waiting for QR confirmation…",
@@ -445,6 +472,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			"raccoon.expiresAt": "Credential valid until {date}",
 			"raccoon.refreshUntil": "Refresh until {date}",
 			"raccoon.refreshTip": "No re-scan for {days} days",
+			"raccoon.refreshClosed": "Renewal window closed; re-scan to log in",
 			"raccoon.models": "Models ({count})",
 			"raccoon.modelsFallback": "Live catalogue unreadable — showing the built-in roster",
 			"raccoon.modelsEmpty": "The gateway offers no visible models right now — showing the built-in roster",
@@ -3503,28 +3531,11 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			} }, scanUrl);
 		}
 	}
-	/**
-	* The Raccoon tab's card tree.
-	* @param {object} props
-	* @param {RaccoonState|null} props.state - the route's last answer, or null
-	*   before the first one lands.
-	* @param {Tt} props.tt - the dictionary.
-	* @param {boolean} props.loginBusy - the login POST is in flight (short: the
-	*   route answers as soon as it has issued a scan).
-	* @param {string|null} props.loginNote - a login/switch error or walk outcome.
-	* @param {string|null} props.modelsNote - the pushed-model save's result.
-	* @param {boolean} props.idsBusy - a pushed-model save is in flight.
-	* @param {() => void} props.onLogin - start a scan.
-	* @param {() => void} props.onLogout - forget the credential.
-	* @param {(enabled: boolean) => void} props.onSwitch - flip the opt-in switch.
-	* @param {(enabled: boolean) => void} props.onWebSearch - flip the web_search opt-in.
-	* @param {(ids: string[]) => void} props.onIds - save the pushed-model list.
-	* @returns {unknown} the tab's card tree.
-	*/
-	function RaccoonCard({ state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch }) {
+	function RaccoonCard({ state, tt, loginBusy, loginNote, modelsNote, idsBusy, onLogin, onLogout, onSwitch, onIds, onWebSearch, onDesktop }) {
 		const enabled = state?.enabled === true;
 		const loggedIn = state?.loggedIn === true;
 		const scanning = state?.loginStatus === "scanning";
+		const desktop = state?.desktop ?? null;
 		const waiting = loginBusy || scanning;
 		const nick = String(state?.nickname ?? "");
 		const models = Array.isArray(state?.models) ? state.models : [];
@@ -3558,11 +3569,14 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		if (loggedIn) {
 			if (expiresAt !== null) clockParts.push(h("span", { key: "exp" }, format(tt("raccoon.expiresAt"), { date: when(expiresAt / 1e3) })));
 			if (refreshAt !== null) {
-				const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
-				clockParts.push(h("span", {
-					key: "refresh",
-					title: format(tt("raccoon.refreshTip"), { days })
-				}, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
+				if (refreshAt <= Date.now()) clockParts.push(h("span", { key: "refresh" }, ` · ${tt("raccoon.refreshClosed")}`));
+				else {
+					const days = Math.max(1, Math.round((refreshAt - Date.now()) / DAY_MS));
+					clockParts.push(h("span", {
+						key: "refresh",
+						title: format(tt("raccoon.refreshTip"), { days })
+					}, ` · ${format(tt("raccoon.refreshUntil"), { date: when(refreshAt / 1e3) })}`));
+				}
 			}
 		}
 		const loginStatus = loggedIn ? state?.credentialExpired === true ? {
@@ -3622,7 +3636,19 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			busy: waiting,
 			label: tt("raccoon.webSearch"),
 			title: tt("raccoon.webSearchTitle")
-		}))), loginNote !== null ? h("div", {
+		})), desktop === null ? null : h("div", { style: { marginTop: 8 } }, h(ToggleSwitch, {
+			checked: desktop.enabled === true,
+			onChange: () => onDesktop(desktop.enabled !== true),
+			busy: waiting,
+			label: tt("raccoon.desktop"),
+			title: tt("raccoon.desktopTitle")
+		})), desktop?.enabled !== true ? null : h("div", {
+			style: {
+				...S.statCaption,
+				marginTop: 6
+			},
+			role: "status"
+		}, desktop.available === true ? tt("raccoon.desktopLive") : format(tt("raccoon.desktopIdle"), { reason: tt(RACCOON_DESKTOP_REASON_KEYS[desktop.reason ?? ""] ?? "raccoon.desktopReasonUnknown") }))), loginNote !== null ? h("div", {
 			style: {
 				...S.formNote,
 				fontSize: 12,
@@ -3680,7 +3706,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			style: S.externalLink
 		}, tt("raccoon.clientLink")));
 	}
-	var QR_SIZE, DAY_MS;
+	var QR_SIZE, DAY_MS, RACCOON_DESKTOP_REASON_KEYS;
 	var init_raccoon_card = __esmMin((() => {
 		init_format();
 		init_models();
@@ -3692,6 +3718,15 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		init_styles();
 		QR_SIZE = 208;
 		DAY_MS = 864e5;
+		RACCOON_DESKTOP_REASON_KEYS = {
+			missing: "raccoon.desktopReasonMissing",
+			unreadable: "raccoon.desktopReasonUnreadable",
+			too_large: "raccoon.desktopReasonTooLarge",
+			malformed: "raccoon.desktopReasonMalformed",
+			no_token: "raccoon.desktopReasonNoToken",
+			no_expiry: "raccoon.desktopReasonNoExpiry",
+			expired: "raccoon.desktopReasonExpired"
+		};
 	}));
 
 //#endregion
@@ -3902,6 +3937,25 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 				if (alive.current) setLoginNote(format(tt("raccoon.webSearchError"), { error: errorText(why) }));
 			}
 		}, [tt]);
+		const toggleDesktop = useCallback(async (enabled) => {
+			setLoginNote(null);
+			try {
+				const body = await postJsonOrThrow(RACCOON_PATH, {
+					action: "desktop",
+					enabled
+				});
+				if (alive.current) setState((current) => {
+					if (!current) return current;
+					const next = body?.desktop;
+					return next ? {
+						...current,
+						desktop: next
+					} : current;
+				});
+			} catch (why) {
+				if (alive.current) setLoginNote(format(tt("raccoon.desktopError"), { error: errorText(why) }));
+			}
+		}, [tt]);
 		const startLogin = useCallback(async () => {
 			setLoginBusy(true);
 			setLoginNote(null);
@@ -3973,7 +4027,8 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			onLogout: () => void logout(),
 			onSwitch: (enabled) => void toggle(enabled),
 			onIds: (ids) => void saveIds(ids),
-			onWebSearch: (enabled) => void toggleWebSearch(enabled)
+			onWebSearch: (enabled) => void toggleWebSearch(enabled),
+			onDesktop: (enabled) => void toggleDesktop(enabled)
 		});
 	}
 	var RACCOON_POLL_MS$1, RACCOON_SCAN_POLL_MS;

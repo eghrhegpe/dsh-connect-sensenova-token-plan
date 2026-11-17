@@ -277,6 +277,23 @@ export interface RaccoonModel {
  * it a real declaration on the Host side too; before this, only the panel
  * carried the shape, with nothing to compare it against.
  */
+/**
+ * The read-only official-App source (§6.1.11), as the `/raccoon` route reports
+ * it. Declared apart from `RaccoonState` because its members are not route
+ * fields: `test/raccoon-status.test.mjs` 的 G 组把接口里的每个 `key:` 当一条
+ * 路由字段去核，嵌套字面量会凭空多出四个「声明了但路由不发」的幽灵键。
+ */
+export interface RaccoonDesktopState {
+  /** The panel switch: may the Host look at the App's file at all? */
+  enabled: boolean;
+  /** Is the App's credential usable right now (fresh, parsed, unexpired)? */
+  available: boolean;
+  /** Why not — a CATEGORY only (`missing`/`expired`/`malformed`/…), never a path or token. */
+  reason?: string;
+  /** The App token's own expiry, when it is usable. */
+  expiresAtMs?: number | null;
+}
+
 export interface RaccoonState {
   ok?: boolean;
   enabled?: boolean;
@@ -286,6 +303,24 @@ export interface RaccoonState {
    * older Host: the tab then keeps the switch OFF.
    */
   webSearchEnabled?: boolean;
+  /**
+   * Whose login is serving requests right now (ROADMAP §6.1.11):
+   * `"desktop-file"` — the official desktop App's own access token, read
+   * through a view this plugin never writes and never refreshes — or
+   * `"qr-scan"`, the credential this plugin's own scan produced. Absent on an
+   * older Host. Not a mode the user is locked into: it reports the store's
+   * per-read precedence (fresh App file → else the scanned pair).
+   */
+  credentialOrigin?: "desktop-file" | "qr-scan";
+  /**
+   * The read-only official-App source (§6.1.11). Absent (or `null`) when the
+   * Host has no such switch wired — the tab then hides the row rather than
+   * offering a dead control. `reason` is a CATEGORY
+   * (`missing`/`unreadable`/`too_large`/`malformed`/`no_token`/`no_expiry`/`expired`),
+   * never a path or anything derived from the token: the tab words it, it is
+   * never printed raw (PITFALLS: 原因码不再原样上屏).
+   */
+  desktop?: RaccoonDesktopState | null;
   switchSource?: string;
   loggedIn?: boolean;
   nickname?: string;

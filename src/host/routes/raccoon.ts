@@ -1,9 +1,9 @@
 /**
  * The Raccoon route (ROADMAP §6.1 "second upstream provider"): one GET
  * reporting the secret-free state a tab renders, one POST carrying `{ action }`
- * for the five panel actions (provider switch, web search, pushed models, QR
- * login, logout). The QR login is a single server-side walk (no
- * client long-poll); the credential never touches this plugin's directory,
+ * for the six panel actions (provider switch, web search, the official-App
+ * read-only source, pushed models, QR login, logout). The QR login is a single
+ * server-side walk (no client long-poll); the credential never touches this plugin's directory,
  * git, or logs — it goes straight to the DSH credentials service through
  * `raccoonStore`.
  *
@@ -53,17 +53,18 @@ export const RACCOON_PATH = `/api/${name}/raccoon`;
 /**
  * Register the Raccoon route. Wiring subset: `settings`, `raccoonStore`,
  * `raccoonSwitch`, `raccoonPublisher`, `raccoonCache`, `webSearchStore`,
- * `raccoonRosterSeen`, `reconcileWebSearch`.
+ * `raccoonRosterSeen`, `reconcileWebSearch`, `raccoonDesktopSwitch`.
  * @param ctx - the host root context (only `ctx.webServer` is used here).
- * @param {Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "raccoonRosterSeen" | "reconcileWebSearch">} wiring
+ * @param {Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "raccoonRosterSeen" | "reconcileWebSearch"
+ *   | "raccoonDesktopSwitch">} wiring
  *   - the Raccoon half's subset, as assembled by `apply()` in `index.ts`. The
  *   `Pick` is what makes "changing the Raccoon line must not affect the Token
  *   Plan one" (ARCHITECTURE §5.5) a compile-time fact rather than a review
  *   promise: this route physically cannot reach a Token Plan field.
  * @returns {Function} the `off()` unregister callback.
  */
-export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "raccoonRosterSeen" | "reconcileWebSearch">) {
-  const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache, webSearchStore, raccoonRosterSeen, reconcileWebSearch } = wiring;
+export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" | "raccoonStore" | "raccoonSwitch" | "raccoonPublisher" | "raccoonCache" | "webSearchStore" | "raccoonRosterSeen" | "reconcileWebSearch" | "raccoonDesktopSwitch">) {
+  const { settings, raccoonStore, raccoonSwitch, raccoonPublisher, raccoonCache, webSearchStore, raccoonRosterSeen, reconcileWebSearch, raccoonDesktopSwitch } = wiring;
 
   // The Raccoon gateway reads (balance + catalogue) go through the SAME
   // coalescing cache primitive the console route uses, so a scan's fast poll
@@ -190,25 +191,35 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
         const state = await raccoonState();
         writeJson(response, 200, { ...state, ...extra }, { "cache-control": "no-store" });
       };
-      // The publish payload every registration-driving action shares lives at the
-      // ROUTE level (`collectRaccoonRows` above): `switch`, `models` and the
-      // settled `login` walk drive the same publisher with it. The walk's
-      // `onLoggedIn` hook is registered once at construction, rendering the
-      // old per-login-branch override dead.
-      if (action === "switch") {
+      /**
+       * The whole flow BOTH boolean switches share (`switch` and `desktop`):
+       * validate the flag, guard an unwired store, save, drive the publisher with
+       * the CURRENT roster, then answer with the fresh state — a 400 for a
+       * non-boolean, `ok: false` in the body for the refusals the panel words, and
+       * no `ok` override on success. It is a closure over `body`/`action`/`answer`
+       * rather than two branch bodies that differ only by their store:
+       * `duplication-gate.mjs` counts such a pair as one clone, and the reason it
+       * is right is §343 — a fix that lands in one branch and not the other is
+       * invisible to the reader of either. A missing token is NOT a refusal: it
+       * degrades to a clean release inside the publisher (the `not_configured
+       * reason`), so neither switch needs a login to exist.
+       * @param {any} store - the switch store (`null`/`undefined` = unwired).
+       * @param {string} unavailable - the wording when the store is unwired.
+       * @returns {Promise<void>} the response is always written on this path.
+       */
+      const booleanSwitch = async (store: any, unavailable: string) => {
         if (typeof body.value.enabled !== "boolean") {
-          writeJson(response, 400, { ok: false, error: "expected { action: \"switch\", enabled: boolean }" }, { "cache-control": "no-store" });
+          writeJson(response, 400, { ok: false, error: `expected { action: "${action}", enabled: boolean }` }, { "cache-control": "no-store" });
           return;
         }
-        if (raccoonSwitch === null || raccoonSwitch === undefined) {
-          await answer({ ok: false, error: "the raccoon switch is unavailable" });
+        if (store === null || store === undefined) {
+          await answer({ ok: false, error: unavailable });
           return;
         }
         try {
-          await raccoonSwitch.save(body.value.enabled);
+          await store.save(body.value.enabled);
           // Drive the registration with the CURRENT roster: the switch decides
-          // whether the models are offered at all. A missing token degrades to
-          // a clean release inside the publisher (the `not_configured` reason).
+          // whether the models are offered at all.
           if (raccoonPublisher !== null && raccoonPublisher !== undefined) {
             const { rows, officeIdentity } = await collectRaccoonRows(null);
             await raccoonPublisher.publish(rows, officeIdentity);
@@ -218,6 +229,15 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
           return;
         }
         await answer();
+      };
+
+      // The publish payload every registration-driving action shares lives at the
+      // ROUTE level (`collectRaccoonRows` above): `switch`, `models` and the
+      // settled `login` walk drive the same publisher with it. The walk's
+      // `onLoggedIn` hook is registered once at construction, rendering the
+      // old per-login-branch override dead.
+      if (action === "switch") {
+        await booleanSwitch(raccoonSwitch, "the raccoon switch is unavailable");
         return;
       }
 
@@ -245,6 +265,20 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
           return;
         }
         await answer();
+        return;
+      }
+
+      // ── desktop: the read-only official-App source switch (§6.1.11) ──
+      // A flip changes WHICH login the store answers with, so the published
+      // descriptors have to be rebuilt exactly as the provider `switch` above
+      // rebuilds them: the per-request token follows the store on its own, but a
+      // descriptor's headers are fixed at publish time — an `X-Org-Code` taken
+      // from the QR credential must not ride on after the App's credential takes
+      // over (that literal is a measured 400, §6.1.11). Nothing on this path can
+      // log anyone out of anything: the store owns the scanned pair, the App owns
+      // its file, and this branch writes neither.
+      if (action === "desktop") {
+        await booleanSwitch(raccoonDesktopSwitch, "the official-App source is unavailable");
         return;
       }
 
@@ -355,7 +389,7 @@ export function registerRaccoonRoute(ctx: any, wiring: Pick<Wiring, "settings" |
         return;
       }
 
-      writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"webSearch\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
+      writeJson(response, 400, { ok: false, error: "expected { action: \"switch\"|\"webSearch\"|\"desktop\"|\"models\"|\"login\"|\"logout\" }" }, { "cache-control": "no-store" });
     }, settings.allowedHosts)
   });
 

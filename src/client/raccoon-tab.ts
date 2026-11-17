@@ -364,6 +364,28 @@ export function RaccoonTab({
     }
   }, [tt]);
 
+  // The official-App read-only source (§6.1.11). One POST saves the switch and
+  // re-reads the state the route answers with, exactly like the web-search
+  // switch: the precedence rule (App file fresh → use it, else the scanned
+  // pair) lives in the Host's store, never here, so the tab cannot disagree
+  // with what a request will actually carry.
+  const toggleDesktop = useCallback(async (enabled: boolean) => {
+    setLoginNote(null);
+    try {
+      const body = await postJsonOrThrow(RACCOON_PATH, { action: "desktop", enabled });
+      if (alive.current) setState((current) => {
+        if (!current) return current;
+        const next = body?.desktop;
+        // A conditional spread, not an `??`: under exactOptionalPropertyTypes,
+        // writing `undefined` into a field is a DIFFERENT fact from leaving it
+        // alone, and "this Host said nothing" must keep the last answer.
+        return next ? { ...current, desktop: next as Exclude<RaccoonState["desktop"], undefined> } : current;
+      });
+    } catch (why) {
+      if (alive.current) setLoginNote(format(tt("raccoon.desktopError"), { error: errorText(why) }));
+    }
+  }, [tt]);
+
   const startLogin = useCallback(async () => {
     setLoginBusy(true);
     setLoginNote(null);
@@ -466,6 +488,7 @@ export function RaccoonTab({
     onLogout: () => void logout(),
     onSwitch: (enabled: boolean) => void toggle(enabled),
     onIds: (ids: string[]) => void saveIds(ids),
-    onWebSearch: (enabled: boolean) => void toggleWebSearch(enabled)
+    onWebSearch: (enabled: boolean) => void toggleWebSearch(enabled),
+    onDesktop: (enabled: boolean) => void toggleDesktop(enabled)
   });
 }

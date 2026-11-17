@@ -13,13 +13,30 @@
  * The load-bearing difference from the Token Plan store: the Raccoon refresh
  * token is SINGLE-USE (the server rotates BOTH tokens). A refresh therefore
  * always re-stores the whole pair (`save` after `refresh`), so the rotated
- * refresh token is not lost in flight. The desktop-file write-back route is
- * rejected by design (ROADMAP §6.1.1: it 401s and can log the user out of the
- * App), so this store is the ONLY owner of the credential.
+ * refresh token is not lost in flight.
  *
- * Precedence, per read: the credentials service, then this process's memory
- * (a Host with no credentials service). A `null` credentials service leaves
- * the credential in-memory only, so it is `ephemeral` (mirrors token-store).
+ * TWO SOURCES, ONE SLOT (ROADMAP §6.1.11). This store answers the same
+ * `resolve()` for two origins, and the distinction is load-bearing:
+ *
+ *   - `qr-scan` — the credential this plugin logged in and OWNS: refreshable,
+ *     `save`/`forget` apply, stored under `RACCOON_CREDENTIAL`;
+ *   - `desktop-file` — a READ-ONLY VIEW of the official App's own credential
+ *     (`raccoon-desktop-creds.ts`, opt-in switch off by default). The App owns
+ *     that file; this store must never refresh it, never `save()` over it, and
+ *     never copy it into the credentials service. `refresh()` refuses it
+ *     locally and `prepareForRequest()` short-circuits before any network
+ *     call — that is what keeps the write-back route (rejected since §6.1.1,
+ *     still rejected) unreachable from here.
+ *
+ * Precedence is per read, not a mode the user switches between: a switched-on,
+ * fresh desktop file wins; anything else (switch off, App closed, App rotated
+ * to an expired token) falls through to the scanned pair untouched, so turning
+ * the source off never costs a login and a working scan is never destroyed.
+ *
+ * Within OUR OWN slot, precedence per read is the credentials service, then
+ * this process's memory (a Host with no credentials service). A `null`
+ * credentials service leaves the credential in-memory only, so it is
+ * `ephemeral` (mirrors token-store).
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-store
  */
@@ -34,6 +51,7 @@ import {
 } from "./raccoon.ts";
 import type { RaccoonCodeValue } from "./raccoon.ts";
 import type { RaccoonStoreDeps } from "./types.ts";
+import { RACCOON_ORIGIN_DESKTOP, RACCOON_ORIGIN_QR } from "./raccoon-desktop-creds.ts";
 
 /** The reference name the credential pair is stored under. */
 export const RACCOON_CREDENTIAL_REF = "RACCOON_CREDENTIAL";
@@ -97,9 +115,9 @@ export function serializeRaccoonCredential(credential: { accessToken?: unknown; 
  *   `api-key-store`: the service may register after this plugin mounts).
  * @param {typeof fetch} [options.fetcher] - injected fetch for the refresh
  *   call (tests stub it; defaults to global `fetch`).
- * @returns {{save, forget, resolve, refresh, prepareForRequest, state}}
+ * @returns {{save, forget, resolve, origin, refresh, prepareForRequest, state, desktopState}}
  */
-export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStoreDeps = {}) {
+export function createRaccoonStore({ credentials = null, fetcher, desktop }: RaccoonStoreDeps = {}) {
   /** Fallback vault for a Host that has no credentials service. */
   const memory = new Map();
   /** Single-flight: a refresh already in flight is shared, never raced. */
@@ -122,6 +140,28 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
    * clears it, so a re-scan always re-opens the door.
    */
   let sessionDead = false;
+
+  /**
+   * The desktop file as a live credential, or `null` — the whole gate in one
+   * place so no call site can forget the switch. Any doubt reads as `null`
+   * (which means "answer from our own slot"), never as a failure: the scanned
+   * credential is the safer of the two answers when the file is in an
+   * unrecognised state.
+   * @returns {Promise<object|null>} `{ credential, expiresAtMs }` or null.
+   */
+  const desktopCredential = async () => {
+    if (typeof desktop?.read !== "function") return null;
+    try {
+      if (typeof desktop.enabled === "function" && (await desktop.enabled()) !== true) return null;
+      const outcome = await desktop.read();
+      if (outcome?.ok !== true) return null;
+      const accessToken = verbatim(outcome.credential?.accessToken, "");
+      if (accessToken === "") return null;
+      return { credential: outcome.credential, expiresAtMs: outcome.expiresAtMs };
+    } catch {
+      return null;
+    }
+  };
 
   const storeNow = async (credential: { accessToken?: unknown; refreshToken?: unknown; expiresAtMs?: unknown; officeIdentity?: unknown; nickname?: unknown }) => {
     const serialized = serializeRaccoonCredential(credential);
@@ -151,7 +191,9 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
 
     /**
      * Forget the stored credential (the panel's "logout"). Both the durable
-     * reference and the in-memory copy are cleared.
+     * reference and the in-memory copy are cleared. What it does NOT touch is
+     * the App's file — that credential is not ours to delete, and the desktop
+     * source has its own switch (§6.1.11).
      */
     async forget() {
       sessionDead = false;
@@ -168,22 +210,56 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
 
     /**
      * Resolve the live credential and where it came from.
-     * @returns {Promise<{credential: object|null, source: ("credentials"|"memory"|null)}>}
+     *
+     * `source` names the vault the answer came out of — `"desktop-file"` (the
+     * App's file, read-only), `"credentials"`, `"memory"`, or null.
+     * `origin` answers the question the panel badges: whose login is actually
+     * serving requests right now (`desktop-file` / `qr-scan`).
+     * @returns {Promise<{credential: object|null, source: ("desktop-file"|"credentials"|"memory"|null), origin: ("desktop-file"|"qr-scan"|null)}>}
      */
     async resolve() {
+      const fromApp = await desktopCredential();
+      if (fromApp !== null) {
+        return {
+          credential: { ...fromApp.credential, origin: RACCOON_ORIGIN_DESKTOP },
+          source: RACCOON_ORIGIN_DESKTOP,
+          origin: RACCOON_ORIGIN_DESKTOP
+        };
+      }
       try {
         const service = resolveCredentialsService(credentials);
         if (service !== null && typeof service.resolve === "function") {
           const resolved = await service.resolve(RACCOON_CREDENTIAL_REF).catch(() => undefined);
           const credential = parseRaccoonCredential(resolved?.value);
-          if (credential !== null) return { credential, source: "credentials" };
+          if (credential !== null) return { credential, source: "credentials", origin: RACCOON_ORIGIN_QR };
         }
       } catch {
         // No usable answer from the service: fall through to memory.
       }
       const held = parseRaccoonCredential(memory.get(RACCOON_CREDENTIAL_REF));
-      if (held !== null) return { credential: held, source: "memory" };
-      return { credential: null, source: null };
+      if (held !== null) return { credential: held, source: "memory", origin: RACCOON_ORIGIN_QR };
+      return { credential: null, source: null, origin: null };
+    },
+
+    /**
+     * The secret-free answer the panel needs about the desktop source: is the
+     * switch on, is the App's credential usable right now, and if not, why in
+     * category terms. Never carries a path, a token, or a size.
+     * @returns {Promise<{supported: boolean, enabled: boolean, available: boolean, reason?: string, expiresAtMs?: number|null}>}
+     *   `supported: false` when no desktop source was wired at all (the module
+     *   is absent, so the panel hides the row instead of showing a dead switch).
+     */
+    async desktopState() {
+      if (typeof desktop?.read !== "function") return { supported: false, enabled: false, available: false };
+      const enabled = typeof desktop.enabled === "function" ? (await desktop.enabled().catch(() => null)) === true : false;
+      if (!enabled) return { supported: true, enabled: false, available: false };
+      try {
+        const outcome = await desktop.read();
+        if (outcome?.ok === true) return { supported: true, enabled: true, available: true, expiresAtMs: outcome.expiresAtMs ?? null };
+        return { supported: true, enabled: true, available: false, ...(typeof outcome?.reason === "string" ? { reason: outcome.reason } : {}) };
+      } catch {
+        return { supported: true, enabled: true, available: false, reason: "unreadable" };
+      }
     },
 
     /**
@@ -200,7 +276,12 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
      * @param {number} [leadMs] - renew this long before expiry; defaults to 5 min.
      */
     async isExpired(leadMs = 5 * 60 * 1000) {
-      const { credential } = await this.resolve();
+      const { credential, origin } = await this.resolve();
+      // The App owns this credential; there is nothing here to renew. The
+      // reader already refused anything inside its freshness margin, and when
+      // the file does lapse the NEXT resolve() answers with the scanned pair —
+      // so "not expired" is the honest answer for the one we are serving.
+      if (origin === RACCOON_ORIGIN_DESKTOP) return false;
       if (credential === null) return true;
       if (sessionDead) return true;
       if (credential.expiresAtMs === undefined) return false;
@@ -220,6 +301,13 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
       // worth re-asking. Short-circuit BEFORE any network call, and report the
       // same code the gateway gave, so a caller that inspects the result sees
       // the truth rather than a synthetic "skipped".
+      // The App's credential is not ours to rotate, in either direction: a
+      // refresh would burn the single-use token behind it (§6.1.1) AND leave us
+      // holding the new one while the App still has the old. Refuse locally —
+      // this line is ABOVE the network call on purpose, so the gateway never
+      // sees a desktop-origin rotation attempt, and NO_REFRESH_TOKEN is not a
+      // dead-session verdict, so it cannot latch the scan out.
+      if ((await this.resolve()).origin === RACCOON_ORIGIN_DESKTOP) return { ok: false, code: RACCOON_CODE.NO_REFRESH_TOKEN };
       if (sessionDead) return { ok: false, code: RACCOON_CODE.SESSION_DEAD };
       if (refreshInFlight === null) {
         refreshInFlight = (async () => {
@@ -272,12 +360,13 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
       }
     },
 
+
     /**
      * The secret-free description the routes and panel report.
      * @returns {Promise<{hasCredential: boolean, source: ("credentials"|"memory"|null), ephemeral: boolean, nickname: string, expiresAtMs: number|null, refreshExpiresAtMs?: number}>}
      */
     async state() {
-      const { credential, source } = await this.resolve();
+      const { credential, source, origin } = await this.resolve();
       // The refresh token's own window (≈30 days): how long the login survives
       // WITHOUT a re-scan. Absent when the walk never carried one.
       const refreshExpiresAtMs = credential?.refreshToken !== undefined && credential.refreshToken !== ""
@@ -286,6 +375,10 @@ export function createRaccoonStore({ credentials = null, fetcher }: RaccoonStore
       return {
         hasCredential: credential !== null,
         source,
+        // `desktop-file` or `qr-scan`: whose login the panel should say it is
+        // using. `source` stays the diagnostics field (it is gated to ?debug=1
+        // by `raccoon-status.ts`), so this is the one ordinary callers read.
+        credentialOrigin: origin,
         ephemeral: isEphemeral(credentials),
         nickname: credential?.nickname ?? "",
         expiresAtMs: credential?.expiresAtMs ?? null,

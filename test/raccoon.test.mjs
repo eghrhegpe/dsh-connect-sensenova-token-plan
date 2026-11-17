@@ -48,6 +48,8 @@ import {
   raccoonIamQrUrl,
   pollRaccoonIamQrLogin,
   issueRaccoonScan,
+  RACCOON_QR_EXPIRED,
+  cancelRaccoonIamQr,
 } from "../src/host/raccoon.ts";
 // The thinking dialect is NOT re-exported from the barrel: it has no
 // production caller, so the split pulled it off the public face. Reached by
@@ -69,6 +71,18 @@ import {
   raccoonRequestHeaders
 } from "../src/host/raccoon-models.ts";
 import { createRaccoonPublisher, raccoonSignature } from "../src/host/raccoon-publish.ts";
+import {
+  readRaccoonDesktopCredential,
+  raccoonDesktopAuthPath,
+  raccoonDesktopCredentialFrom,
+  forgetRaccoonDesktopCache,
+  RACCOON_DESKTOP_REASON,
+  RACCOON_DESKTOP_DIR_ENV,
+  RACCOON_DESKTOP_MAX_BYTES,
+  RACCOON_ORIGIN_DESKTOP,
+  RACCOON_ORIGIN_QR
+} from "../src/host/raccoon-desktop-creds.ts";
+import { createFileRaccoonDesktopStore, RACCOON_DESKTOP_SWITCH_VERSION } from "../src/host/raccoon-desktop-store.ts";
 import { createRaccoonWalk, LOGIN_STATUS } from "../src/host/raccoon-walk.ts";
 import { createFileRaccoonStore, normalizeRaccoonEnabled, RACCOON_SWITCH_VERSION } from "../src/host/raccoon-switch-store.ts";
 import {
@@ -1644,19 +1658,33 @@ function section(title) {
       result.status === RACCOON_QR_STATUS.PENDING && result.accessToken === undefined, JSON.stringify(result));
   }
 
-  // I6: canceled is terminal; everything else (logging, an error code, a
-  // malformed body, a throw) keeps the walk waiting for its deadline.
+  // I6: canceled is terminal; the TICKET-DEATH codes (401/410, with or
+  // without the AUTH_QRCODE_* body spelling — probed 2026-11-17: a
+  // uuidv7-shaped unknown code answers 410) read as the SYNTHESIZED `expired`
+  // terminal the walk reissues on; everything else (a plain 500, a 404'd
+  // endpoint, a malformed body, a throw) keeps the walk waiting for its
+  // deadline — a transient blip must not end a live walk (the reverse of
+  // I6's old rule, which pinned these two codes to pending: that pin was the
+  // "stare at a dead QR to the deadline" defect this reissue fixes).
   {
     const canceled = await pollRaccoonIamQrLogin("qr-abc", async () => json(200, { code: "OK", data: { status: "canceled" } }));
     check("I6 an IAM canceled status is terminal", canceled.status === RACCOON_QR_STATUS.CANCELED, JSON.stringify(canceled));
     const codes = ["AUTH_QRCODE_INVALID", "AUTH_QRCODE_EXPIRED"];
     for (const code of codes) {
-      const result = await pollRaccoonIamQrLogin("qr-abc", async () => json(401, { code }));
-      check(`I6 the ${code} refusal reads as pending, not a failure`,
-        result.status === RACCOON_QR_STATUS.PENDING, JSON.stringify(result));
+      for (const httpStatus of [401, 410]) {
+        const result = await pollRaccoonIamQrLogin("qr-abc", async () => json(httpStatus, { code }));
+        check(`I6 the ${code} refusal (HTTP ${httpStatus}) reads as expired, not pending`,
+          result.status === RACCOON_QR_EXPIRED, JSON.stringify(result));
+      }
     }
+    const bare401 = await pollRaccoonIamQrLogin("qr-abc", async () => json(401, {}));
+    check("I6 a bare 401 (no body code, a gateway reskin) still reads as expired", bare401.status === RACCOON_QR_EXPIRED, JSON.stringify(bare401));
+    const bare410 = await pollRaccoonIamQrLogin("qr-abc", async () => json(410, {}));
+    check("I6 a bare 410 still reads as expired", bare410.status === RACCOON_QR_EXPIRED, JSON.stringify(bare410));
     const broken = await pollRaccoonIamQrLogin("qr-abc", async () => json(500, {}));
-    check("I6 a malformed IAM answer reads as pending", broken.status === RACCOON_QR_STATUS.PENDING, JSON.stringify(broken));
+    check("I6 a 5xx answer reads as pending, NOT expired (a blip must not end the walk)", broken.status === RACCOON_QR_STATUS.PENDING, JSON.stringify(broken));
+    const gone = await pollRaccoonIamQrLogin("qr-abc", async () => json(404, "404 page not found"));
+    check("I6 a 404'd endpoint reads as pending (the endpoint's absence is not ticket death)", gone.status === RACCOON_QR_STATUS.PENDING, JSON.stringify(gone));
     const thrown = await pollRaccoonIamQrLogin("qr-abc", async () => { throw new Error("network down"); });
     check("I6 a throwing IAM poll reads as pending", thrown.status === RACCOON_QR_STATUS.PENDING, JSON.stringify(thrown));
   }
@@ -1734,9 +1762,52 @@ function section(title) {
     check("I8 a non-404 probe (a 503) does not end the walk",
       probe500.code === "qr-srv" && probe500.unavailable === undefined, JSON.stringify(probe500));
   }
+
+  // I9: cancelRaccoonIamQr — the official `cancelQr`'s shape (probed
+  // 2026-11-17: there is NO dedicated cancel path; the issue endpoint takes a
+  // PUT carrying `status: "canceled"`, answers 200, and the next poll reports
+  // `canceled`). Tolerant: a dead ticket's cancel resolves; a live refusal
+  // throws so the caller decides (the route swallows it fire-and-forget).
+  {
+    let put = null;
+    await cancelRaccoonIamQr("qr-srv", async (url, init) => {
+      put = { url: String(url), init };
+      return json(200, { code: "OK" });
+    });
+    check("I9 the cancel PUTs { qrcode_code, status: canceled } on the ISSUE endpoint",
+      put !== null && put.url.endsWith("/api/iam/v1/auth/mp/qrcode")
+        && put.init?.method === "PUT"
+        && String(put.init?.body ?? "").includes('"canceled"')
+        && String(put.init?.body ?? "").includes("qr-srv"),
+      JSON.stringify(put));
+    const gone = await cancelRaccoonIamQr("qr-srv", async () => json(410, { code: "AUTH_QRCODE_EXPIRED" }))
+      .then(() => "resolved", () => "rejected");
+    check("I9 a 410 cancel (the ticket is already dead) resolves, never throws", gone === "resolved", gone);
+    const rejected = await cancelRaccoonIamQr("qr-srv", async () => json(500, { code: "INTERNAL" }))
+      .then(() => "resolved", (error) => String(error?.message ?? error));
+    check("I9 a 5xx cancel refusal throws for the caller to swallow", /cancel refused/.test(rejected), rejected);
+    const down = await cancelRaccoonIamQr("qr-srv", async () => { throw new Error("network down"); })
+      .then(() => "resolved", () => "rejected");
+    check("I9 a transport miss never surfaces (best-effort by construction)", down === "resolved", down);
+  }
+
+  // I10: the gateway may serve its error page under a 200 (probed shell:
+  // `__next_error__`): a status-only probe would call that "page alive" and
+  // hand the user a QR that confirms nowhere.
+  {
+    const marker = await issueRaccoonScan(async (url, init) => {
+      const target = String(url);
+      if (target.includes("/api/iam/v1/auth/mp/qrcode")) {
+        return json(200, { code: "OK", data: { qrcode_code: "qr-srv", scan_path: "/login/mp", expires_in: 300, poll_interval: 2 } });
+      }
+      return new Response("<html id=\"__next_error__\"></html>", { status: 200, headers: { "content-type": "text/html" } });
+    });
+    check("I10 a 200 answer carrying the error-page shell issues unavailable",
+      marker.unavailable === true, JSON.stringify(marker));
+  }
 }
 
-// --- W11-W14. the walk driven by an issued (IAM) scan -----------------------
+// --- W11-W18. the walk driven by an issued (IAM) scan ----------------------
 // The route wires `issueCode` + `pollIam`; these pin the walk's half of that
 // contract without any network: which poller runs, which deadline applies, and
 // what `unavailable` reports.
@@ -1835,6 +1906,460 @@ function section(title) {
     await drain(walk);
     check("W14 the legacy path still polls and settles",
       polls >= 1 && walk.view.takeEvent().status === LOGIN_STATUS.logged_in, `polls=${polls}`);
+  }
+
+  // W15: a poll's `expired` terminal (2026-11-17 reissue fix) reissues the
+  // ticket: the dead one is canceled, the view's scan swaps to the fresh
+  // URL, and the walk settles on the new ticket's success — the user never
+  // stares at a dead QR out to the first ticket's deadline.
+  {
+    let issues = 0;
+    const cancels = [];
+    let iamPolls = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async () => ({ status: RACCOON_QR_STATUS.PENDING }),
+      pollIam: async (code) => {
+        iamPolls += 1;
+        return code === "qr-first"
+          ? { status: RACCOON_QR_EXPIRED }
+          : { status: RACCOON_QR_STATUS.SUCCESS, accessToken: "at", refreshToken: "" };
+      },
+      issueCode: async () => {
+        issues += 1;
+        return issues === 1
+          ? { code: "qr-first", url: "https://x/mp?code=qr-first", iam: true, deadlineMs: Date.now() + 5000, pollIntervalMs: 10 }
+          : { code: "qr-second", url: "https://x/mp?code=qr-second", iam: true, deadlineMs: Date.now() + 5000, pollIntervalMs: 10 };
+      },
+      saveCredential: async () => {},
+      invalidateCache: () => {},
+      onCancel: (code) => { cancels.push(code); }
+    });
+    await walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W15 an expired ticket reissues and the walk settles logged_in",
+      event.status === LOGIN_STATUS.logged_in, `${event.status}`);
+    check("W15 the dead ticket was canceled before the reissue",
+      JSON.stringify(cancels) === JSON.stringify(["qr-first"]), JSON.stringify(cancels));
+    check("W15 the view's scan is the NEW ticket's URL (the panel re-renders a live QR)",
+      walk.view.liveScan() !== null && walk.view.liveScan().url.includes("qr-second"),
+      JSON.stringify(walk.view.liveScan()));
+    check("W15 both tickets were issued (the reissue asked the gateway again)",
+      issues === 2 && iamPolls >= 2, `issues=${issues} polls=${iamPolls}`);
+  }
+
+  // W16: a reissue that meets a dead confirm page (404 at the SECOND issue)
+  // ends the walk `unavailable` — the same terminal the issue-time probe
+  // reports, so the panel's existing note covers it; the walk must NOT sit
+  // out a deadline mislabeling the dead page as an expired QR.
+  {
+    let issues = 0;
+    let polls = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async () => { polls += 1; return { status: RACCOON_QR_STATUS.PENDING }; },
+      pollIam: async (code) => code === "qr-first" ? { status: RACCOON_QR_EXPIRED } : { status: RACCOON_QR_STATUS.PENDING },
+      issueCode: async () => {
+        issues += 1;
+        return issues === 1
+          ? { code: "qr-first", url: "https://x/mp?code=qr-first", iam: true, deadlineMs: Date.now() + 5000, pollIntervalMs: 10 }
+          : { code: "", url: "", unavailable: true };
+      },
+      saveCredential: async () => { throw new Error("must not save"); },
+      invalidateCache: () => {}
+    });
+    await walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W16 a reissue meeting a dead confirm page ends unavailable (not timeout, not failed)",
+      event.status === LOGIN_STATUS.unavailable, `${event.status}`);
+    check("W16 the unavailable reissue never polls the second ticket",
+      issues === 2 && polls === 0, `issues=${issues} polls=${polls}`);
+  }
+
+  // W17: a reissue that FAILS (the second issue throws) keeps polling the
+  // dead ticket to its own deadline — no crash, no fake success, and the
+  // pre-reissue `timeout` shape pinned for the degraded gateway.
+  {
+    let issues = 0;
+    let polls = 0;
+    const walk = createRaccoonWalk({
+      fetcher: async () => { polls += 1; return { status: RACCOON_QR_STATUS.PENDING }; },
+      pollIam: async () => { polls += 1; return { status: RACCOON_QR_EXPIRED }; },
+      issueCode: async () => {
+        issues += 1;
+        if (issues === 1) return { code: "qr-first", url: "https://x/mp?code=qr-first", iam: true, deadlineMs: Date.now() + 120, pollIntervalMs: 10 };
+        throw new Error("gateway down");
+      },
+      saveCredential: async () => {},
+      invalidateCache: () => {}
+    });
+    await walk.issueScan();
+    await drain(walk);
+    const event = walk.view.takeEvent();
+    check("W17 a failed reissue degrades to the ticket's deadline (timeout)",
+      event.status === LOGIN_STATUS.timeout, `${event.status}`);
+    check("W17 the failed reissue was asked exactly once (no retry loop)",
+      issues === 2 && polls >= 2, `issues=${issues} polls=${polls}`);
+  }
+
+  // W18: `stop()` cancels the live IAM ticket (the teardown's zombie window),
+  // and a settled success is never canceled — the official unmount's `!d` gate.
+  {
+    const cancels = [];
+    const walk = createRaccoonWalk({
+      fetcher: async () => ({ status: RACCOON_QR_STATUS.PENDING }),
+      pollIam: async () => ({ status: RACCOON_QR_STATUS.PENDING }),
+      issueCode: async () => ({ code: "qr-live", url: "https://x/mp?code=qr-live", iam: true, deadlineMs: Date.now() + 60_000, pollIntervalMs: 5000 }),
+      saveCredential: async () => {},
+      invalidateCache: () => {},
+      onCancel: (code) => { cancels.push(code); }
+    });
+    await walk.issueScan();
+    walk.stop();
+    check("W18 a teardown cancels the live IAM ticket", cancels.length === 1 && cancels[0] === "qr-live", JSON.stringify(cancels));
+
+    const cancels2 = [];
+    const walk2 = createRaccoonWalk({
+      fetcher: async () => ({ status: RACCOON_QR_STATUS.PENDING }),
+      pollIam: async () => ({ status: RACCOON_QR_STATUS.SUCCESS, accessToken: "at", refreshToken: "" }),
+      issueCode: async () => ({ code: "qr-done", url: "https://x/mp?code=qr-done", iam: true, deadlineMs: Date.now() + 60_000, pollIntervalMs: 10 }),
+      saveCredential: async () => {},
+      invalidateCache: () => {},
+      onCancel: (code) => { cancels2.push(code); }
+    });
+    await walk2.issueScan();
+    await drain(walk2);
+    const event2 = walk2.view.takeEvent();
+    walk2.stop();
+    check("W18 a settled success is not canceled on stop (the ticket is consumed)",
+      event2.status === LOGIN_STATUS.logged_in && cancels2.length === 0, `${event2.status} cancels=${JSON.stringify(cancels2)}`);
+  }
+}
+
+// --- 12. the read-only official-App source (ROADMAP §6.1.11) ------------------
+// The one thing this section exists to prove twice: reading the App's
+// `auth.json` is allowed, and TOUCHING it is not. Every case below runs
+// against an injected filesystem and a counting fetcher, so a regression that
+// sends a rotation request would show up as a red check, not as a user getting
+// logged out of the desktop client.
+{
+  section("official-App read-only source (raccoon-desktop-creds.ts)");
+  try {
+    const { mkdtempSync, rmSync, writeFileSync, utimesSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Three segments, payload in the middle: the exp reader indexes part 2, so a
+    // four-part fixture decodes to "no expiry" rather than to the test's own claim.
+    const jwt = (expSeconds) => "eyJhbGciOiJIUzI1NiJ9." + b64({ exp: expSeconds }) + ".sig";
+    const APP_TOKEN = jwt(nowSec + 30 * 24 * 3600);
+
+    // The path contract: the env override replaces the WHOLE config directory
+    // (the archived contract's semantics), otherwise <home>/.box-agent/config.
+    check("the default path is the App's config directory",
+      raccoonDesktopAuthPath({ env: {}, home: "/home/x" }).endsWith(join("x", ".box-agent", "config", "auth.json")),
+      raccoonDesktopAuthPath({ env: {}, home: "/home/x" }));
+    check(RACCOON_DESKTOP_DIR_ENV + " overrides the config directory",
+      raccoonDesktopAuthPath({ env: { [RACCOON_DESKTOP_DIR_ENV]: join("/tmp", "boxcfg") }, home: "/home/x" }) === join("/tmp", "boxcfg", "auth.json"),
+      raccoonDesktopAuthPath({ env: { [RACCOON_DESKTOP_DIR_ENV]: join("/tmp", "boxcfg") }, home: "/home/x" }));
+    check("an empty override does not hijack the default (a stray env must not blind the reader)",
+      raccoonDesktopAuthPath({ env: { [RACCOON_DESKTOP_DIR_ENV]: "   " }, home: "/home/x" }).endsWith(join(".box-agent", "config", "auth.json")));
+
+    // The credential projection. Two fields are set by this plugin rather than
+    // copied from the file, and BOTH are load-bearing:
+    //  - refreshToken "" — a carried-over refresh token is the thing that would
+    //    let a later rotation burn the App's single-use token;
+    //  - officeIdentity "" — measured: sending the file's literal "personal" as
+    //    X-Org-Code is a 400 org_not_found_error on every gateway read.
+    const projected = raccoonDesktopCredentialFrom({ access_token: APP_TOKEN, refresh_token: jwt(nowSec + 90 * 24 * 3600), office_identity: "personal" });
+    check("a fresh App token projects into a credential with NO refresh token",
+      projected.ok === true && projected.credential.refreshToken === "" && projected.credential.accessToken === APP_TOKEN);
+    check("the projected credential sends an empty X-Org-Code",
+      raccoonHeaders(projected.credential)["X-Org-Code"] === "",
+      raccoonHeaders(projected.credential)["X-Org-Code"]);
+    check("the Bearer header still carries the App's token verbatim",
+      raccoonHeaders(projected.credential).Authorization === "Bearer " + APP_TOKEN);
+    check("the read accepts the alias spellings the App's own reader accepts",
+      raccoonDesktopCredentialFrom({ token: APP_TOKEN }).ok === true && raccoonDesktopCredentialFrom({ accessToken: APP_TOKEN }).ok === true);
+
+    // Every refusal is a CATEGORY, and the category never carries the secret.
+    check("a lapsed token reads as expired", raccoonDesktopCredentialFrom({ access_token: jwt(nowSec - 10) }).reason === RACCOON_DESKTOP_REASON.EXPIRED);
+    check("the freshness margin refuses a token about to die",
+      raccoonDesktopCredentialFrom({ access_token: jwt(nowSec + 30) }).reason === RACCOON_DESKTOP_REASON.EXPIRED);
+    check("a token with no verifiable exp is refused, not trusted forever",
+      raccoonDesktopCredentialFrom({ access_token: "not.a.jwt" }).reason === RACCOON_DESKTOP_REASON.NO_EXPIRY);
+    check("a document without any token spelling is no_token, not an empty login",
+      raccoonDesktopCredentialFrom({ office_identity: "personal" }).reason === RACCOON_DESKTOP_REASON.NO_TOKEN);
+    for (const refusal of [raccoonDesktopCredentialFrom({ access_token: "not.a.jwt" }), raccoonDesktopCredentialFrom({})]) {
+      check("a refusal carries no token material in its answer",
+        !JSON.stringify(refusal).includes("eyJ"), JSON.stringify(refusal).slice(0, 120));
+    }
+
+    const dir = mkdtempSync(join(tmpdir(), "raccoon-desktop-"));
+    const file = join(dir, "auth.json");
+    const writeAppFile = (payload) => writeFileSync(file, typeof payload === "string" ? payload : JSON.stringify(payload), "utf8");
+
+    writeAppFile({ access_token: APP_TOKEN, office_identity: "personal" });
+    const first = await readRaccoonDesktopCredential({ path: file, noCache: true });
+    check("a real file on disk reads as the desktop origin",
+      first.ok === true && first.origin === RACCOON_ORIGIN_DESKTOP && first.credential.accessToken === APP_TOKEN);
+
+    // The App rewrites this file when it rotates. The (mtime,size)-keyed cache
+    // has to follow it — a cached snapshot is how "直连" would silently serve a
+    // dead token after the App moved on.
+    writeAppFile({ access_token: jwt(nowSec + 2 * 24 * 3600) });
+    utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+    const second = await readRaccoonDesktopCredential({ path: file });
+    check("the read cache follows a rewrite (the App rotated its token)",
+      second.ok === true && second.credential.accessToken !== APP_TOKEN, String(second.reason));
+
+    check("an absent file reads as missing",
+      (await readRaccoonDesktopCredential({ path: join(dir, "nope.json"), noCache: true })).reason === RACCOON_DESKTOP_REASON.MISSING);
+    writeAppFile("{oops");
+    check("a corrupt file reads as malformed",
+      (await readRaccoonDesktopCredential({ path: file, noCache: true })).reason === RACCOON_DESKTOP_REASON.MALFORMED);
+    writeAppFile(" ".repeat(RACCOON_DESKTOP_MAX_BYTES + 1));
+    check("an oversized file is skipped before it is parsed",
+      (await readRaccoonDesktopCredential({ path: file, noCache: true })).reason === RACCOON_DESKTOP_REASON.TOO_LARGE);
+    writeAppFile({ access_token: APP_TOKEN });
+    rmSync(dir, { recursive: true, force: true });
+    forgetRaccoonDesktopCache();
+  } catch (error) {
+    fail("official-App read-only source", error);
+  }
+}
+
+// --- 13. two suppliers, ONE credential slot (raccoon-store.ts) ----------------
+{
+  section("desktop precedence and the no-write guarantee (raccoon-store.ts)");
+  try {
+    const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const nowSec = Math.floor(Date.now() / 1000);
+    const jwt = (exp) => "eyJhbGciOiJIUzI1NiJ9." + b64({ exp }) + ".sig";
+    const appToken = jwt(nowSec + 30 * 24 * 3600);
+    const scannedToken = jwt(nowSec + 3 * 3600);
+    const REF = "RACCOON_CREDENTIAL";
+    const scannedDoc = JSON.stringify({ version: 1, access_token: scannedToken, refresh_token: jwt(nowSec + 60 * 24 * 3600), office_identity: "personal", nickname: "扫码的人" });
+
+    // A fake credentials service with a counting set(), so "never copies the
+    // App's token into the vault" is a checked fact and not a comment.
+    const makeVault = (initial = null) => {
+      const state = { value: initial, sets: 0, unsets: 0 };
+      return {
+        state,
+        service: {
+          resolve: async (name) => (name === REF && state.value !== null ? { value: state.value } : undefined),
+          set: async (_name, value) => { state.sets += 1; state.value = value; },
+          unset: async () => { state.unsets += 1; state.value = null; }
+        }
+      };
+    };
+    const countingFetcher = () => {
+      const calls = [];
+      const fn = async (url, init) => { calls.push({ url, body: init?.body }); throw new Error("the network guard should have made this unreachable: " + url); };
+      return { calls, fn };
+    };
+
+    // 1. Switch OFF (the shipped default): byte-for-byte the pre-§6.1.11 store.
+    {
+      const vault = makeVault(scannedDoc);
+      const read = countingFetcher();
+      const store = createRaccoonStore({
+        credentials: vault.service,
+        fetcher: read.fn,
+        desktop: { enabled: async () => false, read: async () => ({ ok: true, credential: { accessToken: appToken, refreshToken: "", expiresAtMs: nowSec * 1000, officeIdentity: "", nickname: "" }, origin: RACCOON_ORIGIN_DESKTOP }) }
+      });
+      const answer = await store.resolve();
+      check("switch off: the scanned credential serves, exactly as before",
+        answer.credential?.accessToken === scannedToken && answer.source === "credentials" && answer.origin === RACCOON_ORIGIN_QR);
+      check("switch off: the App file was never even opened", (await store.desktopState()).available === false && (await store.desktopState()).enabled === false);
+    }
+
+    // 2. Switch ON + a fresh App file: the App's token serves, and NOTHING is
+    //    written to the vault or to the network.
+    {
+      const vault = makeVault(scannedDoc);
+      const read = countingFetcher();
+      const store = createRaccoonStore({
+        credentials: vault.service,
+        fetcher: read.fn,
+        desktop: { enabled: async () => true, read: async () => ({ ok: true, credential: { accessToken: appToken, refreshToken: "", expiresAtMs: nowSec * 1000 + 30 * 24 * 3600_000, officeIdentity: "", nickname: "" }, origin: RACCOON_ORIGIN_DESKTOP }) }
+      });
+      const answer = await store.resolve();
+      check("switch on: the App's credential wins the slot",
+        answer.credential?.accessToken === appToken && answer.origin === RACCOON_ORIGIN_DESKTOP && answer.source === RACCOON_ORIGIN_DESKTOP);
+      check("switch on: the App's token is NOT copied into the credentials vault",
+        vault.state.sets === 0 && vault.state.value === scannedDoc);
+      const state = await store.state();
+      check("state() reports the origin the panel badges",
+        state.hasCredential === true && state.credentialOrigin === RACCOON_ORIGIN_DESKTOP && state.nickname === "" && state.expiresAtMs > nowSec * 1000,
+        JSON.stringify({ o: state.credentialOrigin, n: state.nickname }));
+      // THE red line: an expired-looking desktop credential must not knock on
+      // the refresh endpoint — that call is what burns the App's single-use
+      // token (§6.1.1), so it must be unreachable from a desktop origin.
+      await store.prepareForRequest();
+      const refreshed = await store.refresh();
+      check("a desktop-origin credential refuses to refresh LOCALLY",
+        refreshed.ok === false && refreshed.code === RACCOON_CODE.NO_REFRESH_TOKEN, JSON.stringify(refreshed));
+      check("no rotation request was ever sent for a desktop credential", read.calls.length === 0, JSON.stringify(read.calls));
+      check("isExpired says no (there is nothing here to renew)", (await store.isExpired()) === false);
+      const ds = await store.desktopState();
+      check("desktopState() reports a usable source without a secret",
+        ds.supported === true && ds.enabled === true && ds.available === true && !JSON.stringify(ds).includes("eyJ"),
+        JSON.stringify(ds));
+      // "Logout" is scoped to the credential we own; the App's file is not ours
+      // to evict, and the switch is what governs that source.
+      await store.forget();
+      check("forget() clears OUR slot, not the App's source",
+        vault.state.unsets === 1 && (await store.resolve()).credential?.accessToken === appToken);
+    }
+
+    // 3. Switch ON but the App is closed / lapsed: fall through to the scan.
+    //    This is what makes the toggle reversible — no login is ever stranded.
+    {
+      const vault = makeVault(scannedDoc);
+      const store = createRaccoonStore({
+        credentials: vault.service,
+        fetcher: async () => { throw new Error("unreachable"); },
+        desktop: { enabled: async () => true, read: async () => ({ ok: false, reason: RACCOON_DESKTOP_REASON.EXPIRED }) }
+      });
+      const answer = await store.resolve();
+      check("a lapsed App file falls through to the scanned pair (no login lost)",
+        answer.credential?.accessToken === scannedToken && answer.origin === RACCOON_ORIGIN_QR);
+      const ds = await store.desktopState();
+      check("the refusal reaches the panel as a category, not a token",
+        ds.enabled === true && ds.available === false && ds.reason === RACCOON_DESKTOP_REASON.EXPIRED, JSON.stringify(ds));
+    }
+
+    // 4. No scan at all: the App file alone can carry the tab (the "零配置" case).
+    {
+      const vault = makeVault(null);
+      const store = createRaccoonStore({
+        credentials: vault.service,
+        desktop: { enabled: async () => true, read: async () => ({ ok: true, credential: { accessToken: appToken, refreshToken: "", expiresAtMs: nowSec * 1000 + 3600_000, officeIdentity: "", nickname: "" }, origin: RACCOON_ORIGIN_DESKTOP }) }
+      });
+      const state = await store.state();
+      check("an App-only machine is logged in with zero scans",
+        state.hasCredential === true && state.credentialOrigin === RACCOON_ORIGIN_DESKTOP, JSON.stringify(state));
+    }
+
+    // 5. A reader that throws is a normal state, never a crash and never a
+    //    blackout: the scanned pair keeps serving.
+    {
+      const vault = makeVault(scannedDoc);
+      const store = createRaccoonStore({
+        credentials: vault.service,
+        desktop: { enabled: async () => { throw new Error("EACCES"); }, read: async () => { throw new Error("EACCES"); } }
+      });
+      check("a throwing reader degrades to the scanned credential",
+        (await store.resolve()).credential?.accessToken === scannedToken && (await store.desktopState()).available === false);
+    }
+
+    // 6. Unwired (every existing caller, and the Token Plan half): no field
+    //    appears, no behaviour changes.
+    {
+      const vault = makeVault(scannedDoc);
+      const store = createRaccoonStore({ credentials: vault.service });
+      check("a store with no desktop source answers from the vault",
+        (await store.resolve()).origin === RACCOON_ORIGIN_QR && (await store.desktopState()).supported === false);
+    }
+
+    // The panel switch: its own state file, default not-set (= OFF), and a
+    // version mismatch can never flip it.
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "raccoon-desktop-switch-"));
+    const desktopSwitch = createFileRaccoonDesktopStore({ dir });
+    check("the desktop switch is not set until the panel says so (default OFF)",
+      (await desktopSwitch.enabled()) === null && (await desktopSwitch.isSet()) === false);
+    await desktopSwitch.save(true);
+    check("the desktop switch round-trips through its own file",
+      (await desktopSwitch.enabled()) === true && (await desktopSwitch.isSet()) === true);
+    writeFileSync(join(dir, "raccoon-desktop.json"), JSON.stringify({ version: RACCOON_DESKTOP_SWITCH_VERSION + 1, enabled: true }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const mismatched = createFileRaccoonDesktopStore({ dir, ttlMs: 20 });
+    check("a mismatched version reads as not set (a downgrade cannot flip the source)",
+      (await mismatched.enabled()) === null, String(await mismatched.enabled()));
+    rmSync(dir, { recursive: true, force: true });
+  } catch (error) {
+    fail("desktop precedence and the no-write guarantee", error);
+  }
+}
+
+// --- 14. the row the user actually sees (RaccoonCard frames) ------------------
+// Panel frames are asserted with an IDENTITY dictionary: the check is about
+// WHICH key the card chose, not about wording (wording parity across zh/en is
+// `panel.test.mjs`'s job). The two that matter here are both silent failures:
+// a switch rendered with nothing behind it, and a reason code shown to a user
+// who cannot act on it (the 0.8.6 lesson, PITFALLS: 原因码不再原样上屏).
+{
+  section("official-App row frames (RaccoonCard)");
+  try {
+    const { render, texts } = await import("./panel-render.js");
+    const { surface } = await import("./client-surface.js");
+    // THE real zh dictionary, not an identity tt: the identity form erases the
+    // reason placeholder (the substituted template string simply contains no
+    // literal to point at), and the interpolation is exactly what this section
+    // has to inspect — the sentence must carry the category`s WORDS.
+    const zh = surface.dictionaries.zh;
+    const tt = (key) => (typeof zh[key] === "string" ? zh[key] : key);
+    const treeOf = (component, props) => component(props);
+    const shot = (state) => {
+      const tree = treeOf(render.RaccoonCard, {
+        state, tt, loginBusy: false, loginNote: null, modelsNote: null, idsBusy: false,
+        onLogin: () => {}, onLogout: () => {}, onSwitch: () => {}, onIds: () => {},
+        onWebSearch: () => {}, onDesktop: () => {}
+      });
+      // `texts()` hands back the TEXT NODES, one per rendered element, not a
+      // string: a substring check (does a raw code appear ANYWHERE on screen?)
+      // needs them joined, while an `includes` on the array could only ever
+      // match one whole node — which is how a green check can certify nothing.
+      const nodes = texts(tree);
+      return { text: (Array.isArray(nodes) ? nodes.join("\n") : String(nodes)), tree };
+    };
+    const labelsOf = (tree) => {
+      const found = [];
+      const walk = (node) => {
+        if (Array.isArray(node)) return node.forEach(walk);
+        if (node && typeof node === "object") {
+          if (typeof node.props?.label === "string") found.push(node.props.label);
+          if (node.props && node.props.label !== undefined) return;
+          walk(node.children ?? node.props?.children);
+        }
+      };
+      walk(tree);
+      return found;
+    };
+    const base = { ok: true, loggedIn: true, nickname: "nick", balance: 10 };
+
+    const unwired = shot(base);
+    check("no desktop facts at all → no third switch (a dead control is never offered)",
+      !labelsOf(unwired.tree).includes(zh["raccoon.desktop"]),
+      labelsOf(unwired.tree).join(","));
+
+    const live = shot({ ...base, desktop: { enabled: true, available: true, expiresAtMs: Date.now() + 86_400_000 } });
+    check("an enabled, usable source says WHICH login is serving",
+      live.text.includes(zh["raccoon.desktopLive"]) && labelsOf(live.tree).includes(zh["raccoon.desktop"]),
+      labelsOf(live.tree).join(","));
+
+    const idle = shot({ ...base, desktop: { enabled: true, available: false, reason: "expired" } });
+    check("a refusal is worded from its category, and the raw code never reaches the screen",
+      idle.text.includes(zh["raccoon.desktopReasonExpired"]) && !idle.text.includes("expired") && !idle.text.includes("no_expiry") && !/\bexpired\b/.test(idle.text),
+      idle.text.slice(0, 160));
+
+    const unknown = shot({ ...base, desktop: { enabled: true, available: false, reason: "category_from_a_newer_host" } });
+    check("an unregistered category falls back to the generic line, never to the code",
+      unknown.text.includes(zh["raccoon.desktopReasonUnknown"]) && !unknown.text.includes("category_from_a_newer_host"),
+      unknown.text.slice(0, 160));
+
+    const off = shot({ ...base, desktop: { enabled: false, available: false } });
+    check("the switch is reachable before it is ever turned on (that is how you turn it on)",
+      labelsOf(off.tree).includes(zh["raccoon.desktop"]) && !off.text.includes(zh["raccoon.desktopIdle"]) && !off.text.includes(zh["raccoon.desktopLive"]),
+      labelsOf(off.tree).join(","));
+  } catch (error) {
+    fail("official-App row frames", error);
   }
 }
 
