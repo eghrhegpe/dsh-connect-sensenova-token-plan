@@ -1196,6 +1196,23 @@ const bar = (tree) => findElement(tree, (props) => props["aria-valuenow"] !== un
       loginLineOf(tree) === "raccoon.loggedIn", loginLineOf(tree));
   }
 
+  // A CLOSED refresh window must not render as an open one: "续期至 <past
+  // date>" — with the {days} tooltip clamped to 1 — reads as healthy renewal
+  // ahead, when the fact is the opposite (only a re-scan gets back in). The
+  // 11-17 field credential had BOTH exps at 2026-11-13 21:32; this frame is
+  // its card.
+  {
+    const tree = card({
+      ok: true, loggedIn: true, balance: 1,
+      expiresAtMs: Date.now() - 86_400_000, refreshExpiresAtMs: Date.now() - 86_400_000
+    });
+    const statusLines = findAll(tree, (props) => props.role === "status").map((el) => texts(el).join(""));
+    const clockLine = statusLines.find((l) => l.includes("raccoon.expiresAt")) ?? "";
+    check("a closed refresh window renders the closed fact, not an open renewal",
+      clockLine.includes("raccoon.refreshClosed") && !clockLine.includes("raccoon.refreshUntil"),
+      clockLine);
+  }
+
   // The nickname is absent on some gateway responses: the suffix must go, not
   // render as "已登录：" with nothing after the colon. `tt` is identity here, so
   // this is exact — `raccoon.loggedIn` is a SUBSTRING of `raccoon.loggedInPlain`

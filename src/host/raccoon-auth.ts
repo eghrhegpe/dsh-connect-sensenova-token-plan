@@ -18,7 +18,8 @@ import {
   RACCOON_AUTH_PREFIX,
   RACCOON_IAM_AUTH_PREFIX,
   RACCOON_LOGIN_TIMEOUT_MS,
-  RACCOON_QR_POLL_INTERVAL_MS
+  RACCOON_QR_POLL_INTERVAL_MS,
+  RACCOON_SCAN_PAGE_ERROR_MARKER
 } from "./raccoon-consts.ts";
 import {
   parseRaccoonEnvelope,
@@ -52,6 +53,24 @@ export const RACCOON_QR_STATUS = Object.freeze({
   CANCELED: "canceled",
   SUCCESS: "success"
 });
+
+/**
+ * The SYNTHESIZED terminal: a dead ticket arrives as the gateway's error
+ * codes on the poll endpoint, not as a `status` value — `AUTH_QRCODE_INVALID`
+ * (HTTP 401, the code was never issued) and `AUTH_QRCODE_EXPIRED` (HTTP 410,
+ * the ticket's `expires_in` passed). Probed 2026-11-17: the gateway answers
+ * a well-formed-but-unknown uuidv7-shaped code with 410, so 410 also means
+ * "unknown ticket", not "known-and-expired" — either way the answer is
+ * the same: this ticket can never confirm. The walk reissues on this
+ * status. The gateway never spells `expired` as a raw status value (probed
+ * 2026-11: `pending`/`logging`/`canceled`/`success` only), so the string
+ * cannot collide with a server spelling.
+ */
+export const RACCOON_QR_EXPIRED = "expired";
+
+/** The gateway's string error codes naming a dead ticket (probed 2026-11-17). */
+export const RACCOON_IAM_QR_INVALID_CODE = "AUTH_QRCODE_INVALID";
+export const RACCOON_IAM_QR_EXPIRED_CODE = "AUTH_QRCODE_EXPIRED";
 
 /**
  * One poll of the QR login status. Any anomaly degrades to `pending`: the
@@ -197,10 +216,14 @@ export function raccoonIamQrUrl(code: string, scanPath: string): string {
  * poll (`POST /api/iam/v1/auth/mp/qrcode/login`), whose envelope is the
  * string `code: "OK"` half, so the numeric parser does not apply.
  *
- * Every anomaly degrades to `pending`, exactly like the legacy poll: the
- * server's own expiry surfaces here as the AUTH_QRCODE error codes rather
- * than a status, and the walk's deadline — set from the same `expires_in`
- * at issue time — is what turns that into a `timeout`.
+ * Every anomaly EXCEPT the ticket-death codes degrades to `pending`,
+ * exactly like the legacy poll. The server's own expiry surfaces as the
+ * AUTH_QRCODE error codes (401/410), which this poller reports as the
+ * SYNTHESIZED `RACCOON_QR_EXPIRED` status — the walk turns it into a
+ * reissue (a fresh ticket inside the overall login window) rather than
+ * letting the user wait out the dead ticket's deadline staring at a QR
+ * that can no longer confirm (2026-11-17 differential vs the reference
+ * implementation, which reissues on the same two codes).
  *
  * The success payload observed in 2026-11 carries an `access_token` and NO
  * `refresh_token` (the official site's flow takes the access token only):
@@ -217,17 +240,31 @@ export function raccoonIamQrUrl(code: string, scanPath: string): string {
 export async function pollRaccoonIamQrLogin(code: string, fetcher?: typeof fetch): Promise<RaccoonQrPollResult> {
   const effective = fetcher ?? globalThis.fetch;
   let body: { code?: unknown; data?: unknown } | null;
+  let httpStatus = 0;
   try {
     const response = await effective(`${RACCOON_API_BASE}${RACCOON_IAM_AUTH_PREFIX}/auth/mp/qrcode/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ qrcode_code: str(code, "") })
     });
+    httpStatus = response.status;
     body = (await response.json().catch(() => null)) as { code?: unknown; data?: unknown } | null;
   } catch {
     return { status: RACCOON_QR_STATUS.PENDING };
   }
   const data = body === null ? null : obj(body.data);
+  // A dead ticket arrives as an ERROR CODE, not a status: 401
+  // `AUTH_QRCODE_INVALID` / 410 `AUTH_QRCODE_EXPIRED` (probed 2026-11-17;
+  // a uuidv7-shaped unknown code answers 410, so 410 also covers "unknown").
+  // The walk turns this into a reissue; 5xx / malformed / network errors
+  // still degrade to `pending` (a transient blip must not end a live walk —
+  // the reverse of the I6 "refusal reads as pending" rule, which I6 now
+  // pins to every status EXCEPT these two codes).
+  const bodyCode = body === null ? "" : str((body as { code?: unknown }).code, "");
+  if (httpStatus === 401 || httpStatus === 410
+      || bodyCode === RACCOON_IAM_QR_INVALID_CODE || bodyCode === RACCOON_IAM_QR_EXPIRED_CODE) {
+    return { status: RACCOON_QR_EXPIRED };
+  }
   const rawStatus = data === null ? "" : str(data.status, "");
   if (rawStatus === RACCOON_QR_STATUS.CANCELED) return { status: RACCOON_QR_STATUS.CANCELED };
   if (rawStatus === RACCOON_QR_STATUS.SUCCESS) {
@@ -289,13 +326,18 @@ export async function issueRaccoonScan(fetcher?: typeof fetch): Promise<RaccoonI
     url = raccoonQrLoginUrl(code);
   }
   let probeStatus: number | null = null;
+  let probeBody = "";
   try {
     const probe = await effective(url, { method: "GET", headers: { Accept: "text/html" } });
     probeStatus = probe.status;
+    // A 2xx/3xx answer still gets its body read: the gateway may serve the
+    // error page under a 200 (probed shell: `__next_error__`), and only the
+    // body reveals that. A 4xx/5xx body carries no decision.
+    if (probeStatus < 400) probeBody = await probe.text().catch(() => "");
   } catch {
     probeStatus = null;
   }
-  if (probeStatus === 404) return { code: "", url: "", unavailable: true };
+  if (probeStatus === 404 || (probeStatus !== null && probeBody.includes(RACCOON_SCAN_PAGE_ERROR_MARKER))) return { code: "", url: "", unavailable: true };
   if (created === null) return { code, url };
   // Spread the optional fields rather than assigning `undefined`: the
   // project compiles with `exactOptionalPropertyTypes`, where an explicit
@@ -367,4 +409,38 @@ export async function refreshRaccoonCredential(
   const refreshTokenOut = verbatim(envelope.data.refresh_token, "");
   const expMs = decodeRaccoonJwtExpMs(accessToken);
   return { ok: true, accessToken, refreshToken: refreshTokenOut, ...(expMs !== undefined ? { expiresAtMs: expMs } : {}) };
+}
+
+/**
+ * Cancel a server-issued scan ticket — the official client's `cancelQr`
+ * (probed 2026-11-17: the gateway has NO independent cancel path; the ISSUE
+ * endpoint accepts a `PUT` carrying `{ qrcode_code, status: "canceled" }`,
+ * answers 200, and the next poll reports `canceled`). Used to void a ticket
+ * the walk abandons mid-way (a reissue supersedes it; a teardown drops it)
+ * instead of leaving a 300-second zombie ticket confirmable by a scan.
+ *
+ * Tolerant semantics: 401/410 (the ticket is already dead) is a no-op that
+ * RESOLVES; any other refusal THROWS, so a caller that wants the official
+ * fire-and-forget shape writes `void cancelRaccoonIamQr(code).catch(() => {})`
+ * — the function itself stays "failures visible" for the suites.
+ * @param {string} code - the issued `qrcode_code`.
+ * @param {typeof fetch} [fetcher] - injected fetch.
+ */
+export async function cancelRaccoonIamQr(code: string, fetcher?: typeof fetch): Promise<void> {
+  const effective = fetcher ?? globalThis.fetch;
+  let body: { code?: unknown } | null = null;
+  let status = 0;
+  try {
+    const response = await effective(`${RACCOON_API_BASE}${RACCOON_IAM_AUTH_PREFIX}/auth/mp/qrcode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ qrcode_code: str(code, ""), status: "canceled" })
+    });
+    status = response.status;
+    body = (await response.json().catch(() => null)) as { code?: unknown } | null;
+  } catch {
+    return; // a transport miss never surfaces: the cancel is best-effort
+  }
+  if (status === 401 || status === 410) return; // the ticket is already gone
+  if (str(body?.code, "") !== "OK") throw new Error(`raccoon ticket cancel refused (code ${str(body?.code, "") || status})`);
 }

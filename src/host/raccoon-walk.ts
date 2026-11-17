@@ -14,6 +14,8 @@
  * What this module owns (and nothing else):
  *   - issuing a scan code
  *   - polling the gateway until settle or timeout
+ *   - reissuing a dead ticket (a poll's `expired` terminal) and canceling
+ *     the ticket it supersedes / the teardown drops (both via `onCancel`)
  *   - persisting the credential pair (delegates to callers)
  *   - clearing the read cache on settle
  *   - firing the logged-in side-effect hook (`onLoggedIn`) after the
@@ -30,7 +32,7 @@
  *
  * @module dsh-connect-sensenova-token-plan/raccoon-walk
  */
-import { RACCOON_QR_STATUS, RACCOON_QR_POLL_INTERVAL_MS, RACCOON_LOGIN_TIMEOUT_MS, generateRaccoonQrCode, raccoonQrLoginUrl } from "./raccoon.ts";
+import { RACCOON_QR_STATUS, RACCOON_QR_EXPIRED, RACCOON_QR_POLL_INTERVAL_MS, RACCOON_LOGIN_TIMEOUT_MS, generateRaccoonQrCode, raccoonQrLoginUrl } from "./raccoon.ts";
 import { errMsg, redactSecrets } from "./util.ts";
 import type { RaccoonIssuedScan, RaccoonQrPollResult } from "./raccoon.ts";
 
@@ -99,6 +101,15 @@ export interface RaccoonWalkView {
  *   state, and the read model does not use it — `login` reads the walk's own
  *   state (`takeEvent` / `liveScan`) — so the route registers nothing and a
  *   caller with no per-scan UI has nothing to say.
+ * @param {(code: string) => void} [options.onCancel] - called with a ticket's
+ *   code when the walk ABANDONS it: a reissue supersedes the dead ticket, and
+ *   `stop()` drops the live one on teardown. OPTIONAL — legacy (local-code)
+ *   tickets have nothing to cancel server-side, so a caller without it loses
+ *   only the 300-second zombie window. The route wires it to
+ *   `cancelRaccoonIamQr` fire-and-forget (the official client's unmount does
+ *   the same `cancelQr(code).catch(() => {})`). The walk calls it
+ *   SYNCHRONOUSLY and ignores its result: a cancel miss never blocks the
+ *   reissue or the teardown.
  * @param {() => void} options.onLoggedIn - called AFTER the credential was persisted and the
  *   read cache cleared, with the outcome already `logged_in`. The caller's
  *   provider-registration side effect lives here. Its failures are swallowed:
@@ -114,6 +125,7 @@ export function createRaccoonWalk(options: {
   invalidateCache: () => void;
   onSettled?: () => void;
   onLoggedIn?: () => void;
+  onCancel?: (code: string) => void;
 }): { view: RaccoonWalkView; issueScan: () => Promise<void>; stop: () => void } {
   let scan: { code: string; url: string } | null = null;
   /** `null` while idle; a promise while the walk runs. Cleared in finally. */
@@ -128,6 +140,13 @@ export function createRaccoonWalk(options: {
    * checked in three places, all of them load-bearing — see `stoppedAt` below.
    */
   let stopRequested = false;
+  /** Whether the credential write has landed: a settled walk's ticket is
+   * consumed, and the official unmount cancels only when it did NOT.
+   * Read by `stop()` to gate the teardown cancel. */
+  let succeeded = false;
+  /** Whether the live scan is a SERVER-issued (IAM) ticket: only those have
+   * something to cancel on the gateway. Set at adoption, tracked per scan. */
+  let scanIam = false;
   /**
    * Wakes the poll loop's inter-poll sleep. A bare `stopRequested` check would
    * still leave the loop parked for up to a full poll interval after teardown,
@@ -189,17 +208,30 @@ export function createRaccoonWalk(options: {
    * them, the gateway's wire facts otherwise.
    */
   async function runScan(issued: RaccoonIssuedScan) {
-    const poller = issued.iam === true ? options.pollIam ?? options.fetcher : options.fetcher;
-    const cadenceMs = issued.pollIntervalMs ?? RACCOON_QR_POLL_INTERVAL_MS;
-    const code = issued.code;
+    let poller = issued.iam === true ? options.pollIam ?? options.fetcher : options.fetcher;
+    let cadenceMs = issued.pollIntervalMs ?? RACCOON_QR_POLL_INTERVAL_MS;
+    let code = issued.code;
     scan = { code, url: issued.url };
+    scanIam = issued.iam === true;
     status = LOGIN_STATUS.scanning;
     error = null;
     options.onSettled?.();
 
-    const deadline = issued.deadlineMs ?? Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
+    // The walk's HARD ceiling: even a chain of reissued tickets cannot outlive
+    // the login window (a 5-minute "re-scan" is a new walk, not a new ticket).
+    // The first ticket keeps the server's own deadline, clamped to the ceiling —
+    // W13 pins the pre-reissue behaviour: a short `expires_in` still ends the
+    // walk early when no ticket ever dies mid-walk.
+    const overallCapMs = Date.now() + RACCOON_LOGIN_TIMEOUT_MS;
+    let deadline = Math.min(issued.deadlineMs ?? overallCapMs, overallCapMs);
     let canceled = false;
     let settled: SettledScan | null = null;
+    let reissueUnavailable = false;
+    // A reissue the gateway refused is not retried by THIS walk: the dead
+    // ticket keeps polling to its deadline (harmless pending), and the NEXT
+    // login click starts a fresh walk with a fresh ask. Without the flag a
+    // down gateway would be hammered once per poll cycle for five minutes.
+    let reissueFailed = false;
 
     try {
       try {
@@ -226,6 +258,43 @@ export function createRaccoonWalk(options: {
             canceled = true;
             break;
           }
+          if (poll.status === RACCOON_QR_EXPIRED) {
+            // The ticket's own window closed without a scan: a dead ticket can
+            // never confirm, so the only honest move is a reissue — cancel the
+            // dead one (best-effort; a miss never blocks) and adopt a fresh
+            // ticket while the overall window still has room. The view's scan
+            // is swapped to the new URL so the panel's next poll re-renders a
+            // LIVE QR instead of a dead one. Without a wired `issueCode`
+            // (legacy local codes have no server-side ticket) or at the
+            // ceiling, fall through to the deadline: `timeout`, the
+            // pre-reissue behaviour.
+            if (options.issueCode !== undefined && !reissueFailed && Date.now() < overallCapMs) {
+              options.onCancel?.(code);
+              const next = await options.issueCode().catch(() => null);
+              if (stoppedAt()) break;
+              if (next !== null && next.unavailable === true) {
+                // The confirm page died MID-walk (404 at reissue): the same
+                // terminal the issue-time probe reports — the panel already
+                // carries its own note for `unavailable`, no new wording.
+                reissueUnavailable = true;
+                break;
+              }
+              if (next !== null) {
+                code = next.code;
+                scan = { code, url: next.url };
+                scanIam = next.iam === true;
+                poller = next.iam === true ? options.pollIam ?? options.fetcher : options.fetcher;
+                cadenceMs = next.pollIntervalMs ?? RACCOON_QR_POLL_INTERVAL_MS;
+                deadline = Math.min(next.deadlineMs ?? overallCapMs, overallCapMs);
+                // The new ticket owns a fresh window: no trailing sleep.
+                continue;
+              }
+              // `next === null` (the issue threw): mark the reissue as asked
+              // once, and keep polling the dead ticket to the deadline —
+              // harmless pending, bounded above.
+              reissueFailed = true;
+            }
+          }
           await sleepOnePoll(cadenceMs);
         }
       } finally {
@@ -240,8 +309,14 @@ export function createRaccoonWalk(options: {
       if (settled === null) {
         // A stop is reported as `canceled`, not `timeout`: the gateway was
         // never given the chance to be late, and telling the tab it timed out
-        // would be a lie it has no way to correct.
-        status = canceled || stoppedAt() ? LOGIN_STATUS.canceled : LOGIN_STATUS.timeout;
+        // would be a lie it has no way to correct. A confirm page that died
+        // MID-walk (404 at reissue) is `unavailable` — the same terminal the
+        // issue-time probe reports, so the panel's note for it covers both.
+        if (reissueUnavailable) {
+          status = LOGIN_STATUS.unavailable;
+        } else {
+          status = canceled || stoppedAt() ? LOGIN_STATUS.canceled : LOGIN_STATUS.timeout;
+        }
         return;
       }
 
@@ -262,6 +337,10 @@ export function createRaccoonWalk(options: {
           ...(settled.nickname !== undefined && settled.nickname !== "" ? { nickname: settled.nickname } : {})
         });
         options.invalidateCache();
+        // The credential landed: `stop()`'s teardown cancel is gated on this,
+        // because the official unmount cancels only when the login did NOT
+        // succeed (a consumed ticket has nothing left to void).
+        succeeded = true;
         status = LOGIN_STATUS.logged_in;
         // The logged-in side effect (provider publish etc.), fired after the
         // credential landed and the outcome was set. Its failure must NOT flip
@@ -371,6 +450,11 @@ export function createRaccoonWalk(options: {
   function stop() {
     stopRequested = true;
     wakePoll?.();
+    // Drop the live ticket the walk still holds (see the module doc's
+    // `onCancel`): only a SERVER-issued (IAM) scan has something to cancel,
+    // and only when the login did not succeed (a consumed ticket's cancel is
+    // a tolerated no-op — the gate just saves one request).
+    if (scan !== null && scanIam && !succeeded) options.onCancel?.(scan.code);
   }
 
   return { view, issueScan, stop };

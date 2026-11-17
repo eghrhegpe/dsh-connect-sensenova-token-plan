@@ -51,3 +51,12 @@ export const RACCOON_QR_POLL_INTERVAL_MS = 2_000;
 export const RACCOON_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 /** The per-request deadline for a gateway read (catalogue / balance). */
 export const RACCOON_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * The marker of the gateway's error-page shell (probed 2026-11-17: the
+ * `/login/mp` 404 is served as a full Next.js error page carrying
+ * `__next_error__` in its HTML). The issue-time probe reads it so a gateway
+ * that starts serving that page under a 200 does not read as "page alive" —
+ * a status-only check would miss the 200-shelled error page.
+ */
+export const RACCOON_SCAN_PAGE_ERROR_MARKER = "__next_error__";
