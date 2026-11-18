@@ -15,6 +15,15 @@
  *      by anyone, including CI-adjacent machines with no token at hand. This
  *      is the tier that would have caught the `_token` path typo before it
  *      shipped (ROADMAP §6.1.3).
+ *
+ *      L1d also carries the ISSUE #1/#5 recovery judgement: the server-side
+ *      QR-code endpoint plus the HTTP status of the scan confirm page. It is
+ *      the single answer to "is the upstream back yet?" — the plugin cannot
+ *      know that itself, because its only signal is a user staring at a dead
+ *      page. The verdict is frozen in the baseline, so the run stays green
+ *      while the page stays dead and goes red exactly once on the day it comes
+ *      back (refresh `loginMpScanPage.expected` then, and see ADR-020: the
+ *      browser-authorize path in 0.9.0 no longer depends on that page).
  *   L2 (`RACCOON_ACCESS_TOKEN` set) — the real read contract: the catalogue
  *      shape and, above all, `available_points` still being the balance
  *      field. That field name is the exact bug 0.4.6 fixed (everything else
@@ -284,6 +293,62 @@ for (const forbidden of contract.forbidden) {
     offending.length === 0 ? "no authenticated call site" : `line(s) ${offending.map((o) => o.no).join(", ")}`);
 }
 
+// --- L1d. the scan confirm page: the ISSUE #1/#5 recovery judgement -------
+// Since 0.8.5 the plugin asks the gateway for the QR code instead of inventing
+// one locally, so `issueRaccoonScan` depends on TWO upstream facts at once: a
+// `qrcode_code` out of the IAM endpoint, and a confirm page the phone can
+// actually open. The first has stayed healthy on every re-run; the second has
+// been a Next.js 404 since 2026-11-04 (issues #1 / #5) — and no client-side
+// change can repair it. This block is the single answer to "is the upstream
+// back yet?": unauthenticated, spends nothing, re-runnable at will.
+//
+// The verdict is FROZEN IN THE BASELINE rather than asserted as a constant, on
+// purpose. A probe that goes red on every run while the page stays dead
+// trains people to ignore reds — the exact failure mode AGENTS.md warns
+// about. So this asserts "live status === the recorded verdict": green while
+// the page is still dead, and exactly ONE red on the day it comes back, which
+// tells you to flip `loginMpScanPage.expected` to `"live-200"` and re-check
+// whether the 0.9.0 browser-authorize path (ADR-020) can retire this block.
+{
+  const spec = contract.loginMpScanPage ?? null;
+  if (spec === null) {
+    console.log("\nSKIP L1d — test/baselines/raccoon-contract.json has no loginMpScanPage block.");
+  } else {
+    const mint = await probe("POST", spec.qrcodeEndpoint, { auth: false, body: {} });
+    if (mint.transportError !== null) {
+      check("L1d QR-code endpoint reachable", false, `transport: ${mint.transportError}`);
+    } else {
+      const data = mint.body?.data ?? null;
+      const code = typeof data?.qrcode_code === "string" ? data.qrcode_code : "";
+      const rawPath = typeof data?.scan_path === "string" ? data.scan_path : "";
+      check("L1d QR-code endpoint still mints a server-side code",
+        mint.status === 200 && mint.body?.code === "OK" && code !== "" && rawPath !== "",
+        `HTTP ${mint.status} envelope=${String(mint.body?.code)} qrcode_code=${code === "" ? "(absent)" : fingerprint(code)} scan_path=${String(rawPath)}`);
+      // Use the path the gateway just told us to use, like the plugin does —
+      // but only when it is a relative path; an absolute URL would have to be
+      // probed as-is, and this script's probe() prefixes BASE_URL.
+      const target = rawPath.startsWith("/") ? rawPath : "/login/mp";
+      const confirmUrl = `${target}?code=${encodeURIComponent(code !== "" ? code : "probe-code-not-minted")}&appname=${encodeURIComponent(spec.appname)}&source=${spec.sourceParam}`;
+      await sleep(PROBE_BACKOFF_MS);
+      const page = await probe("GET", confirmUrl, { auth: false });
+      const wantLive = spec.expected === "live-200";
+      const isLive = page.status === 200;
+      const verdictNote = wantLive && isLive
+        ? "live: issue #1/#5 unblocked, the QR path is usable again"
+        : (!wantLive && !isLive)
+          ? "still dead: issue #1/#5 stay blocked on upstream, nothing to fix client-side"
+          : "FLIPPED: update loginMpScanPage.expected in the baseline";
+      check(
+        "L1d scan confirm page matches the recorded verdict (" + spec.expected
+          + (spec.observed404Since ? " since " + spec.observed404Since : "") + ")",
+        wantLive ? isLive : !isLive,
+        "HTTP " + page.status + " bodyBytes=" + page.text.length + " - " + verdictNote
+      );
+    }
+    await sleep(PROBE_BACKOFF_MS);
+  }
+}
+
 if (accessToken === "") {
   console.log("\nSKIP L2 — RACCOON_ACCESS_TOKEN is not set.");
   console.log("L2 is the tier that guards `available_points` (the 0.4.6 balance bug) and the");
@@ -516,6 +581,75 @@ if (accessToken === "") {
     if (members.length > 0) {
       console.log(`\nL2e spent ${members.length} billed chat request(s) — one per probe-set member.`);
     }
+  }
+}
+
+// --- L2f. the thinking toggle: is the pinned wire fact still true? --------
+// `src/host/raccoon-fallback.ts` pins `extra_body.thinking = { type }` as the
+// ONLY channel the gateway honours, and v1 deliberately registers
+// `reasoning: false` (see raccoon-models.ts) — the toggle is pinned but
+// unwired, because pi-ai's openai-completions cannot emit `extra_body` at all.
+// Issue #7 reports four spellings that do NOT work (`thinking`,
+// `reasoning_effort`, `enable_thinking`, `deep_think`) and concludes "thinking
+// cannot be turned off"; the one spelling that report did not test is exactly
+// the one this repo pinned.
+//
+// So this block asks the gateway the single question a future adapter change
+// would hinge on: does it still ACCEPT `extra_body.thinking`? Two short billed
+// requests, no retry, no loop — the same cost discipline as L2e.
+//
+// It deliberately does NOT assert an observable verdict. An honest reading
+// needs a human: the gateway may answer `disabled` with fewer reasoning
+// tokens, with no visible difference at all, or by ignoring the field the way
+// it ignores a top-level `thinking`. Whatever it does, the answer belongs in
+// this baseline's `note` plus ROADMAP §6.1.x — never in adapter logic read
+// backwards from one request (ROADMAP §2.3).
+{
+  const spec = contract.thinkingToggle ?? null;
+  if (spec === null) {
+    console.log("\nSKIP L2f — test/baselines/raccoon-contract.json has no thinkingToggle block.");
+  } else {
+    const arms = [
+      { label: "no extra_body (server default = thinking on)", extraBody: undefined },
+      { label: "extra_body.thinking disabled", extraBody: { thinking: { type: "disabled" } } }
+    ];
+    const seen = [];
+    for (const arm of arms) {
+      const body = {
+        model: spec.model,
+        stream: false,
+        messages: [{ role: "user", content: spec.prompt }]
+      };
+      if (arm.extraBody !== undefined) body.extra_body = arm.extraBody;
+      const res = await probe("POST", "/api/web/llm/v2/chat/completions", {
+        auth: true,
+        timeoutMs: VISION_TIMEOUT_MS,
+        body
+      });
+      if (res.transportError !== null) {
+        check(`${spec.model} ${arm.label}: request reachable`, false, `transport: ${res.transportError}`);
+        continue;
+      }
+      const usage = res.body?.usage ?? res.body?.data?.usage ?? null;
+      const answer = chatAnswer(res.text, res.body);
+      seen.push({ arm: arm.label, status: res.status, envelope: res.body?.code, usage, answerBytes: answer.length });
+      check(`${spec.model} ${arm.label}: the gateway ACCEPTED the request`,
+        res.status === 200 && (res.body?.code === 0 || res.body?.code === undefined),
+        `HTTP ${res.status} envelope=${String(res.body?.code)} usage=${JSON.stringify(usage ?? {})} answerBytes=${answer.length}`);
+      await sleep(PROBE_BACKOFF_MS);
+    }
+    // Recorded facts, printed for a human to fold into the baseline note. Not a
+    // gate: asserting a verdict here would convert a measurement into a belief
+    // after a single run.
+    if (seen.length > 0) {
+      console.log("\nL2f thinking-toggle observations (one row per arm, both billed):");
+      for (const row of seen) console.log(`  ${JSON.stringify(row)}`);
+      console.log("Fewer completion/reasoning tokens on the disabled arm is evidence");
+      console.log("the field is honoured; identical usage means the gateway ignores it.");
+      console.log("Fold the conclusion into test/baselines/raccoon-contract.json and");
+      console.log("ROADMAP.md §6.1.x before touching adapter logic.");
+    }
+    console.log(`\nL2f spent ${seen.length} billed chat request(s) — one per arm.`);
   }
 }
 

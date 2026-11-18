@@ -112,6 +112,22 @@
     },
     "note": "expected = 「这个模型能不能真的读图」的实测结论，成员就是 src 两个实测集合（RACCOON_VISION_DENYLIST / WHITELIST）的并集，由 test/raccoon.test.mjs 离线对齐。L2e 段每个成员发一次计费 chat 请求（L2 里唯一花钱的部分），不重试、不轮询。结论是测量不是设计：哪天网关把 sn-glm-5-3 接到会看的后端，这条会红，届时把否决集里的条目取出来并同步本文件。declaration（目录 tags）不在这里冻结——它随网关漂，且 2026-10-06 实测两个方向都错过。`sn-deepseek-v4-1-flash-1017` 于 2026-10-22 追加：同一张四条竖条图、同一条问题，sync 读对 4/4 色；它的 tags 与未加日期后缀的原版同为一组无 vision 的标签，故同样只能靠实测进白名单（日期后缀是构建 id，下一次改名要重新探）。"
   },
+  "loginMpScanPage": {
+    "qrcodeEndpoint": "/api/iam/v1/auth/mp/qrcode",
+    "appname": "商汤小浣熊官网",
+    "sourceParam": "platform",
+    "expected": "dead-404",
+    "observed404Since": "2026-11-04",
+    "observedAt": "2026-11-17",
+    "note": "issue #1/#5 的**恢复判据**：无凭据、零消耗、可反复跑。expected 冻结的是「上游确认页此刻的死活」，不是设计目标 —— dead-404 = 仍 404（扫码链路上游缺页，客户端无东西可修）；live-200 = 确认页回来了。这一条**只该红一次**：它红的时候把 expected 翻成 live-200 即复绿，同时回到 0.9.0 的浏览器授权 + loopback 旁路（ADR-020）判断是否还需保留。2026-11-17 实测：POST qrcode → 200（qrcode_code qr-*、expires_in 300、poll_interval 2、scan_path /login/mp）；GET /login/mp?code=…&appname=商汤小浣熊官网&source=platform → **404**，body 是 Next.js 的 __next_error__ 页（9798 字节）；GET /login → 200。0.8.5 起插件已改服务端造码 + 发码即探活，确认页回来扫码链路即刻可用，不必改码。"
+  },
+  "thinkingToggle": {
+    "capturedAt": "2026-11-17",
+    "model": "sn-sensenova-6-8-flash-lite",
+    "prompt": "只回答一个字：猫。",
+    "channel": "extra_body.thinking",
+    "note": "issue #7 第三条。报告人测过 thinking / reasoning_effort / enable_thinking / deep_think 四个字段名**全部无效**，结论「思考恒开」——但他没测本仓钉定的那个通道。本块探的正是 extra_body.thinking = {type}（src/host/raccoon-fallback.ts 的 raccoonThinkingExtraBody：off → type disabled，其余 → enabled），报告里那四个名字不在其中。**只判定网关是否接受该字段**，不断言可观测效果：一次测量写成断言就等于把测量变成长期信念（同 L2e 的纪律）。代价同 L2e：两个 arm（不带 extra_body / 带 disabled）各一次计费 chat，不重试、不轮询。读法：两行 usage 差异明显即字段生效；usage 一致即网关忽略它，与顶层 thinking 同判。结论落本 note 与 ROADMAP §6.1.x，**不进 src 逻辑**（ROADMAP §2.3：live 失败是信息不是回归）。"
+  },
   "envelope": {
     "successCode": 0,
     "codeField": "code",
