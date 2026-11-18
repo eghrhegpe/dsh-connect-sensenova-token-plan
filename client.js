@@ -34,6 +34,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	var init_i18n = __esmMin((() => {
 		zh = {
 			"panel.back": "返回会话",
+			"nav.entry": "商汤 Token Plan",
 			"panel.refresh": "刷新",
 			"panel.updated": "更新于 {time}",
 			"panel.loading": "加载中…",
@@ -285,6 +286,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		};
 		en = {
 			"panel.back": "Back to conversation",
+			"nav.entry": "SenseNova Token Plan",
 			"panel.refresh": "Refresh",
 			"panel.updated": "Updated {time}",
 			"panel.loading": "Loading…",
@@ -5061,6 +5063,21 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 			}, PanelPage)));
 		} catch (error) {
 			console.warn(`[${NS}] config card registration failed:`, error);
+		}
+		try {
+			disposers.push(ctx.slots.inject("settings.section", () => ctx.slots.register({
+				name: "settings.section",
+				id: NS,
+				order: 30,
+				label: () => tt("nav.entry"),
+				locale: NS,
+				inject: () => ({
+					tt,
+					localeSubscribe: ctx.locale.subscribe.bind(ctx.locale)
+				})
+			}, PanelPage)));
+		} catch (error) {
+			console.warn(`[${NS}] settings section registration failed:`, error);
 		}
 		try {
 			disposers.push(ctx.slots.inject("conversation.input.right", () => ctx.slots.register({
