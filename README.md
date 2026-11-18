@@ -19,7 +19,7 @@
 
 > **AI 协作会话请先读 [AGENTS.md](https://github.com/eghrhegpe/dsh-connect-sensenova-token-plan/blob/master/AGENTS.md)**——验证入口、红线与文档地图都在那里；过程文档与提交历史本身就是本仓库工作面的一部分。
 > 三个常被外部审读问起的疑问，预答在这里：
-> - `lib/` 与根 `client.js` 是**入库的构建产物**：`github:` 安装源不跑 prepack，不入库则直装即坏（[docs/ADR.md](docs/ADR.md) ADR-005）
+> - `lib/` 与根 `client.js` 是**构建产物、不入库**：由 `prepare` 在安装时现场构建；`github:` 直装需先把本插件加进 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml` 的 `allowBuilds`（未批准报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，pnpm 会打印要加的那行——见安装节）
 > - `docs/sensenova-api-reference/` 是商汤**官方文档的本地容器**，逐文件出处与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 > - 本仓库由 AI 协作开发，其提交历史里的过程痕迹是工作方式的一部分，不是疏漏
 >
@@ -89,7 +89,7 @@
    dsh plugin --profile web add dsh-connect-sensenova-token-plan       # Web 端
    dsh plugin --profile desktop add dsh-connect-sensenova-token-plan  # 桌面端
    ```
-
+   > **`github:` 直装**若报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`：把 pnpm 打印的 `allowBuilds:` 那行加进 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`（桌面端即 `~/.dsh/profiles/desktop/pnpm-workspace.yaml`），再重试——`prepare` 现场构建 `lib/` 与根 `client.js`。
 2. **完全退出 DSH（含托盘）再启动**。
 
 3. 打开 DSH 的 **Plugins 页**，找到本插件的插件卡（面板是页内的内联卡片，**不在侧边栏**）。

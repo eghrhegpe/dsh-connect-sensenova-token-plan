@@ -50,7 +50,8 @@
     "host-range:update": "node tools/update-host-range.mjs",
     "host-range:check": "node tools/update-host-range.mjs --check",
     "build": "tsdown -c tsdown.config.mjs",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+  "prepare": "npm run build"
   },
   "dsh": {
     "bundle": {

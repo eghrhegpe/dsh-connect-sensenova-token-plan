@@ -57,7 +57,7 @@ node test/e2e.mjs           # 端到端单独跑：拉起真 Host + 假平台，
 npm test                    # 全量离线测试门禁 = node test/run-all.mjs（套件名册单一声源 test/suites.mjs；各门禁探到 typescript / tsdown / jscpd / dsh CLI 才实跑，否则 SKIP）
 npm run test:list           # 只列名册不执行
 node test/run-all.mjs --only=<子串>   # 按域裁剪的正式形态（--skip=<子串> 反向；空选择直接红，绝不假装通过）
-npm run build               # 改 src/（host 或 client）后必跑：重建 lib/ 与根 client.js；两者已**版本化入库**（不再 gitignore，理由见 .gitignore 注释 + 兄弟插件 dsh-connect-qoder 的 docs/issues/19：github: 安装源不跑 prepack，lib 不入库则 GitHub 直装坏）；提交源码时务必把产物一并提交，否则 CI 的 build-freshness 门禁会红
+npm run build               # 改 src/（host 或 client）后必跑：重建 lib/ 与根 client.js；两者由 `prepare` 在安装/发布时**现场构建，不入库**（git 依赖只在 `allowBuilds` 批准后跑 prepare，未批准报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，修法见 README 安装节）；build-gate 仍校验「client.js 是 src 的忠实重建 + lib 切分闭包」，与入库无关
 ```
 
 - **e2e 已在 `npm test` 门禁里**（经 `test/e2e-gate.mjs`），但只在这台机器装了 dsh CLI 时才真跑；
