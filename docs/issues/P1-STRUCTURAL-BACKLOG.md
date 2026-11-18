@@ -1,6 +1,7 @@
 # 结构债台账（P1，2026-10-05 建）
 
 承接 [P0-OPTIMIZATION-PROPOSAL.md](./P0-OPTIMIZATION-PROPOSAL.md) 的结构债清单。
+入口迁移（面板从 Plugins 页卡迁到设置页 + 侧栏）方案见 [P2-ENTRY-MIGRATION.md](./P2-ENTRY-MIGRATION.md)（待拍板，未实现）。
 P0 两条已修 + P1 writePayload 收编后的**剩余结构性欠账**，逐项给现状 / 为什么没动 / 出手条件。
 
 ---
