@@ -23,7 +23,7 @@ export const zh = {
   // the moment either side is edited — the pair used to be kept equal by a
   // test, which kept the duplication alive rather than questioning it.
   "panel.back": "返回会话",
-  "nav.entry": "商汤 Token Plan",
+  "nav.entry": "接入 商汤",
   "panel.refresh": "刷新",
   "panel.updated": "更新于 {time}",
   "panel.loading": "加载中…",
@@ -355,7 +355,7 @@ export const zh = {
 /** English dictionary, mirroring every zh key. */
 export const en: typeof zh = {
   "panel.back": "Back to conversation",
-  "nav.entry": "SenseNova Token Plan",
+  "nav.entry": "Access SenseNova",
   "panel.refresh": "Refresh",
   "panel.updated": "Updated {time}",
   "panel.loading": "Loading…",

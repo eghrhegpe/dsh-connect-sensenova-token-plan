@@ -34,7 +34,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 	var init_i18n = __esmMin((() => {
 		zh = {
 			"panel.back": "返回会话",
-			"nav.entry": "商汤 Token Plan",
+			"nav.entry": "接入 商汤",
 			"panel.refresh": "刷新",
 			"panel.updated": "更新于 {time}",
 			"panel.loading": "加载中…",
@@ -286,7 +286,7 @@ var dsh_connect_sensenova_token_plan_client = (function() {
 		};
 		en = {
 			"panel.back": "Back to conversation",
-			"nav.entry": "SenseNova Token Plan",
+			"nav.entry": "Access SenseNova",
 			"panel.refresh": "Refresh",
 			"panel.updated": "Updated {time}",
 			"panel.loading": "Loading…",
