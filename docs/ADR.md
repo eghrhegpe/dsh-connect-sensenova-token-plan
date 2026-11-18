@@ -43,7 +43,7 @@
 ## ADR-005 构建产物 lib/ 从「gitignore 不入库」改为「版本化入库」
 
 - **日期**：2026-10-03
-- **状态**：现行（现行表述见 [ARCHITECTURE.md](./ARCHITECTURE.md) 语言表、`docs/SETUP.md` §2、`docs/DSH-PLUGIN.md` §构建化、`.gitignore` 注释；门禁见 `ci.yml` 的 `build-freshness` job）
+- **状态**：已被 ADR-021 取代（原裁定见下；取代记录见 ADR-021）
 - **裁定**：`lib/`（Host ESM bundle + 切分 chunk）与根 `client.js`（Client IIFE）**不再 gitignore，随 `src/` 一起提交**；CI 新增 `build-freshness` 硬门禁——`npm run build` 后 `git diff --exit-code -- lib client.js` 必须为空，并双跑构建比对字节稳定，防止「源码动了却没重生成产物」。发布到 npm registry 的那一份仍由 `prepack` 现场重建，不受影响。
 - **理由**：DSH 市场的 `github:` 安装源是 **pnpm git-dep**，pnpm 11 在没有 allowBuilds 批准时**不会**替仓库跑 `prepack`/`prepare`——此前 `lib/` 被 gitignore，用户打 GitHub 仓库地址装出来的插件缺宿主入口 `lib/index.js`，卡片静默失效。兄弟插件 `dsh-connect-qoder`（其 `.gitignore` 的 docs/issues/19）已踩过同一坑并采用同款版本化方案。另：构建产物经实测**字节可复现**（双跑 `diff` 为空），门禁可信。
 - **取代**：2026-09-30 的「`lib/` 与 `client.js` 一并 gitignore、产物彻底不入库」方案（原载 [ROADMAP.md](./ROADMAP.md) §6.2，已在该处标注被本 ADR 推翻）。该方案当时依赖「删 lib 可重建」即可，未考虑 github: 安装源不跑 prepack 的现实，故作废。
@@ -189,3 +189,12 @@
 - **边界**：① 只动小浣熊半的**登录入口**，凭据仍只进 DSH 凭据服务（红线 1/2），Token Plan 全链、provider 装配、红线 7 一律不动；② loopback 端口由 OS 分配（`port 0`），接收端单飞（路由级一个接收端，与 walk 同一 idiom），卸载即取消；③ 默认 `appname` 是官方注册应用（办公小浣熊客户端，今日实测成功值），本插件不自注册新应用；④ 浏览器打开动作在客户端（`window.open`，宿主无特权），弹窗被拦时卡片保留手动链接兜底。
 - **端到端定案（2026-11-17 当日点穿）**：loopback 投递成立——真实用户同意后，服务端**确实**按 `redirect` 把一次性 `authorization_code` 跳回 `http://127.0.0.1:<port>/auth/callback`（接收端按七规则收下），`login_with_authorization_code` 换码回 `code:0`。真实答案的形状**推翻了两处读码预期**：① IAM 令牌的 `iss` 是**不带 scheme 的 host 形** `xiaohuanxiong.com/iam`（官方 fallback 即 `new URL(LOGIN_URL).host + "/iam"`；按 `https://…/iam` 严格等值判会把每个真 token 误拒在成功门外——`RACCOON_IAM_ISSUER` 常量与测试 E4 钉形为此而设）；② 网关给 IAM 令牌**配发 refresh_token**（与 access 同刻过期，+30 天）——成功门「IAM 半边不要求 refresh」仍成立，但「IAM 没有 refresh」是官方自己的存储选择，不是事实；本实现透传：网关配什么存什么（测试 C4b/C4c 钉形）。
 - **复核条件**：① loopback 投递点穿失败 ⇒ 通道降级为「待上游确认」，面板入口保留但文案改指扫码；② 上游复活 `/login/mp`（§6.1.10 复测判据：一次造码 + 一次页面 GET 回 200）⇒ QR 链复活为主通道，本条通道降为并行入口（两条共存，不做独占开关）；③ 服务端对 loopback 投递加预注册票据或 redirect 白名单 ⇒ 接收端规则与 URL 构造按复测重述；④ 网关把换码端点迁到 IAM 族（string envelope）⇒ 成功门按「一族一解析器」拆第二解析，永不混用（`raccoon.ts` 桶头裁定）；⑤ 官方客户端改 refresh 提前窗为条件式（IAM 0 窗，`scheduleAuth.js` L76）已被参考插件整段抄 300s 的差异项挂账，随刷新修复合并处理，不在本条。
+
+## ADR-021 构建产物从「版本化入库」改为「prepare 现场构建、不入库」：安装说明教 allowBuilds 批准
+
+- **日期**：2026-11-18
+- **状态**：现行（实现见 `.gitignore`（gitignore `lib/` 与根 `client.js`）、`package.json` 的 `prepare`（=`npm run build`）、README 安装节（allowBuilds 批准步骤）、`ci.yml`（`build-freshness` job 移除）、AGENTS.md 验证节；`build-gate` 保留）
+- **裁定**：`lib/` 与根 `client.js` 是**构建产物、不入库**（重新 gitignore）；由 `prepare` 在**安装/发布时现场构建**。DSH 市场的 `github:` 直装走 pnpm git-dep，pnpm 只在 `allowBuilds` 批准后跑 `prepare`——未批准则报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`（**响亮、可修**，pnpm 会打印要加的那行）。安装说明见 README 安装节：把 pnpm 打印的 `allowBuilds:` 那行（形如 `dsh-connect-sensenova-token-plan@git+https://…#<commit>: true`，含 commit hash）加进对应 profile 的 `~/.dsh/profiles/<profile>/pnpm-workspace.yaml`（桌面端即 `~/.dsh/profiles/desktop/pnpm-workspace.yaml`），再重试安装。CI 的 `build-freshness` job 移除（比对「已提交产物」已无意义）；`build-gate` 保留（仍校验「client.js 是 src 的忠实重建 + lib 切分闭包 + 字节可复现」，与是否入库无关）。
+- **理由**：ADR-005 的「产物入库」是把 pnpm 构建批准（`allowBuilds`）绕开的替代路径——它不是对抗，但把安装机制藏进了预编译产物，社区学不到「这些插件要构建批准」。对齐 DeepSeek 构建流的正确姿势是走 `prepare` + 把批准步骤**写进安装说明**。实测（2026-11-18，最小 git-dep 仓库）：无批准 → `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`；带精确 `allowBuilds` 键（含 hash，错误信息即给）→ `prepare` 跑、产物现场生成（`exit=0`）。兄弟先例：`dsh-providers-hub` 在 desktop profile 的 `allowBuilds` 里（故能靠 prepare 构建）；`dsh-connect-workbuddy` 不在（其 `lib/` 是手动/link 构建，**不是**平台跑——不是范例）。
+- **取代**：ADR-005 的「`lib/` 与根 `client.js` 版本化入库 + CI `build-freshness` 硬门禁」裁定（本条改为「`prepare` 现场构建 + README 教 allowBuilds」）。ADR-005 的「构建产物字节可复现」结论不失效（`build-gate` 仍双跑比对）；npm registry 分发仍走 `prepack`（不变）。
+- **边界**：只动**分发方式**（产物入库 → `prepare` 构建）；`lib/`、`client.js` 仍是 `files` 白名单成员与构建产物；`build-gate` 的 chunk 闭包 + 忠实重建校验保留。
