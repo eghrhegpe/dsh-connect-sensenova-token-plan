@@ -29,6 +29,14 @@
  *      它，shell 的模块注册表供给它，所以它不在安装树里是正常形态。按包存在性
  *      断言（旧版的做法）只会把上游的打包方式当成契约，见 PITFALLS §58。
  *
+ * 2026-11-19 漂移记录：rc.3 起宿主打包风格换了——双引号变反引号、参数空白被剥
+ * 掉（`keyedObservableHook(source, defaultKey)` → `keyedObservableHook(source,defaultKey)`）、
+ * `scope === "session-maybe"` 变成 `scope===`session-maybe``。四项语义断言不变（rc.5
+ * 逐条核验过：座席仍声明 kind list + scope session、仍被 InputBar 渲染、session
+ * adapter 仍经 `binding.session.projections.faceOf(key)` 供 `modelSelection` 源族），
+ * 字节锚点改 bundler-容忍正则：三种引号风格都认、空白可选。否则宿主每换一次打包器
+ * 门禁就误报一次「座席是死的」——同 PITFALLS §58「把上游打包方式当契约」一类。
+ *
  * ## 怎么跑
  *
  * 纯静态读文件，不装 peer、不拉 Host、不碰网络。候选 scope 根按「本机 DSH 副本」
@@ -233,7 +241,7 @@ function assertScope(scope, label) {
     const txt = readFileSync(convJs, "utf8");
     check(
       `${label}: client.js 仍 renderSlot conversation.input.right`,
-      txt.includes('renderSlot("conversation.input.right"'),
+      /renderSlot\(\s*['"`]conversation\.input\.right['"`]/.test(txt),
       "声明了但不渲染 = 座席是死的"
     );
   } catch (error) {
@@ -246,8 +254,8 @@ function assertScope(scope, label) {
     const txt = readFileSync(sessJs, "utf8");
     check(
       `${label}: session adapter 声明 keyedHooks projection`,
-      txt.includes('keyedHooks: ["projection"]') &&
-        txt.includes("binding.session.projections.faceOf(key)"),
+      /keyedHooks\s*:\s*\[\s*['"`]projection['"`]\s*\]/.test(txt) &&
+        /binding\.session\.projections\.faceOf\(\s*key\s*\)/.test(txt),
       "useProjection 的唯一来源是 session scope adapter 的 projection 源族"
     );
   } catch (error) {
@@ -267,12 +275,12 @@ function assertScope(scope, label) {
     );
     check(
       `${label}: keyedHooks 经 standardHookPropName 物化为 use<Name> prop`,
-      body.includes("standardHookPropName") && body.includes("keyedObservableHook(source, defaultKey)"),
+      body.includes("standardHookPropName") && /keyedObservableHook\(\s*source\s*,\s*defaultKey\s*\)/.test(body),
       "projection → useProjection 的物化路径（打包产物里是 (0, mod.standardHookPropName)(name) 形式）"
     );
     check(
       `${label}: session（非 session-maybe）作用域 optional=false（严格必需）`,
-      txt.includes("strict keyed standard hook") && txt.includes('scope === "session-maybe"'),
+      /strict\s+keyed\s+standard\s+hook/.test(txt) && /scope\s*===\s*['"`]session-maybe['"`]/.test(txt),
       "缺源会抛 SlotAssemblyError，不存在「可能没注入」的形态"
     );
   } catch (error) {
