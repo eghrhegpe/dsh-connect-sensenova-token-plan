@@ -333,7 +333,7 @@ export { isChatModel };
 const PROBED_EFFORT: Readonly<Record<string, { low: boolean; medium: boolean; high: boolean; xhigh: boolean; max: boolean }>> = Object.freeze({
   "deepseek-v4-flash": { low: true, medium: true, high: true, xhigh: true, max: false },
   "glm-5.2":           { low: true, medium: true, high: true, xhigh: false, max: true },
-  "sensenova-6.8-flash-lite": { low: true, medium: true, high: true, xhigh: false, max: false },
+  "sensenova-6.8-flash-lite": { low: true, medium: true, high: true, xhigh: true, max: true },
   "deepseek-v4-pro":   { low: false, medium: false, high: true, xhigh: false, max: false },
   // deepseek-flash: medium probed 200; low was inconclusive (429, re-run
   // pending) so it stays closed — "not measured" is not "supported".

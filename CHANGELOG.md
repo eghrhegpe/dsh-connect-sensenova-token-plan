@@ -2,6 +2,15 @@
 
 本文件只记**公开行为变化**（新增能力、破坏性改动、重要修复）。实现细节、重构与测试加固请直接看 `git log`。
 
+## [0.9.1] — 2026-11-19
+
+Gitee 分支修复合并：API key 解析、429 退避、思考档位、下线模型过滤。
+
+- **修复「Provider is not configured」**：`apiKeyStore.resolve()` 探测 `SENSENOVA_TOKEN_PLAN_API_KEY`，并扫描凭据服务所有含 `sensenova` 的引用。
+- **429 退避缩短**：`initialDelayMs 1500→1000`、`maxDelayMs 20000→8000`（实测限流约 5 秒恢复）。
+- **思考档位补全**：`sensenova-6.8-flash-lite` 的 `xhigh`/`max` 实测可用。
+- **下线模型源头过滤**：`sensenova-u1.5-lite` 已停用（/chat/completions 404）但仍在 /v1/models，`fetchModelCatalog` 按 `RETIRED_MODEL_IDS` 过滤。
+
 ## [0.9.0] — 2026-11-17
 
 小浣熊半的登录链路重建：QR 确认页在上游已死，本版采纳官方客户端自己的「浏览器授权 + loopback 回调」为第二登录入口，并新增「桌面 App 只读直连」。
