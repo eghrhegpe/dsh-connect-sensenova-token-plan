@@ -123,6 +123,27 @@ export function createApiKeyStore({ credentials = null, env = process.env }: { c
           const resolved = await service.resolve(API_KEY_REF).catch(() => undefined);
           const value = verbatim(resolved?.value, "");
           if (typeof value === "string" && value.trim() !== "") return { value, source: "credentials" };
+          // FIX: DSH's "add model" page stores the key under the provider-derived ref
+          // (deriveKeyRef("sensenova-token-plan") === "SENSENOVA_TOKEN_PLAN_API_KEY") rather
+          // than the plugin's hard-coded API_KEY_REF ("SENSENOVA_API_KEY"). Probe that ref
+          // and scan every known ref for a sensenova match so the provider is configured.
+          const SENSENOVA_REF_HINTS = ["SENSENOVA_TOKEN_PLAN_API_KEY"];
+          for (const hint of SENSENOVA_REF_HINTS) {
+            const r2 = await service.resolve(hint).catch(() => undefined);
+            const v2 = verbatim(r2?.value, "");
+            if (typeof v2 === "string" && v2.trim() !== "") return { value: v2, source: "credentials" };
+          }
+          const sensenovaValues = (service as any).values;
+          if (sensenovaValues instanceof Map) {
+            for (const k of sensenovaValues.keys()) {
+              if (typeof k !== "string" || !/sensenova/i.test(k)) continue;
+              if (k === API_KEY_REF) continue;
+              const r3 = await service.resolve(k).catch(() => undefined);
+              const v3 = verbatim(r3?.value, "");
+              if (typeof v3 === "string" && v3.trim() !== "") return { value: v3, source: "credentials" };
+            }
+          }
+
         }
       } catch {
         // No usable answer from the service: fall through to memory/env.
