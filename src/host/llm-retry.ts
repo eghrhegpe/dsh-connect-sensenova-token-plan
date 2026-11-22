@@ -98,8 +98,8 @@ export function buildRetryPolicyConfig() {
     maxRetries: 8,
     retryableCodes: retryableCodes(),
     backoff: {
-      initialDelayMs: 1_500,
-      maxDelayMs: 20_000,
+      initialDelayMs: 1_000,
+      maxDelayMs: 8_000,
       jitterRatio: 0.25
     }
   };
