@@ -753,7 +753,7 @@ async function withNetwork(stub, body) {
       return new Response(JSON.stringify({
         data: [
           { id: "sensenova-6.8-flash-lite", input_modalities: ["text", "image"] },
-          { id: "sensenova-u1.5-lite", input_modalities: ["text"], output_modalities: ["image"] }
+          { id: "sensenova-u1-fast", input_modalities: ["text"], output_modalities: ["image"] }
         ]
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
@@ -782,8 +782,9 @@ async function withNetwork(stub, body) {
       llm.hasApiKey === true && llm.keySource === "credentials", JSON.stringify(llm));
     check("the llm block counts models and vision models",
       llm.modelCount === 1 && llm.visionCount === 1, JSON.stringify(llm));
-    // The image-output model (sensenova-u1.5-lite) is not a chat model and
-    // must not appear in the picker roster (isChatModel, 2026-09-29).
+    // The image-output model (sensenova-u1-fast; 0.10.1 起 fixture 换掉已退役的
+    // u1.5-lite——RETIRED_MODEL_IDS 源头过滤后目录里不再有它) is not a chat model
+    // and must not appear in the picker roster (isChatModel, 2026-09-29).
     check("the roster excludes the image-output model",
       JSON.stringify(llm.models?.map((m) => m.id)) === JSON.stringify(["sensenova-6.8-flash-lite"]),
       JSON.stringify(llm.models));
@@ -801,9 +802,9 @@ async function withNetwork(stub, body) {
     // facts, not operator preferences. Only `drawPreferredModel` is
     // preference-shaped and absent here.
     check("auto-pick still reports drawModel + candidates when the catalog exists",
-      llm.drawModel === "sensenova-u1.5-lite" &&
+      llm.drawModel === "sensenova-u1-fast" &&
       llm.drawCandidateCount === 1 &&
-      JSON.stringify(llm.drawCandidateIds) === JSON.stringify(["sensenova-u1.5-lite"]),
+      JSON.stringify(llm.drawCandidateIds) === JSON.stringify(["sensenova-u1-fast"]),
       JSON.stringify({ drawModel: llm.drawModel, candidates: llm.drawCandidateIds }));
     check("auto-pick carries no operator preference",
       !("drawPreferredModel" in llm), JSON.stringify(llm.drawPreferredModel));

@@ -106,9 +106,12 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       thinkingLevelMapFor({ id: "deepseek-v4-pro" }).medium === null &&
       thinkingLevelMapFor({ id: "deepseek-flash" }).low === null &&
       thinkingLevelMapFor({ id: "kimi-k3" }).low === null);
-    check("max is rejected off by default (400 on flash-lite / v4-flash)",
-      thinkingLevelMapFor({ id: "sensenova-6.8-flash-lite" }).max === null);
-    check("glm-5.2 alone offers max (probed 200)",
+    check("flash-lite offers max + xhigh after the 2026-11-19 probe (baseline driftLog 2026-11-22)",
+      thinkingLevelMapFor({ id: "sensenova-6.8-flash-lite" }).max === "max" &&
+      thinkingLevelMapFor({ id: "sensenova-6.8-flash-lite" }).xhigh === "xhigh");
+    check("deepseek-v4-flash keeps max closed (its 400 stands; only flash-lite flipped)",
+      thinkingLevelMapFor({ id: "deepseek-v4-flash" }).max === null);
+    check("glm-5.2 offers max (probed 200, 2026-09-29)",
       thinkingLevelMapFor({ id: "glm-5.2" }).max === "max");
     check("cost is zeroed on all four fields", JSON.stringify(descriptor.cost) === JSON.stringify(NO_COST) &&
       descriptor.cost.input === 0 && descriptor.cost.output === 0 &&
