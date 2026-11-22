@@ -6,6 +6,11 @@
     "apiKeyRef": "SENSENOVA_API_KEY",
     "driftLog": [
       {
+        "date": "2026-11-22",
+        "change": "sensenova-6.8-flash-lite 的 reasoningEffort xhigh/max 由 false 翻 true（src/host/llm-models.ts 的 PROBED_EFFORT 表同轮同步）：Gitee v0.8.9 分支 2026-11-19 实测 200（GitHub PR #9 申报）；支持面相对 2026-09-29/30 探针前进（当时这两格未测/保持关）。live-contract 回放跟进复核；若回 400 按新实测翻回并同记 driftLog。",
+        "evidence": "GitHub PR #9 申报（2026-11-18）：POST /v1/chat/completions reasoning_effort=xhigh / max 对 sensenova-6.8-flash-lite 均 HTTP 200（Gitee v0.8.9 分支 2026-11-19 实测，未附原文）。本仓未联网复核——live-contract 定时档跟进。"
+      },
+      {
         "date": "2026-10-02",
         "change": "max_tokens 上限探针首测（live-contract §2c）：flash-lite max_tokens:131072 → 400「field MaxTokens invalid, should be in [1, 65536]」（目录 max_output_length 65536 是硬上限）；v4-flash / glm-5.2 max_tokens:131072 → 200（接受翻倍）。同时坐实 harness 兜底：dsh-llm-pi-ai resolveRouteModels 对未声明 maxTokens 强制填 defaultMaxTokens ?? 32768——descriptor 自此声明目录权威值（maxOutputLength 有则声明、缺则回落不声明），不再让输出被截在 32768。",
         "evidence": "npm run test:live:contract 2026-10-02 20:30 输出：sensenova-6.8-flash-lite max_tokens:131072 → HTTP 400 {\"error\":{\"message\":\"field MaxTokens invalid, should be in [1, 65536]\"}}；deepseek-v4-flash max_tokens:131072 → HTTP 200；glm-5.2 max_tokens:131072 → HTTP 200。"
@@ -28,7 +33,7 @@
       "chat": true,
       "visionInput": true,
       "thinkingField": "reasoning",
-      "reasoningEffort": { "max": false, "xhigh": false, "low": true, "medium": true, "none": true, "default": "high" },
+      "reasoningEffort": { "max": true, "xhigh": true, "low": true, "medium": true, "none": true, "default": "high" },
       "thinkingObject": "untested",
       "status": "ok",
       "contextLength": 262144,

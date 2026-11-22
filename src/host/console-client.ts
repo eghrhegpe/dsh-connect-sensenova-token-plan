@@ -30,6 +30,20 @@ import { createCoalescedFetch } from "./coalesced-fetch.ts";
 import type { ResolvedSettings } from "./host-config.ts";
 
 /**
+ * Models the platform has retired but still lists in /v1/models.
+ *
+ * A retired id gets filtered at the source (fetchModelCatalog) so it never
+ * reaches the panel roster or the published provider — the API still
+ * advertises it (2026-11 probe: sensenova-u1.5-lite returns 404 on
+ * /chat/completions but stays in /v1/models), and filtering only the
+ * catalog file would be overwritten on the next restart's live poll.
+ * Add a retired id here when the platform stops serving it.
+ */
+export const RETIRED_MODEL_IDS: ReadonlySet<string> = Object.freeze(new Set([
+  "sensenova-u1.5-lite"
+]));
+
+/**
  * A short identity fingerprint for a cache key.
  *
  * The shared console/catalog cache is keyed per IDENTITY, not per URL: the
@@ -209,7 +223,7 @@ export async function fetchModelCatalog(
             const source = obj(entry);
             return { id: str(source.id, ""), ...source };
           })
-          .filter((entry: { id?: string }) => entry.id !== "")
+          .filter((entry: { id?: string }) => entry.id !== "" && !RETIRED_MODEL_IDS.has(entry.id ?? ""))
       : [];
     return models;
   };

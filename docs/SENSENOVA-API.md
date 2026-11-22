@@ -237,7 +237,7 @@ IAM 拒绝登录时返回 `google.rpc.Status` 信封：顶层 `message` 是泛�
 
 | 模型 | 对话可用 | 思考字段 | 实测备注 |
 |---|---|---|---|
-| `sensenova-6.8-flash-lite` | ✅ 200 | `reasoning` | 唯一吐 `reasoning` 的；当天曾整体 404「model is not found」（抖动，见 §7.6）；**2026-09-30 目录仍声明 `input_modalities:["text","image"]`** |
+| `sensenova-6.8-flash-lite` | ✅ 200 | `reasoning` | 唯一吐 `reasoning` 的；当天曾整体 404「model is not found」（抖动，见 §7.6）；**2026-09-30 目录仍声明 `input_modalities:["text","image"]`**；**2026-11-19 实测 `xhigh`/`max` 档 200 可用（GitHub PR #9 申报，基线已翻 true，见 driftLog 2026-11-22；live-contract 复核跟进）** |
 | `deepseek-v4-flash` | ✅ 200 | `reasoning_content` | 思考 ~20–32 rTok；`max` 400、`xhigh` 200；**2026-09-30 目录 `input_modalities` 回退 `["text"]`** |
 | `deepseek-v4-pro` | ✅ 200 | `reasoning_content` | 思考 ~123 rTok（128 配额几乎全烧）；**2026-09-30 目录 `input_modalities` 回退 `["text"]`** |
 | `deepseek-flash` | ✅ 200 | `reasoning_content` | **2026-09-30 目录 `input_modalities` 回退 `["text"]`** |
@@ -251,9 +251,9 @@ IAM 拒绝登录时返回 `google.rpc.Status` 信封：顶层 `message` 是泛�
 
 - **思考字段分家**：flash-lite → `message.reasoning`；deepseek-v4-flash/v4-pro/deepseek-flash/glm-5.2/kimi-k3 → `message.reasoning_content`。DeepSeek 系文档：**带 `tools` 时须回传所有历史 `reasoning_content`**（否则工具调用链路不完整）；不带 tools 时回传了也会被忽略。
 - **`thinking` 参数**：字符串形态全线 400；object 形态 `{"type":"enabled"/"disabled"}` 在 deepseek-v4-flash / glm-5.2 实测有效（disabled → `reasoning_tokens=0`）；v4.1-flash 文档自述支持；GLM 官方文档称 disabled 会失败——实测可用（文档错）。
-- **`reasoning_effort`**：平台报错列表 `low/medium/high/xhigh/none` 是**并集**，各模型支持面不同：`max` 仅 glm（实测 200）与 v4.1-flash（文档原生）支持，flash-lite / v4-flash 400；`xhigh` v4-flash 实测 200（文档称映射到 high）。
+- **`reasoning_effort`**：平台报错列表 `low/medium/high/xhigh/none` 是**并集**，各模型支持面不同且**随平台演进**：`max` 仅 glm（实测 200）、v4.1-flash（文档原生）与 **flash-lite（2026-11-19 实测 200，GitHub PR #9；09-30 实测为 400）** 支持；v4-flash 400；`xhigh` v4-flash 实测 200（文档称映射到 high），flash-lite 亦于 11-19 实测转 200。
 - **思考模式采样规则**（DeepSeek v4/v4.1 文档）：temperature / presence_penalty / frequency_penalty **不生效**（传入不报错）；top_p 思考模式最小 0.95、非思考固定 1.0。GLM top_p 默认 0.95。
 - **`max_tokens` 默认（文档）**：flash-lite 65535；v4-flash 非思考 8K / 思考 64K（`max` 档 128K）；v4.1-flash 131072（范围 [1,393216]）；glm 64K（[1,128K]）。目录 `max_output_length` 是权威值（v4.1-flash 目录为 65536，与文档默认 131072 不符——以目录为准）。**2026-10-02 真机探针**：flash-lite `max_tokens:131072` → 400「should be in [1, 65536]」（目录 65536 是硬上限）；v4-flash / glm-5.2 `131072` → 200（目录未声明上限，平台实际接受更高）。**harness 兜底是减半不是无上限**：`dsh-llm-pi-ai` 对未声明的 maxTokens 强制填 `defaultMaxTokens ?? 32768`——本插件 descriptor 自 0.5.0 起声明目录权威值（有则声明、缺则回落不声明），不再让 harness 把输出截在 32768。
-- **U 系列不是对话模型**：`sensenova-u1-fast`/`u1.5-lite` 是图像生成（`output_modalities:["image"]`，独立 images 数组 API），对话端点 404。`llm-models.ts` 的 `isChatModel` 按 `output_modalities` 把它们从**选择器 roster、descriptor 列表、注册计数**三处一致排除，杜绝「选了就 404」。
+- **U 系列不是对话模型**：`sensenova-u1-fast`/`u1.5-lite` 是图像生成（`output_modalities:["image"]`，独立 images 数组 API），对话端点 404。`llm-models.ts` 的 `isChatModel` 按 `output_modalities` 把它们从**选择器 roster、descriptor 列表、注册计数**三处一致排除，杜绝「选了就 404」。0.10.1 起 `console-client.ts` 的 `RETIRED_MODEL_IDS` 再对**目录源头**过滤已下线但仍挂在 `/v1/models` 的模型（首批 `sensenova-u1.5-lite`）：平台日后恢复服务时需先从集合移除。
 - **可用性抖动**：flash-lite 当天出现整体 404「model is not found」（连 `reasoning_effort:"high"` 对照都 404）。按错误码文档（§14）404 = 模型下线或不存在，遇到先查平台状态，不是参数语义。
 - **目录声明 ≠ 实测能力（2026-09-30 复核）**：`input_modalities` 是平台的**声明字段**，插件 vision 识别（`identifyVisionModel`）按它判定（`"image"` ∈ `input_modalities` 才算看图，方向宽松——缺字段不算）。2026-09-29 初测时 6 家 DeepSeek/GLM/Kimi 系声明 `["text","image"]`，2026-09-30 平台把其中 5 家（`deepseek-v4-flash`/`v4-pro`/`deepseek-flash`/`glm-5.2`/`kimi-k3`，外加 403 的 `deepseek-v4.1-flash`）退回 `["text"]`，`sensenova-6.8-flash-lite` 仍声明 `["text","image"]`。**推理响应方言不受此次目录改动影响**：glm-5.2 复核仍 200 且吐 `reasoning_content`，flash-lite 仍吐 `reasoning`。即：目录回退只影响插件 vision 清单（5 家从「可看图」掉出），不影响思考透出。`test/contract.test.mjs` 按刷新后的基线（`visionInput:false`）全绿；`live-contract` 是抓这类目录漂移的护栏，红了先查基线 `driftLog`，再决定是否随平台刷新。
