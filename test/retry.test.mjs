@@ -65,6 +65,8 @@ const BASE_URL = "https://token.sensenova.cn/v1";
       b.initialDelayMs >= 1000, String(b.initialDelayMs));
     check("backoff.maxDelayMs caps the worst-case wait (>=10000ms)",
       b.maxDelayMs >= 10_000, String(b.maxDelayMs));
+    check("backoff current values (0.10.1 audit): initial 1s / cap 20s — PR #9's 8s cap rejected on the floor",
+      b.initialDelayMs === 1_000 && b.maxDelayMs === 20_000, JSON.stringify(b));
     check("backoff.jitterRatio is within [0, 1]",
       b.jitterRatio >= 0 && b.jitterRatio <= 1, String(b.jitterRatio));
   } catch (error) {

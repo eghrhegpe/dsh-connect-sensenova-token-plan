@@ -39,9 +39,9 @@ import type { ResolvedSettings } from "./host-config.ts";
  * catalog file would be overwritten on the next restart's live poll.
  * Add a retired id here when the platform stops serving it.
  */
-export const RETIRED_MODEL_IDS: ReadonlySet<string> = new Set([
+export const RETIRED_MODEL_IDS: ReadonlySet<string> = Object.freeze(new Set([
   "sensenova-u1.5-lite"
-]);
+]));
 
 /**
  * A short identity fingerprint for a cache key.

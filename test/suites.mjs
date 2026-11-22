@@ -65,7 +65,7 @@
  * @type {ReadonlyArray<{name: string, kind: "suite"|"gate", note: string}>}
  */
 export const SUITES = Object.freeze([
-  // ── the 32 *.test.mjs suites (this exact set is what package.test.mjs pins
+  // ── the 34 *.test.mjs suites (this exact set is what package.test.mjs pins
   //    against disk; the five gate files below are exempt there, as e2e-gate
   //    has been since it stopped being a *.test.mjs) ───────────────────────
   { name: "auth.test.mjs", kind: "suite", note: "login / PKCE / JWE / throttle classification" },
@@ -78,9 +78,11 @@ export const SUITES = Object.freeze([
   { name: "render.test.mjs", kind: "suite", note: "the client render surface" },
   { name: "render-dom.test.mjs", kind: "suite", note: "shipped client.js in jsdom + REAL react (SKIPs without the devDeps)" },
   { name: "parsers.test.mjs", kind: "suite", note: "response parsing + shape-drift detection" },
+  { name: "retired-models.test.mjs", kind: "suite", note: "RETIRED_MODEL_IDS catalog source filter (0.10.1): retired ids out on live + cached paths, empty-id behaviour kept, failure path untouched" },
   { name: "snapshot-aggregate.test.mjs", kind: "suite", note: "snapshot body aggregation" },
   { name: "provider-refresh.test.mjs", kind: "suite", note: "background provider refresher (arm gates + per-tick switch + persistence)" },
   { name: "provider.test.mjs", kind: "suite", note: "provider registration state machine" },
+  { name: "api-key-store.test.mjs", kind: "suite", note: "the closed dual-ref key probe (0.10.1): derived-ref resolution, probe precedence, /sensenova/i isolation negatives, the internal-.values rejection, the closed query log" },
   { name: "provider-rollback-guard.test.mjs", kind: "suite", note: "rollback path (only runs when things broke)" },
   { name: "switch-precedence.test.mjs", kind: "suite", note: "panel value vs config default" },
   { name: "config.test.mjs", kind: "suite", note: "settings resolution + auth overrides" },
