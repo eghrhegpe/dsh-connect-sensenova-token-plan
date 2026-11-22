@@ -30,6 +30,33 @@ import { verbatim } from "./util.ts";
 export const API_KEY_REF = "SENSENOVA_API_KEY";
 
 /**
+ * The provider-DERIVED reference name DSH's built-in 添加模型 page stores the
+ * key under for this provider: `deriveKeyRef("sensenova-token-plan")`
+ * (`dsh-client-ui-settings-models`: provider id upper-cased, non-alphanumerics
+ * to `_`, plus `_API_KEY`). Without probing it, a key saved through that
+ * page was invisible to the plugin and the provider reported
+ * "not configured" (GitHub PR #9). The constant is hard-coded here — the
+ * Host UI bundle is a client package this Host module must not import.
+ */
+export const DERIVED_KEY_REF = "SENSENOVA_TOKEN_PLAN_API_KEY";
+
+/**
+ * The CLOSED probe list `resolve()` walks, in order (first non-empty wins):
+ * the plugin's own ref first — what this panel's 接入 API tab writes and what
+ * `save()` / `forget()` manage — then the provider-derived ref.
+ *
+ * No wildcard scan, deliberately: the credentials service is shared by every
+ * plugin on this Host (red line 2: its records are only `grant` / `api-key`),
+ * and the 小浣熊 upstream keeps refs of its own (§5 invariant 3: the two
+ * upstreams' credential references are fully isolated). A `/sensenova/i`
+ * sweep (the shape GitHub PR #9 shipped) could hand the Token Plan provider
+ * the raccoon's OAuth token; and reaching into the service's internal
+ * `values` shape is the same trap as treating upstream packaging as contract
+ * — an internal rename must not change behaviour.
+ */
+export const RESOLVE_REF_PROBES: readonly string[] = Object.freeze([API_KEY_REF, DERIVED_KEY_REF]);
+
+/**
  * Build the API-key store.
  * @param {object} [options] - wiring.
  * @param {object|Function|null} [options.credentials] - the `ctx.credentials`
@@ -114,36 +141,23 @@ export function createApiKeyStore({ credentials = null, env = process.env }: { c
 
     /**
      * Resolve the live key and where it came from.
+     *
+     * The credentials service is walked over the CLOSED probe list
+     * (`RESOLVE_REF_PROBES`): the plugin's own ref first, then the
+     * provider-derived ref the built-in 添加模型 page writes (GitHub PR #9).
+     * Other refs are never consulted — see the constant's doc for why the
+     * list stays closed.
      * @returns {Promise<{value: string, source: ("credentials"|"memory"|"env"|null)}>}
      */
     async resolve() {
       try {
         const service = resolveCredentialsService(credentials);
         if (service !== null && typeof service.resolve === "function") {
-          const resolved = await service.resolve(API_KEY_REF).catch(() => undefined);
-          const value = verbatim(resolved?.value, "");
-          if (typeof value === "string" && value.trim() !== "") return { value, source: "credentials" };
-          // FIX: DSH's "add model" page stores the key under the provider-derived ref
-          // (deriveKeyRef("sensenova-token-plan") === "SENSENOVA_TOKEN_PLAN_API_KEY") rather
-          // than the plugin's hard-coded API_KEY_REF ("SENSENOVA_API_KEY"). Probe that ref
-          // and scan every known ref for a sensenova match so the provider is configured.
-          const SENSENOVA_REF_HINTS = ["SENSENOVA_TOKEN_PLAN_API_KEY"];
-          for (const hint of SENSENOVA_REF_HINTS) {
-            const r2 = await service.resolve(hint).catch(() => undefined);
-            const v2 = verbatim(r2?.value, "");
-            if (typeof v2 === "string" && v2.trim() !== "") return { value: v2, source: "credentials" };
+          for (const ref of RESOLVE_REF_PROBES) {
+            const resolved = await service.resolve(ref).catch(() => undefined);
+            const value = verbatim(resolved?.value, "");
+            if (typeof value === "string" && value.trim() !== "") return { value, source: "credentials" };
           }
-          const sensenovaValues = (service as any).values;
-          if (sensenovaValues instanceof Map) {
-            for (const k of sensenovaValues.keys()) {
-              if (typeof k !== "string" || !/sensenova/i.test(k)) continue;
-              if (k === API_KEY_REF) continue;
-              const r3 = await service.resolve(k).catch(() => undefined);
-              const v3 = verbatim(r3?.value, "");
-              if (typeof v3 === "string" && v3.trim() !== "") return { value: v3, source: "credentials" };
-            }
-          }
-
         }
       } catch {
         // No usable answer from the service: fall through to memory/env.

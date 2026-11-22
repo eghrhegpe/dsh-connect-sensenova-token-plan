@@ -84,12 +84,18 @@ export function retryableCodes() {
  *
  * Tuned for SenseNova's daytime rate ceiling (rpm/tpm), which the peer mislabels
  * as `QUOTA` — `llm-error-fix.ts` pulls those back to `RATE_LIMIT` so they
- * reach this policy. The numbers: more attempts (8) and a gentler, longer
- * backoff than the peer default (initial 1.5s → cap 20s, jitter 0.25) so a
- * single shared credit pool is not stampeded while the rate window refills.
- * Still bounded: a genuine outage fails after ~90s of backed-off retries rather
- * than spinning forever. QUOTA stays excluded (a depleted pool cannot be retried
- * into health; retrying it only prolongs the cool-down — ROADMAP §1).
+  * reach this policy. The numbers: more attempts (8) and a gentle, longer
+  * backoff than the peer default (initial 1s → cap 20s, jitter 0.25) so a
+  * single shared credit pool is not stampeded while the rate window refills.
+  * The cap is a CONTRACT, not a knob: retry.test pins the shared-pool floor
+  * (>= 10s) — GitHub PR #9 proposed 8s from one ≈5s-refill observation,
+  * rejected on the floor (a longer real window still has to be ridden out).
+  * The initial DID come down 1.5s → 1s from the same PR: a faster first
+  * retry, still at the test's >= 1000ms floor.
+  * Still bounded: a genuine outage fails after ~100s of backed-off retries
+  * rather than spinning forever. QUOTA stays excluded (a depleted pool cannot
+  * be retried into health; retrying it only prolongs the cool-down —
+  * ROADMAP §1).
  * @returns {{mode: "normal", maxRetries: number, retryableCodes: string[], backoff: {initialDelayMs: number, maxDelayMs: number, jitterRatio: number}}}
  */
 export function buildRetryPolicyConfig() {
@@ -99,7 +105,7 @@ export function buildRetryPolicyConfig() {
     retryableCodes: retryableCodes(),
     backoff: {
       initialDelayMs: 1_000,
-      maxDelayMs: 8_000,
+      maxDelayMs: 20_000,
       jitterRatio: 0.25
     }
   };
